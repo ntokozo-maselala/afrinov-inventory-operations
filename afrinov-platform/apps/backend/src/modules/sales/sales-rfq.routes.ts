@@ -21,7 +21,8 @@ const money = z.number().min(0).max(1e12);
 const equipmentLine = z.object({
   equipment: rfqText(200),
   details: rfqText(2000),
-  quantity: z.number().int().min(1).max(100000).optional(),
+  // 0: priced for the client to see, not charged (printed "R -").
+  quantity: z.number().int().min(0).max(100000).optional(),
   labour: z.array(z.object({ labourRateId: z.uuid(), hours: z.number().min(0.01).max(100000) })).max(100).optional(),
   // One supplier's whole quote per Procurement RFQ, each RFQ on one line only.
   materials: z.array(z.object({ rfqId: z.uuid(), supplierId: supplierIdSchema })).max(50).optional(),
@@ -32,6 +33,8 @@ const equipmentLine = z.object({
 const salesFields = {
   description: rfqText(500),
   notes: rfqText(2000),
+  // Printed on the quotation under the company's Notes, one per line.
+  quoteNotes: rfqText(1000),
   penaltiesApply: z.boolean().optional(),
   markupPercent: z.number().min(0).max(1000).nullable().optional(),
   deliveryPrice: money.optional(),

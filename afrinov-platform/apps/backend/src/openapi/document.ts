@@ -914,6 +914,8 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/sales-rfqs', tag: 'Sales requests for quotation', summary: 'Raise a draft Sales request for quotation',
     description: "One job for one project, priced in one or more equipment lines (one empty line when none are given). On each line, for one unit: labour at each role's rate on GET /labour-rates, one supplier's whole quote on each chosen Procurement RFQ of the project (GET /sales-rfqs/quote-options; each RFQ on one line only), and other costs as quantity × unit cost. "
+      + 'A line of quantity 0 is priced for the client to see but not charged (printed "R -"); it adds nothing to the totals. '
+      + "quoteNotes are printed on the quotation under the company's Notes, one per line. "
       + "The client defaults to the project's, the conditions to the quotation's usual ones, and the signer's email to the creator's.",
     procurement: true, permissions: [P.ManageSalesRfq], body: createSalesRfqSchema, success: 201,
   },
@@ -924,7 +926,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/sales-rfqs/:id/submit', tag: 'Sales requests for quotation', summary: 'Send a draft to the Director for approval',
-    description: "Needs each equipment line's name and labour, a quote or another cost on it, the client's name and a markup (400). Each quote's amount and the VAT rate are fixed as they are now.",
+    description: "Needs each equipment line's name and labour, a quote or another cost on it, at least one line with a quantity of 1 or more, the client's name and a markup (400). Each quote's amount and the VAT rate are fixed as they are now.",
     procurement: true, permissions: [P.ManageSalesRfq], errors: [400, 404, 409],
   },
   {

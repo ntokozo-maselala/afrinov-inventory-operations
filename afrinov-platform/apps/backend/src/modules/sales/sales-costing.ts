@@ -13,6 +13,9 @@
 //   unit price   = unit cost + unit markup: the quotation's Unit Price
 //   total        = unit price × quantity: its Total Price
 //
+// A line of quantity 0 is priced for the client to see but not charged: it
+// keeps its unit price and adds nothing to any total below.
+//
 // The quotation, over all its lines:
 //
 //   labour, material, other, cost, markup = each line's × its quantity, added up

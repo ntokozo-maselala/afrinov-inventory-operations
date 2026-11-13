@@ -801,6 +801,9 @@ model SalesRfq {
   description        String?
   // Remarks for Sales and the Director; not printed on the quotation.
   notes              String?
+  // This quotation's own Notes, printed under the company's (Settings), one per
+  // line: "All Flexibles to be free issued by client".
+  quoteNotes         String?        @map("quote_notes")
   penaltiesApply     Boolean        @default(false) @map("penalties_apply")
   // The job's markup on each equipment line's labour, material and other costs,
   // as a percentage: 40 for the sheet's "× 1.4". Needed to submit, not to save a draft.
@@ -871,7 +874,9 @@ model SalesRfqEquipmentLine {
   equipment  String?
   // Printed under it, one per line: "Accommodation & LOA".
   details    String?
-  // How many; the labour, quotes and other costs are for one.
+  // How many; the labour, quotes and other costs are for one. 0 prints the line
+  // with its unit price and "R -", charging nothing: an item the client supplies
+  // or hasn't taken, priced for them to see (AFRI-0413 lines 3 and 4).
   quantity   Int     @default(1)
 
   salesRfq   SalesRfq             @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)

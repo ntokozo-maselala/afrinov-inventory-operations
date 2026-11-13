@@ -169,6 +169,22 @@ describe('Sales RFQ page', () => {
     expect(price).toHaveTextContent(/2 equipment lines.*36.190/);
   });
 
+  // AFRI-0413 Rev 2: a line the client supplies, priced at quantity 0.
+  it('shows a line at quantity 0 as priced but not charged, and the notes for the quotation', async () => {
+    const [pump, install] = TWO_LINES.equipmentLines;
+    current = {
+      ...TWO_LINES, quoteNotes: 'All Flexibles to be free issued by client',
+      equipmentLines: [pump, { ...install!, quantity: 0, totals: { ...install!.totals, quantity: 0, total: '0.00' } }],
+    };
+    renderAt('/sales-rfqs/r-1');
+    const line = await screen.findByRole('region', { name: 'Equipment line 2' });
+    expect(line).toHaveTextContent(/Not charged: shown on the quotation at R\s?7.840[,.]00 a unit, R - in total/);
+    expect(line).not.toHaveTextContent('The costs below are for one unit.');
+    expect(within(line).getByLabelText('Price of line 2')).toHaveTextContent(/Total \(0\)\s*Not charged/);
+    expect(screen.getByText('Notes on the quotation')).toBeInTheDocument();
+    expect(screen.getByText('All Flexibles to be free issued by client')).toBeInTheDocument();
+  });
+
   it('lets Sales submit a draft, saying what goes to the Director', async () => {
     renderAt('/sales-rfqs/r-1');
     fireEvent.click(await screen.findByRole('button', { name: 'Submit for approval' }));
@@ -307,8 +323,42 @@ describe('Sales RFQ form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add equipment line' }));
     fireEvent.change(within(screen.getByRole('group', { name: 'Equipment line 2' })).getByLabelText('Qty'), { target: { value: '1.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
-    expect(await screen.findByText('Equipment line 2: the quantity is a whole number, 1 or more.')).toBeInTheDocument();
+    expect(await screen.findByText('Equipment line 2: the quantity is a whole number, 0 or more (0 prices it without charging it).')).toBeInTheDocument();
     expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  // AFRI-0413 Rev 2: the flexibles the client supplies are priced at quantity 0,
+  // and the quotation adds "All Flexibles to be free issued by client".
+  it('prices a line at quantity 0 without charging it, and saves the notes for the quotation', async () => {
+    renderAt('/sales-rfqs/new');
+    fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1469' } });
+    fireEvent.change(screen.getByLabelText('Equipment'), { target: { value: 'Maintenance' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add other cost to the equipment line' }));
+    fireEvent.change(screen.getByLabelText('Other cost 1 description'), { target: { value: 'Oil testing' } });
+    fireEvent.change(screen.getByLabelText('Other cost 1 unit cost'), { target: { value: '1000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add equipment line' }));
+
+    const second = screen.getByRole('group', { name: 'Equipment line 2' });
+    fireEvent.change(within(second).getByLabelText('Equipment'), { target: { value: 'Electrode Flexibles' } });
+    fireEvent.change(within(second).getByLabelText('Qty'), { target: { value: '0' } });
+    expect(second).toHaveTextContent(/Priced for the client to see, not charged/);
+    fireEvent.click(within(second).getByRole('button', { name: 'Add other cost to equipment line 2' }));
+    fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 description'), { target: { value: 'Flexibles' } });
+    fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 unit cost'), { target: { value: '500' } });
+    fireEvent.change(screen.getByLabelText('Markup %'), { target: { value: '50' } });
+
+    // Its unit price shows; only line 1 is charged: 1 000 × 1.5 = 1 500.
+    expect(within(second).getByLabelText('Price of equipment line 2')).toHaveTextContent(/Unit price.*750.*Total.*0,00/);
+    const preview = screen.getByLabelText('Price as typed');
+    expect(preview).toHaveTextContent(/2\. Electrode Flexibles \(not charged\)/);
+    expect(preview).toHaveTextContent(/Total excl. VAT.*1.500,00/);
+
+    fireEvent.change(screen.getByLabelText('Notes on the quotation'), { target: { value: 'All Flexibles to be free issued by client' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    const body = mockPost.mock.calls[0]![1] as { quoteNotes: string; equipmentLines: Array<{ quantity: number }> };
+    expect(body.quoteNotes).toBe('All Flexibles to be free issued by client');
+    expect(body.equipmentLines.map((l) => l.quantity)).toEqual([1, 0]);
   });
 
   it('refuses hours finer than 2 decimal places and a role with no hours before saving', async () => {

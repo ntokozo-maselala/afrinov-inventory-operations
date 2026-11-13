@@ -29,7 +29,7 @@ import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney } from '../lib/poMoney';
 import { formatDay } from '../lib/rfq';
-import { SALES_STATUS_LABEL, allMaterials, mayApprove, type SalesEquipmentLine, type SalesLabourLine, type SalesMaterial, type SalesOtherCost, type SalesRfq, type SalesRfqStatus } from '../lib/salesRfq';
+import { SALES_STATUS_LABEL, allMaterials, isCharged, mayApprove, type SalesEquipmentLine, type SalesLabourLine, type SalesMaterial, type SalesOtherCost, type SalesRfq, type SalesRfqStatus } from '../lib/salesRfq';
 import { QUOTATION_SETTINGS, downloadQuotation, quotationCompanyFromSettings } from '../lib/salesQuotation';
 
 const LIST = { label: 'Sales RFQs', to: '/sales-rfqs' };
@@ -275,6 +275,7 @@ export function SalesRfqDetail() {
                   <dt className="text-surface-500">Raised</dt><dd className="col-span-2 text-meta">{formatDateTime(r.createdAt)}{r.createdBy ? <><br /><span className="text-surface-400">by {r.createdBy.name}</span></> : null}</dd>
                   {r.submittedAt && <><dt className="text-surface-500">Submitted</dt><dd className="col-span-2 text-meta">{formatDateTime(r.submittedAt)}{r.submittedBy ? <><br /><span className="text-surface-400">by {r.submittedBy.name}</span></> : null}</dd></>}
                   {r.issuedAt && <><dt className="text-surface-500">Issued</dt><dd className="col-span-2">{formatDay(r.issuedAt)}</dd></>}
+                  {r.quoteNotes && <><dt className="text-surface-500">Notes on the quotation</dt><dd className="col-span-2 whitespace-pre-wrap">{r.quoteNotes}</dd></>}
                   {r.notes && <><dt className="text-surface-500">Remarks</dt><dd className="col-span-2 whitespace-pre-wrap">{r.notes}</dd></>}
                 </dl>
               </div>
@@ -379,9 +380,12 @@ function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipme
   const t = line.totals;
   const several = r.equipmentLines.length > 1;
   const nothing = line.labour.length === 0 && line.materials.length === 0 && line.otherCosts.length === 0;
+  const charged = isCharged(line);
   const priced = t.unitPrice === null
     ? `Cost ${formatMoney(t.unitCost)} a unit; priced once the markup is set`
-    : `${formatNumber(line.quantity)} × ${formatMoney(t.unitPrice)} = ${formatMoney(t.total)}`;
+    : charged
+      ? `${formatNumber(line.quantity)} × ${formatMoney(t.unitPrice)} = ${formatMoney(t.total)}`
+      : `Not charged: shown on the quotation at ${formatMoney(t.unitPrice)} a unit, R - in total`;
   return (
     <section aria-label={`Equipment line ${line.lineNo}`} className="space-y-3">
       <SectionHeader
@@ -414,7 +418,7 @@ function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipme
           <div><dt className="text-meta">Cost a unit</dt><dd className="font-mono">{formatMoney(t.unitCost)}</dd></div>
           <div><dt className="text-meta">Markup a unit</dt><dd className="font-mono">{formatMoney(t.unitMarkup)}</dd></div>
           <div><dt className="text-meta">Unit price</dt><dd className="font-mono">{formatMoney(t.unitPrice)}</dd></div>
-          <div><dt className="text-meta">Total ({formatNumber(line.quantity)})</dt><dd className="font-mono font-semibold">{formatMoney(t.total)}</dd></div>
+          <div><dt className="text-meta">Total ({formatNumber(line.quantity)})</dt><dd className="font-mono font-semibold">{charged ? formatMoney(t.total) : 'Not charged'}</dd></div>
         </dl>
       )}
     </section>
@@ -482,6 +486,7 @@ const FIELD_WORDS: Record<string, string> = {
   clientName: 'client', clientAddress: 'client address', contactName: 'contact', clientReference: 'client reference',
   paymentTerms: 'conditions', validity: 'conditions', deliveryDuration: 'conditions', deliveryTerms: 'conditions',
   signerPhone: 'signer', signerEmail: 'signer', closingDate: 'price due date', description: 'description', notes: 'remarks',
+  quoteNotes: 'notes on the quotation',
 };
 
 /** One Activity entry in plain words. */
