@@ -15,10 +15,28 @@ import { LabourRateService } from './labour-rate.service.js';
 export const SALES_RFQ_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'CANCELLED'] as const;
 
 const money = z.number().min(0).max(1e12);
-const salesFields = {
+
+// One line of the quotation and what it costs for one unit. The service checks
+// the finer rules (decimal places, roles, quotes) with messages naming the line.
+const equipmentLine = z.object({
   equipment: rfqText(200),
+  details: rfqText(2000),
+  // 0: priced for the client to see, not charged (printed "R -").
+  quantity: z.number().int().min(0).max(100000).optional(),
+  // Its own markup, %; null or left out: the job's.
+  markupPercent: z.number().min(0).max(1000).nullable().optional(),
+  labour: z.array(z.object({ labourRateId: z.uuid(), hours: z.number().min(0.01).max(100000) })).max(100).optional(),
+  // One supplier's whole quote per Procurement RFQ, each RFQ on one line only.
+  materials: z.array(z.object({ rfqId: z.uuid(), supplierId: supplierIdSchema })).max(50).optional(),
+  // Accommodation, LOA, travel: quantity × unit cost in rand.
+  otherCosts: z.array(z.object({ description: z.string().max(200), quantity: z.number().gt(0).max(1e6), unitCost: z.number().gt(0).max(1e10) })).max(50).optional(),
+});
+
+const salesFields = {
   description: rfqText(500),
   notes: rfqText(2000),
+  // Printed on the quotation under the company's Notes, one per line.
+  quoteNotes: rfqText(1000),
   penaltiesApply: z.boolean().optional(),
   markupPercent: z.number().min(0).max(1000).nullable().optional(),
   deliveryPrice: money.optional(),
@@ -33,9 +51,8 @@ const salesFields = {
   deliveryTerms: rfqText(300),
   signerPhone: rfqText(60),
   signerEmail: rfqText(200),
-  labour: z.array(z.object({ labourRateId: z.uuid(), hours: z.number().min(0.01).max(100000) })).max(100).optional(),
-  // One supplier's whole quote per Procurement RFQ.
-  materials: z.array(z.object({ rfqId: z.uuid(), supplierId: supplierIdSchema })).max(50).optional(),
+  // Replaces all of them, in order. At least one; the service says so in words.
+  equipmentLines: z.array(equipmentLine).max(20).optional(),
 };
 
 export const createSalesRfqSchema = z.object({ projectNumber: z.string().trim().min(1).max(64), ...salesFields });

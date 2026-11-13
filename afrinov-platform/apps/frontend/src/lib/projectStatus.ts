@@ -21,3 +21,20 @@ export const PROJECT_STATUS_TONE: Record<ProjectStatus, 'neutral' | 'success' | 
 export function projectStatusLabel(status: string | null | undefined): string {
   return PROJECT_STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status ?? '';
 }
+
+/** Completed and Cancelled close a project. */
+export function isClosedProjectStatus(status: string | null | undefined): boolean {
+  return status === 'COMPLETED' || status === 'CANCELLED';
+}
+
+/**
+ * Whether this user completes, cancels, archives or hands on a project: an
+ * Admin, anyone granted close:project, or the project's own manager, as the
+ * server decides (system audit E3).
+ */
+export function canCloseProject(user: { id?: string; roles?: string[]; permissions?: string[] } | null | undefined, managerId: string | null | undefined): boolean {
+  if (!user) return false;
+  if ((user.roles ?? []).some((r) => r.toUpperCase() === 'ADMIN')) return true;
+  if (user.permissions?.includes('close:project')) return true;
+  return !!managerId && user.id === managerId;
+}

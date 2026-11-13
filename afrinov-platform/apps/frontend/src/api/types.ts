@@ -37,6 +37,8 @@ export interface Supplier {
 export interface OpenLoan {
   loanId: string; slipId: string | null; recipientId: string | null; recipientName: string | null; recipientType?: string | null; projectNumber: string | null;
   locationId: string; locationName: string;
+  /** False when the location it was lent from has closed since: check-in asks where it goes back (system audit A2). */
+  locationActive?: boolean;
   /** How many were lent, and how many of them are still out. */
   quantity: string; out: string;
   /** Of those out, how many are waiting to be written off as lost: not to be checked in again (ADR-028). */

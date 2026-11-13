@@ -5,6 +5,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, renderHook, screen, waitFor, fireEvent } from '@testing-library/react';
 
 const get = vi.fn();
+// Signed in as an Admin, who sets unit costs too (system audit C1).
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { id: 'u-1', roles: ['ADMIN'] } }) }));
+
 vi.mock('../api/client', () => ({
   api: { get: (p: string) => get(p), post: vi.fn(), patch: vi.fn() },
   isApiError: (err: unknown) => typeof err === 'object' && err !== null && 'code' in err,

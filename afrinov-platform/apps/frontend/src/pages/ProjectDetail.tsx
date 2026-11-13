@@ -2,7 +2,7 @@
 // links the Projects list has, and its schedules of steps. Anyone can see them;
 // the project's manager and Admin plan them, start them, keep their steps up to
 // date and re-plan them, as the server allows.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../auth';
@@ -19,14 +19,14 @@ import { StaleDataNotice } from '../components/StaleDataNotice';
 import { useToast } from '../components/Toast';
 import { ProjectStepForm } from '../components/ProjectStepForm';
 import { ProjectGantt } from '../components/ProjectGantt';
-import { ProcurementOrdersDialog, ProcurementStepNote, procurementStepOf } from '../components/ProcurementStep';
+import { ProcurementStepNote, procurementStepOf } from '../components/ProcurementStep';
 import { RemoveStepDialog, ReplanDialog, ScheduleForm } from '../components/ProjectScheduleDialogs';
 import { api } from '../api/client';
 import { errorToast } from '../lib/errorPresentation';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { PROJECT_STATUS_TONE, projectStatusLabel, type ProjectStatus } from '../lib/projectStatus';
 import {
-  SCHEDULE_STATUS_LABEL, SCHEDULE_STATUS_TONE, canChangeSchedules, formatDay, formatSpan, isOpenSchedule, latenessOf,
+  SCHEDULE_STATUS_LABEL, SCHEDULE_STATUS_TONE, actualOf, canChangeSchedules, formatDay, isOpenSchedule, latenessOf, stepDays, stepVariance,
 } from '../lib/projectSchedule';
 import { parseClosedDays } from '../lib/workingDays';
 import { today } from '../lib/dates';
@@ -50,13 +50,12 @@ type Dialog =
   | { kind: 'edit-schedule'; schedule: ProjectSchedule }
   | { kind: 'replan'; schedule: ProjectSchedule }
   | { kind: 'step'; schedule: ProjectSchedule; step: ScheduleStep | null; finishOn?: string }
-  | { kind: 'orders'; procurement: StepProcurement }
   | { kind: 'remove-step'; schedule: ProjectSchedule; step: ScheduleStep }
   | { kind: 'status'; schedule: ProjectSchedule; to: ScheduleStatus }
   | { kind: 'next-month'; schedule: ProjectSchedule };
 
 const STATUS_CHANGE: Record<ScheduleStatus, { verb: string; description: string }> = {
-  ACTIVE: { verb: 'Start', description: 'The plan is locked from now on: each step is expected as planned, and the plan changes only by a re-plan with the reason.' },
+  ACTIVE: { verb: 'Start', description: 'The plan is locked from now on: each step’s actual dates start out as planned and are kept up to date, and the plan changes only by a re-plan with the reason.' },
   DONE: { verb: 'Mark done', description: 'Every step is finished. The schedule can be reopened if a step was marked finished too soon.' },
   CANCELLED: { verb: 'Cancel', description: 'For a job, or part of one, that has been called off. A cancelled schedule can’t be changed.' },
   PLANNING: { verb: 'Plan', description: '' },
@@ -151,7 +150,7 @@ export function ProjectDetail() {
             <div><dt className="text-surface-500">End</dt><dd>{formatDay(p.endDate?.slice(0, 10))}</dd></div>
             <div><dt className="text-surface-500">Open schedules</dt><dd className="text-num">{totals?.openSchedules ?? '—'}</dd></div>
             <div><dt className="text-surface-500">Progress</dt><dd className="text-num">{totals?.progress === null || totals?.progress === undefined ? '—' : `${totals.progress}%`}</dd></div>
-            <div><dt className="text-surface-500">Expected to finish</dt><dd>{formatDay(totals?.forecastEnd)}</dd></div>
+            <div><dt className="text-surface-500">Finish</dt><dd>{formatDay(totals?.forecastEnd)}</dd></div>
           </dl>
           {!canChange && (
             <p className="text-xs text-surface-500 mt-3">
@@ -205,9 +204,6 @@ export function ProjectDetail() {
           onSaved={saved}
         />
       )}
-      {dialog?.kind === 'orders' && (
-        <ProcurementOrdersDialog procurement={dialog.procurement} canOpenOrders={canSeeOrders} onClose={() => setDialog(null)} />
-      )}
       {dialog?.kind === 'remove-step' && <RemoveStepDialog schedule={dialog.schedule} step={dialog.step} onCancel={() => setDialog(null)} onSaved={saved} />}
       {dialog?.kind === 'status' && (
         <ConfirmDialog
@@ -254,6 +250,8 @@ function ScheduleCard({ schedule: s, canChange, projectClosed, closedDays, procu
   const procurement = useApi<StepProcurement>(procurementStep && isOpenSchedule(s.status) ? procurementPath : null);
   const open = isOpenSchedule(s.status);
   const started = s.status === 'ACTIVE';
+  // The Actual columns and the variance, once there is something to track against the plan.
+  const tracked = s.status !== 'PLANNING';
   const late = latenessOf(s.totals.daysLate);
   const allDone = s.steps.length > 0 && s.steps.every((st) => st.done);
   const unplanned = s.steps.filter((st) => !st.baselineStart || !st.baselineEnd);
@@ -267,13 +265,13 @@ function ScheduleCard({ schedule: s, canChange, projectClosed, closedDays, procu
           </h2>
           <p className="text-sm text-surface-600 mt-1">
             {s.totals.progress}% done
-            {s.totals.forecastEnd && <> · expected to finish {formatDay(s.totals.forecastEnd)}</>}
+            {s.totals.forecastEnd && <> · finish {formatDay(s.totals.forecastEnd)}</>}
             {started && <> · <span className={late.tone === 'danger' ? 'text-danger-600' : late.tone === 'warning' ? 'text-warning-700' : ''}>{late.text}</span></>}
             {s.dueDate && <> · due {formatDay(s.dueDate)}</>}
             {s.alsoCovers.length > 0 && <> · also covers {s.alsoCovers.join(', ')}</>}
           </p>
           {s.totals.daysPastDue !== null && (
-            <p className="text-sm text-danger-600 mt-1">Expected {s.totals.daysPastDue} working day{s.totals.daysPastDue === 1 ? '' : 's'} after the date promised to the client.</p>
+            <p className="text-sm text-danger-600 mt-1">Finishing {s.totals.daysPastDue} working day{s.totals.daysPastDue === 1 ? '' : 's'} after the date promised to the client.</p>
           )}
           {open && s.totals.lateStep && (
             <p className="text-sm text-warning-700 mt-1">Behind: {s.totals.lateStep.name}.</p>
@@ -319,40 +317,69 @@ function ScheduleCard({ schedule: s, canChange, projectClosed, closedDays, procu
         <ProjectGantt schedule={s} closedDays={closedDays} today={today()} />
       ) : (
         <div className="overflow-x-auto">
+          {/* As the workbook: the plan (its grey columns) beside the actual (its blue ones), then the variance. */}
           <table className="w-full text-sm" aria-label={`Steps of ${s.name}`}>
             <thead>
+              <tr className="text-left text-surface-500">
+                <th rowSpan={2} className="py-2 pr-2 w-8 align-bottom border-b border-surface-200">#</th>
+                <th rowSpan={2} className="py-2 pr-2 align-bottom border-b border-surface-200">Step</th>
+                <th rowSpan={2} className="py-2 pr-2 align-bottom border-b border-surface-200">Assigned to</th>
+                <th colSpan={3} scope="colgroup" className="py-1 px-2 text-center bg-surface-100 text-surface-700 rounded-t">Plan</th>
+                {tracked && <th colSpan={3} scope="colgroup" className="py-1 px-2 text-center bg-info-100 text-info-700 rounded-t">Actual</th>}
+                <th rowSpan={2} className="py-2 px-2 w-36 align-bottom border-b border-surface-200">Progress</th>
+                {tracked && <th rowSpan={2} className="py-2 px-2 align-bottom text-right border-b border-surface-200">Variance</th>}
+                {editable && open && <th rowSpan={2} className="py-2 w-32 border-b border-surface-200" />}
+              </tr>
               <tr className="text-left text-surface-500 border-b border-surface-200">
-                <th className="py-2 pr-2 w-8">#</th>
-                <th className="py-2 pr-2">Step</th>
-                <th className="py-2 pr-2">Assigned to</th>
-                <th className="py-2 pr-2">Planned</th>
-                <th className="py-2 pr-2">{started || s.status === 'DONE' ? 'Expected or actual' : ''}</th>
-                <th className="py-2 pr-2 w-36">Progress</th>
-                {editable && open && <th className="py-2 w-32" />}
+                <th className="py-1 px-2 bg-surface-100 font-medium">Start</th>
+                <th className="py-1 px-2 bg-surface-100 font-medium">End</th>
+                <th className="py-1 px-2 bg-surface-100 font-medium text-right">Days</th>
+                {tracked && <>
+                  <th className="py-1 px-2 bg-info-100 font-medium">Start</th>
+                  <th className="py-1 px-2 bg-info-100 font-medium">End</th>
+                  <th className="py-1 px-2 bg-info-100 font-medium text-right">Days</th>
+                </>}
               </tr>
             </thead>
             <tbody>
               {s.steps.map((st) => (
-                <StepRow key={st.id} schedule={s} step={st} canChange={editable && open} onAction={onAction}
+                <StepRow key={st.id} schedule={s} step={st} canChange={editable && open} onAction={onAction} closedDays={closedDays}
                   procurement={st === procurementStep ? procurement.data : null} />
               ))}
             </tbody>
           </table>
+          {tracked && (
+            <p className="text-xs text-surface-500 mt-2">
+              <span className="font-medium text-surface-600">Plan</span> is locked when the job starts.{' '}
+              <span className="font-medium text-surface-600">Actual</span> dates in <span className="italic text-surface-400">light italics</span> are not final: the step hasn’t begun or finished yet.{' '}
+              Days are working days. <span className="font-medium text-surface-600">Variance</span> is the working days between the planned and actual end: negative is late.
+            </p>
+          )}
         </div>
       )}
     </section>
   );
 }
 
-function StepRow({ schedule, step: st, canChange, onAction, procurement }: {
+function StepRow({ schedule, step: st, canChange, onAction, procurement, closedDays }: {
   schedule: ProjectSchedule; step: ScheduleStep; canChange: boolean; onAction: (d: Dialog) => void;
   /** For the Procurement step: the orders it stands on. */
   procurement?: StepProcurement | null;
+  closedDays: ReadonlySet<string>;
 }) {
-  const showActual = schedule.status !== 'PLANNING';
-  const end = st.done ? st.actualEnd : (st.forecastEnd ?? st.baselineEnd);
-  const slipped = !st.done && !!st.baselineEnd && !!end && end > st.baselineEnd;
-  const overdue = showActual && !st.done && !!end && end < today();
+  const tracked = schedule.status !== 'PLANNING';
+  const actual = actualOf(st);
+  const overdue = tracked && !st.done && !!actual.end && actual.end < today();
+  const variance = tracked ? stepVariance(st, closedDays) : null;
+  const planDays = stepDays(st.baselineStart, st.baselineEnd, closedDays);
+  const actualDays = stepDays(actual.start, actual.end, closedDays);
+  /** A date in the Actual columns: as it is once final, light and italic until then. */
+  const actualDate = (day: string | null, final: boolean, label: string, extra?: ReactNode) => (
+    <td className="py-2 px-2 whitespace-nowrap bg-info-50">
+      {day ? <span className={final ? 'text-surface-900' : 'italic text-surface-400'} title={final ? undefined : `${label} not final yet`}>{formatDay(day)}</span> : <span className="text-surface-400">—</span>}
+      {extra}
+    </td>
+  );
   return (
     <tr className="border-b border-surface-100 align-top">
       <td className="py-2 pr-2 text-surface-500 text-num">{st.position}</td>
@@ -363,7 +390,6 @@ function StepRow({ schedule, step: st, canChange, onAction, procurement }: {
           <ProcurementStepNote
             procurement={procurement}
             stepEnd={st.done ? null : (st.forecastEnd ?? st.baselineEnd)}
-            onOpen={() => onAction({ kind: 'orders', procurement })}
             onMarkDone={canChange && schedule.status === 'ACTIVE' && !st.done && procurement.summary.allReceived && procurement.summary.lastReceivedOn
               ? () => onAction({ kind: 'step', schedule, step: st, finishOn: procurement.summary.lastReceivedOn! })
               : undefined}
@@ -371,13 +397,17 @@ function StepRow({ schedule, step: st, canChange, onAction, procurement }: {
         )}
       </td>
       <td className="py-2 pr-2">{st.assignee?.name ?? <span className="text-surface-400">Nobody yet</span>}</td>
-      <td className="py-2 pr-2 whitespace-nowrap">{formatSpan(st.baselineStart, st.baselineEnd)}</td>
-      <td className="py-2 pr-2 whitespace-nowrap">
-        {showActual && (st.done
-          ? <span>Finished {formatDay(st.actualEnd)}</span>
-          : <span className={overdue || slipped ? 'text-warning-600 font-medium' : ''}>{formatSpan(st.forecastStart, st.forecastEnd)}{overdue ? ' (overdue)' : ''}</span>)}
-      </td>
-      <td className="py-2 pr-2">
+      <td className="py-2 px-2 whitespace-nowrap bg-surface-50">{formatDay(st.baselineStart)}</td>
+      <td className="py-2 px-2 whitespace-nowrap bg-surface-50">{formatDay(st.baselineEnd)}</td>
+      <td className="py-2 px-2 text-num text-right bg-surface-50">{planDays ?? '—'}</td>
+      {tracked && <>
+        {actualDate(actual.start, actual.startFinal, 'Start')}
+        {actualDate(actual.end, actual.endFinal, 'End', overdue && <div className="text-xs text-warning-700">overdue</div>)}
+        <td className="py-2 px-2 text-num text-right bg-info-50">
+          {actualDays === null ? <span className="text-surface-400">—</span> : <span className={actual.startFinal && actual.endFinal ? '' : 'italic text-surface-400'}>{actualDays}</span>}
+        </td>
+      </>}
+      <td className="py-2 px-2">
         <div className="flex items-center gap-2">
           <div className="h-2 flex-1 rounded bg-surface-100 overflow-hidden" aria-hidden="true">
             <div className={`h-full ${st.done ? 'bg-success-500' : 'bg-brand-500'}`} style={{ width: `${st.progress}%` }} />
@@ -385,6 +415,17 @@ function StepRow({ schedule, step: st, canChange, onAction, procurement }: {
           <span className="text-num text-xs w-9 text-right">{st.progress}%</span>
         </div>
       </td>
+      {tracked && (
+        <td className="py-2 px-2 text-right">
+          {variance === null ? <span className="text-surface-400">—</span> : (
+            // As the workbook's column M: red when late (negative), green when on time or early.
+            <span aria-label={`Variance ${variance} working day${Math.abs(variance) === 1 ? '' : 's'}${variance < 0 ? ', late' : ''}`}
+              className={`inline-block min-w-[2.5rem] rounded px-1.5 py-0.5 text-num text-center font-medium ${variance < 0 ? 'bg-danger-100 text-danger-700' : 'bg-success-100 text-success-700'}`}>
+              {variance}
+            </span>
+          )}
+        </td>
+      )}
       {canChange && (
         <td className="py-2 text-right whitespace-nowrap">
           <Button size="sm" variant="secondary" onClick={() => onAction({ kind: 'step', schedule, step: st })} aria-label={`Update ${st.name}`}>Update</Button>

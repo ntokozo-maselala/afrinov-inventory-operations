@@ -19,15 +19,13 @@ import { Prisma, PurchaseOrderStatus, type RoleName } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { ApiError, Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { toDecimal, gtZero } from '../../shared/decimal.js';
+import { toDecimal } from '../../shared/decimal.js';
 import { checkWholeUnits } from '../../shared/units.js';
-import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
 import { OWN_ORDER, STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
 import { refuseProjectMaterialOnStoresOrder, refuseStoresOnProjectOrder } from '../inventory/material-section.js';
-import { checkMaterialActive } from '../inventory/inventory.service.js';
 import { inactiveMessage } from '../inventory/material-status.js';
 
 export interface CreateSupplierInput {
@@ -252,6 +250,17 @@ const DETAIL_TEXT_FIELDS = [
   'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact',
 ] as const;
 
+/**
+ * The terms a signature is given for, beside the money (system audit D1, ADR-039):
+ * how and when it is paid, where and how it is delivered, penalties, and which
+ * job pays. Changing one on an order being signed or approved sends it back.
+ * Contact names, notes and dates are not: they change without a new signature.
+ */
+const SIGNED_TERMS = [
+  'paymentTerms', 'paymentMilestone', 'settlementDiscount', 'penaltiesApply', 'projectNumber',
+  'deliveryMethod', 'deliveryTo', 'deliveryAddress', 'deliveryCountry', 'shippingTerms',
+] as const;
+
 /** Trims multi-line text (an address) line by line, keeping the line breaks. */
 function cleanLines(s: string | null | undefined): string | null {
   if (s === null || s === undefined) return null;
@@ -263,10 +272,11 @@ function cleanLines(s: string | null | undefined): string | null {
 export async function assertProjectOpen(projectNumber: string, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<void> {
   const project = await client.project.findUnique({ where: { projectNumber } });
   if (!project) throw Errors.validation(`No project ${projectNumber}`);
-  if (!project.active) throw Errors.validation(`Project ${projectNumber} is inactive`);
+  // The status first: it says why (inactive follows from it, system audit E2).
   if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
     throw Errors.validation(`Project ${projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so nothing more is ordered for it.`);
   }
+  if (!project.active) throw Errors.validation(`Project ${projectNumber} is inactive`);
 }
 
 /** The order's lines' materials, for the project rules. */
@@ -336,6 +346,10 @@ export const RECEIVABLE_STATUSES: PurchaseOrderStatus[] = ['APPROVED', 'PARTIALL
  * Store Roadmap, Phase 2): a project order's delivery is received on Receive
  * stock, so it is no longer confirmed on the order.
  */
+/** Where a delivery is received now that the receive-all route is retired (system audit D3). */
+export const RECEIVE_ON_RECEIVE_STOCK =
+  "Deliveries are received on Receive stock: count what arrived against the order there.";
+
 export const DELIVERY_IS_RECEIVED =
   "Project orders are received into stock now: the store books each delivery on Receive stock.";
 
@@ -536,6 +550,12 @@ export const PurchaseOrderService = {
       // either waits for this order (and is refused, being on it) or is seen as
       // moved here (Qodo, PR #129).
       const ids = [...new Set(input.lines.map((l) => l.materialId))];
+      // The project is held and read again here, so it can't close between the
+      // check and the order being written (system audit E1).
+      if (input.projectNumber) {
+        await tx.$executeRaw`SELECT 1 FROM projects WHERE project_number = ${input.projectNumber} FOR SHARE`;
+        await assertProjectOpen(input.projectNumber, tx);
+      }
       await tx.$executeRaw`SELECT 1 FROM materials WHERE id IN (${Prisma.join(ids)}) FOR SHARE`;
       const held = await lineMaterialsOf(ids, tx);
       refuseInactiveMaterial(held);
@@ -673,10 +693,11 @@ export const PurchaseOrderService = {
       // "Rev 01", so the supplier can tell the copies apart.
       if (po.status === 'APPROVED' && anyChange) data.revision = po.revision + 1;
       const moneyChanged = priceChanges.length > 0 || discountChanges.length > 0 || 'vatRate' in data;
+      const termsChanged = SIGNED_TERMS.some((k) => k in data);
       let signaturesCleared = false;
       // A signature is for the money as it stood: changing it on an order still
       // being signed starts the signing again.
-      if (moneyChanged && po.status === 'PENDING_APPROVAL' && po.signatures.length > 0) {
+      if ((moneyChanged || termsChanged) && po.status === 'PENDING_APPROVAL' && po.signatures.length > 0) {
         await tx.purchaseOrderSignature.deleteMany({ where: { purchaseOrderId: po.id } });
         signaturesCleared = true;
       }
@@ -684,12 +705,13 @@ export const PurchaseOrderService = {
       // VAT rate, needs a signature it doesn't have, or has lost a price goes back
       // for approval. Who signs still goes by the value excluding VAT. Lowering
       // its value keeps the signatures: nobody is held to more.
-      if (moneyChanged && requireApproval && po.status === 'APPROVED' && po.approvedById) {
+      // A change of the signed terms always goes back: nobody signed for them (system audit D1).
+      if ((moneyChanged || termsChanged) && requireApproval && po.status === 'APPROVED' && po.approvedById) {
         const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
         const state = approvalState({ ...po, vatRate: input.vatRate ?? po.vatRate, lines }, approvalSettings);
         const signedFor = approvalState(po, approvalSettings).randValue;
         const raised = signedFor !== null && state.randValue !== null && new Prisma.Decimal(state.randValue).gt(signedFor);
-        if (state.block || state.next || raised || 'vatRate' in data) {
+        if (termsChanged || state.block || state.next || raised || 'vatRate' in data) {
           await tx.purchaseOrderSignature.deleteMany({ where: { purchaseOrderId: po.id } });
           signaturesCleared = po.signatures.length > 0;
           // Back for approval, it has no approved wording until approved again:
@@ -743,7 +765,10 @@ export const PurchaseOrderService = {
       const lineMaterials = await lineMaterialsOf(po.lines.map((l) => l.materialId), tx);
       refuseInactiveMaterial(lineMaterials);
       refuseProjectMaterialOnStoresOrder(po.projectNumber, lineMaterials);
-      if (po.projectNumber) await assertProjectOpen(po.projectNumber, tx);
+      if (po.projectNumber) {
+        await tx.$executeRaw`SELECT 1 FROM projects WHERE project_number = ${po.projectNumber} FOR SHARE`;
+        await assertProjectOpen(po.projectNumber, tx);
+      }
       const now = new Date();
       // The rate locks here, so who has to sign can't move with today's rate.
       const exchangeRate = exchangeRateOf({ currency: po.currency, exchangeRate: null }, approvalSettings);
@@ -895,88 +920,18 @@ export const PurchaseOrderService = {
     });
   },
 
-  // Receive everything still outstanding: every line's shortfall becomes a
-  // RECEIPT inventory transaction at the chosen location, and the order is
-  // RECEIVED. Partial deliveries go through goods receipts instead. Calling
-  // it twice is rejected by the status guard (ADR-002: the ledger stays the
-  // source of truth).
-  async receive(input: ReceiveInput, actorId: string) {
-    return prisma.$transaction(async (tx) => {
-      // The order before its stock, as posting a goods receipt locks them, so
-      // the two cannot deadlock; and before its lines are read, so the
-      // shortfall counts a goods receipt posted meanwhile.
-      await lockOrder(input.id, tx);
-      const po = await tx.purchaseOrder.findUnique({
-        where: { id: input.id },
-        include: { lines: true },
-      });
-      if (!po) throw Errors.notFound('PurchaseOrder');
-      // A project order's delivery is held for its project; a Stores order's is
-      // Stores stock (Project Material Through the Store Roadmap, Phase 2).
-      const stockOf = (materialId: string) => ({ materialId, locationId: input.locationId, heldForProject: po.projectNumber });
-      await lockInventoryBalances(po.lines.map((line) => stockOf(line.materialId)), tx);
-      if (!RECEIVABLE_STATUSES.includes(po.status)) {
-        throw Errors.invalidState(`Only an approved or partly received purchase order can be received`, { status: po.status });
-      }
-      const location = await tx.location.findUnique({ where: { id: input.locationId } });
-      if (!location) throw Errors.notFound('Location');
-      if (!location.active) throw Errors.validation('Location is inactive');
-
-      const now = new Date();
-      const claimed = await tx.purchaseOrder.updateMany({
-        where: { id: input.id, status: po.status },
-        data: {
-          status: 'RECEIVED',
-          deliveredAt: now,
-          deliveredById: actorId,
-          deliveryNotes: input.deliveryNotes ?? null,
-        },
-      });
-      if (claimed.count === 0) {
-        throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
-      }
-
-      for (const line of po.lines) {
-        const orderedQty = toDecimal(line.orderedQty);
-        const alreadyReceived = toDecimal(line.receivedQty);
-        // Only create receipt transactions for the shortfall so that partial
-        // receipts (e.g. via GoodsReceipt posting) are not double-counted.
-        const toReceive = orderedQty.minus(alreadyReceived);
-        if (gtZero(toReceive)) {
-          await checkMaterialActive(line.materialId, tx);
-          await tx.inventoryTransaction.create({
-            data: {
-              materialId: line.materialId,
-              locationId: input.locationId,
-              type: 'RECEIPT',
-              quantity: toReceive,
-              referenceType: 'PurchaseOrder',
-              referenceId: po.id,
-              actorId,
-              heldForProject: po.projectNumber,
-            },
-          });
-          await recomputeBalance(stockOf(line.materialId), tx);
-        }
-
-        await tx.purchaseOrderLine.update({
-          where: { id: line.id },
-          data: { receivedQty: orderedQty },
-        });
-      }
-
-      await tx.auditLogEntry.create({
-        data: {
-          actorId,
-          action: 'PO_RECEIVE',
-          entityType: 'PurchaseOrder',
-          entityId: input.id,
-          before: { status: po.status },
-          after: { status: 'RECEIVED', deliveredAt: now.toISOString(), deliveredById: actorId, locationId: input.locationId, notes: input.deliveryNotes ?? null },
-        },
-      });
-      return tx.purchaseOrder.findUnique({ where: { id: input.id } });
-    });
+  /**
+   * Retired (system audit D3, ADR-039): booking every outstanding line in one
+   * call skipped the goods receipt, the count of what arrived, the whole-unit
+   * check and the project check. Every delivery is received on Receive stock
+   * (POST /goods-receipts). Orders received this way before stay as they are.
+   *
+   * @throws {ApiError} NOT_FOUND; VALIDATION_ERROR otherwise.
+   */
+  async receive(input: Pick<ReceiveInput, 'id'>, _actorId: string): Promise<never> {
+    const po = await prisma.purchaseOrder.findUnique({ where: { id: input.id }, select: { id: true } });
+    if (!po) throw Errors.notFound('PurchaseOrder');
+    throw Errors.validation(RECEIVE_ON_RECEIVE_STOCK);
   },
 
   /**

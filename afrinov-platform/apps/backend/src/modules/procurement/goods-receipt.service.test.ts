@@ -249,6 +249,14 @@ describe('GoodsReceiptService', () => {
         await expect(receive([{ materialId: 'mat-1', quantity: 2.5, purchaseOrderLineId: 'pol-1' }])).rejects.toMatchObject({ message });
       });
 
+      // System audit D2: an inactive supplier gets no new orders, but what was
+      // already ordered from them is still received.
+      it('receives against an order from a supplier deactivated since', async () => {
+        db.suppliers.set('sup-1', { id: 'sup-1', name: 'Hydroscand', active: false });
+        const gr = await receive([{ materialId: 'mat-1', quantity: 5, purchaseOrderLineId: 'pol-1' }]);
+        expect(gr.purchaseOrderId).toBe('po-1');
+      });
+
       it("refuses another supplier's delivery against the order", async () => {
         db.suppliers.set('sup-2', { id: 'sup-2', name: 'Other', active: true });
         await expect(receive([{ materialId: 'mat-1', quantity: 5, purchaseOrderLineId: 'pol-1' }], { supplierId: 'sup-2' }))

@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon';
 import { ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
 import { PROCUREMENT_ENABLED } from '../config/features';
+import { ResetSectionDialog } from '../components/ResetSectionDialog';
 
 interface Section { to: string; label: string; description: string; adminOnly?: boolean; category?: SettingCategory }
 
@@ -20,7 +21,7 @@ const SECTIONS: Section[] = [
   { to: '/settings/projects', label: 'Projects', description: 'Step templates for schedules, and the days the business is closed.', category: 'projects', adminOnly: true },
   { to: '/settings/appearance', label: 'Appearance', description: 'Theme and display density.', category: 'appearance' },
   { to: '/settings/users', label: 'Users & permissions', description: 'Accounts and the roles they hold.', category: 'users', adminOnly: true },
-  { to: '/settings/security', label: 'Security', description: 'When a sign-in ends after a time without activity.', category: 'security', adminOnly: true },
+  { to: '/settings/security', label: 'Security', description: 'When a sign-in ends, and the log of who signed in.', category: 'security', adminOnly: true },
   { to: '/settings/system', label: 'System', description: 'Version, environment, and status.', category: 'system' },
   { to: '/settings/data', label: 'Data & backup', description: 'Backups, restore tests and exports.', category: 'data', adminOnly: true },
   { to: '/settings/history', label: 'Change history', description: 'Audit log of administrative changes.' },
@@ -44,7 +45,7 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   const location = useLocation();
   const settings = useSettings();
   const toast = useToast();
-  const { dirty, resetDraft, save, saving, resetAll, resetting, error, loading, reload } = settings;
+  const { dirty, resetDraft, save, saving, resetting, error, loading, reload } = settings;
 
   // Browser-level guard against accidental reload.
   useBeforeUnload((e) => {
@@ -79,6 +80,9 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   }
 
   const sections = SECTIONS.filter((s) => (!s.adminOnly || isAdmin) && (PROCUREMENT_ENABLED || s.category !== 'purchase_orders'));
+  // The section open now: "Reset to defaults" resets only that one (system audit C10).
+  const current = SECTIONS.find((s) => s.to === location.pathname.replace(/\/$/, '')) ?? SECTIONS.find((s) => s.to === '/settings');
+  const resettable = !!current?.category && Object.values(settings.settings).some((r) => r.category === current.category && r.isEditable !== false);
 
   return (
     <div>
@@ -93,9 +97,11 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
               <Button variant="secondary" size="sm" onClick={resetDraft} disabled={!dirty || saving || resetting}>
                 Reset changes
               </Button>
-              <Button variant="danger" size="sm" onClick={() => setConfirmReset(true)} disabled={saving || resetting} loading={resetting}>
-                Reset to defaults
-              </Button>
+              {resettable && (
+                <Button variant="danger" size="sm" onClick={() => setConfirmReset(true)} disabled={dirty || saving || resetting} loading={resetting}>
+                  Reset {current!.label} to defaults
+                </Button>
+              )}
               <Button
                 variant="primary"
                 size="sm"
@@ -179,24 +185,48 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
         />
       )}
 
-      {confirmReset && (
-        <ConfirmDialog
-          open
+      {confirmReset && current?.category && (
+        <ResetSectionDialog
+          category={current.category}
+          label={current.label}
           onClose={() => setConfirmReset(false)}
-          onConfirm={async () => {
+          onReset={async () => {
             try {
-              await resetAll();
-              setConfirmReset(false);
-            } catch { setConfirmReset(false); }
+              const { updated } = await settings.resetSection(current.category!);
+              toast.success(`${current.label} reset`, `${updated} setting(s) back to their defaults.`);
+            } catch (err) {
+              toast.error('Reset failed', (err as Error)?.message ?? 'Unexpected error');
+            } finally { setConfirmReset(false); }
           }}
-          title="Reset all settings to defaults?"
-          description="This restores every setting to its factory default. A row is written to the audit log for every change. This action cannot be undone."
-          confirmLabel="Reset to defaults"
-          cancelLabel="Cancel"
-          destructive
-          loading={resetting}
+          resetting={resetting}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Why a two-person check is being switched off (system audit C9): shown under
+ * it while the draft switches it off, and kept with the change in Activity.
+ */
+export function SwitchOffReason({ settingKey }: { settingKey: string }) {
+  const { switchingOff, switchOffReason, setSwitchOffReason } = useSettings();
+  if (!switchingOff.includes(settingKey)) return null;
+  const id = `${settingKey}-reason`;
+  return (
+    <div className="ml-7 space-y-1">
+      <label htmlFor={id} className="block text-sm font-medium text-surface-800">Why is the second person no longer needed? <span className="text-danger-600">*</span></label>
+      <textarea
+        id={id}
+        rows={2}
+        maxLength={500}
+        className="w-full rounded border border-surface-300 bg-surface-0 px-3 py-2 text-sm"
+        value={switchOffReason}
+        onChange={(e) => setSwitchOffReason(e.target.value)}
+        placeholder="e.g. The approver is away until the 20th"
+        required
+      />
+      <p className="text-xs text-surface-500">Kept in Change history. While it is off, the Dashboard tells every Admin.</p>
     </div>
   );
 }

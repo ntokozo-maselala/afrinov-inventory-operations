@@ -25,6 +25,7 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { NO_PROJECT_LEFTOVERS, leftoversLink } from '../components/LeftoversNotice';
+import { CostHistory } from '../components/CostHistory';
 import { projectStatusLabel } from '../lib/projectStatus';
 
 
@@ -91,6 +92,8 @@ export function MaterialDetail() {
   // Every row carries the item's status; take it from the first.
   const itemStatus = stock.data?.[0];
   const unitCost = material.data?.unitCost;
+  // Only Procurement and Admin price an item (system audit C1).
+  const canSetCost = hasPermission('materials:cost');
   const hasPrice = unitCost !== null && unitCost !== undefined && unitCost !== '';
   // An inactive item cannot be moved; tools are lent on the Tools page, not issued.
   const active = !!material.data?.active;
@@ -154,11 +157,12 @@ export function MaterialDetail() {
                 <dd className="col-span-2 text-num">
                   {hasPrice
                     ? `R ${formatNumber(Number(unitCost), { fixed: true })}`
-                    : <span className="text-warning-700">No price{canManage && <> · <button type="button" className="btn-link" onClick={() => setEditing(true)}>Set one</button></>}</span>}
+                    : <span className="text-warning-700">No price{canManage && canSetCost && <> · <button type="button" className="btn-link" onClick={() => setEditing(true)}>Set one</button></>}</span>}
                 </dd>
                 {material.data.description && (<><dt className="text-surface-500">Description</dt><dd className="col-span-2">{material.data.description}</dd></>)}
               </dl>
             </section>
+            <CostHistory materialId={material.data.id} />
             {!storesItem ? (
               // Project material comes through the store, held for the project its
               // order is for: it has no stock status, and no project of its own

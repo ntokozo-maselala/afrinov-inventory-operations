@@ -60,7 +60,7 @@ export const DEMO_CREDENTIALS: DemoCredentials = {
  * source of truth.
  */
 export const SIGN_IN_TAGLINE = 'Welcome to your Inventory management system';
-export const SIGN_IN_TITLE = 'Sign in to Afrinov IMS';
+export const SIGN_IN_TITLE = 'Sign in to Afrinov OMS';
 export const SIGN_IN_SUBTITLE = 'Access your inventory management workspace';
 
 /**

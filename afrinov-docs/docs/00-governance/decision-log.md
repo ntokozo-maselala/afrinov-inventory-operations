@@ -1211,3 +1211,149 @@ Microsoft 365): files locked for 30 days, and access that can't delete,
 renewed yearly. Point-in-time recovery is not covered. Tests:
 `backup-status.test.ts`, `backups.real-http.test.ts`, `lib/backups.test.ts`,
 and the CI drill.
+
+### ADR-038 — Locations, suppliers and projects close only when nothing still depends on them; a project's status decides whether it is active
+**Date:** 2026-11-12 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P2, closing things safely)
+found that items follow "inactive means nothing moves" (ADR-033), but
+locations, suppliers and projects could be closed while work still depended
+on them. A location could be deactivated with stock on it, which could then not
+be issued, moved, adjusted or counted, and with tools out on loan that could
+never be checked back in (A1, A2). Receiving against an order didn't check the
+location was open (A3), and a counter receipt read an item's status before
+holding its row (A5). Tools could be lent to a completed project (B1).
+Deactivating a supplier refused every delivery against their open orders (D2).
+Completing a project checked only its schedules, and cancelling or archiving it
+checked nothing (E1, D4). A project's `active` flag and its status were set
+separately and could disagree (E2). The owner approved the recommended option
+for each.
+
+**Decision:**
+- **A location is deactivated only when clear:** no stock on it (Stores or a
+  project's), no tool out on loan from it, no adjustment waiting there, not
+  where project deliveries are booked, and no active location inside it.
+  `GET /locations/:id/deactivation-check` lists what is in the way; the screen
+  shows it first. Every movement holds the location's row `FOR SHARE`
+  (`checkLocationActive`, stock counts, counter receipts) and deactivation
+  holds it `FOR UPDATE`, so the two can't pass each other, as for items.
+- **A tool comes back even if its location has closed:** check-in takes a
+  `locationId` to put it elsewhere, and a lost tool is written off without its
+  location being open, since its return and write-off cancel out there.
+- **Every way stock arrives checks the location is open**, receipts against an
+  order included; counter receipts use `checkMaterialActive`.
+- **No tool is lent to a completed or cancelled project**, as no stock is
+  issued to one.
+- **An inactive supplier gets no new orders or quotes, but orders already
+  raised still go through and are received.** Deactivating lists their open
+  orders.
+- **A project is completed, cancelled or archived only when nothing still
+  depends on it:** no order still open (drafts included), no Procurement RFQ
+  still in draft or sent, no tool out on loan to it, no write-off of its stock
+  waiting; completing also needs every schedule done or cancelled (ADR-032).
+  `GET /projects/:projectNumber/closing-check?to=COMPLETED|CANCELLED` lists what
+  is in the way. Issuing, lending and ordering for a project hold its row
+  `FOR SHARE`; closing holds it `FOR UPDATE`.
+  *Departure from the recommendation:* stock held for the project does not
+  block closing, because Leftovers moves that stock to Stores only once the
+  project is closed; requiring it first would make every project with stock
+  impossible to close. Sales RFQs don't block either: they record prices
+  asked for and are never awarded or closed.
+- **Status decides whether a project is active:** Completed and Cancelled are
+  inactive, every other status active; the separate flag is no longer taken
+  from the API or the project form. Migration
+  `20260101000057_project_status_decides` lines the flag up with status and adds
+  two database checks: status is one of the five values, and `active` agrees
+  with it. That makes the recommended `check:project-status` report
+  unnecessary: the database refuses a disagreement.
+
+**Consequences:** Closing a location or a project can now take a few steps
+(move the stock, check the tools in, cancel the drafts) and the screen says
+which. A project's stock still shows under Leftovers after it closes. Reopening
+a project is a status change, and it becomes active again. Tests:
+`location.service.test.ts`, `project.service.test.ts`,
+`tool-loan.service.test.ts`, `goods-receipt.service.test.ts`,
+`closing-safely.real-http.test.ts`, `materials-sections.real-http.test.ts`,
+`ClearFirstDialog.test.tsx`, `SupplierMaster.test.tsx`,
+`mockMaterialSections.test.ts`.
+
+### ADR-039 — Controls: who prices, closes and switches off checks, and what is recorded
+**Date:** 2026-11-12 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P3, controls) found ways
+round the two-person checks and gaps in what is recorded. The store controller
+could set an item's unit cost and then write it off under the approval limit
+(C1); a cost change kept no history (C3); a large write-off could be split into
+small ones (C2). Changing an approved order's terms didn't send it back for
+signing (D1). Two API-only routes booked stock with no count or order (D3).
+Anyone with `manage:projects` (store, Procurement, Sales) could complete or
+cancel any project (E3). Sign-ins left no record (F3). Nothing linked a
+recipient to a user account, so issuing to oneself went unseen (F5). The ledger
+and who was blamed for losses needed only a sign-in (F6). Switching off either
+approval setting said nothing about removing the second person (C9), and one
+button reset every setting at once (C10). The owner approved the phase and
+answered no question, so each finding takes its recommended option.
+
+**Decision:**
+- **The unit cost is Procurement's and Admin's** (`edit:unit_cost`). Setting it
+  on a new item or changing it needs the permission; a change needs a reason.
+  Each change is a row of `material_cost_changes` (before, after, reason, who,
+  when), shown on the item's page (`GET /materials/:id/cost-history`). A body
+  that changes only the cost needs `edit:unit_cost` alone. A cost of 0 counts
+  as no cost: the write-off waits for approval.
+- **Write-offs are judged over a week.** A write-off's value is added to what
+  the same person wrote off of the same item in the last 7 days
+  (`WRITE_OFF_WINDOW_DAYS`), less reversals and those someone else approved;
+  over the limit, it waits. Manual adjustments, count differences and lost
+  tools all use it. A waiting request records `recentValue`.
+- **An approved order's signed terms are signed for.** Changing payment terms or
+  milestone, settlement discount, penalties, project, delivery method, address,
+  country, destination or shipping terms sends it back for signing, as a price
+  rise does (`SIGNED_TERMS`). Contacts, notes and dates don't.
+- **Every delivery is counted in on Receive stock.** `POST
+  /purchase-orders/:id/receive` and `POST /stock-items` are retired: they refuse
+  every request (400) with a pointer to Receive stock, as confirm-delivery does.
+  `StockItemService` is removed.
+- **Closing a project takes `close:project` (Admin) or being its manager.**
+  Completing, cancelling and archiving it, and changing its manager (so nobody
+  makes themselves manager to close it), are checked with the project's row held
+  `FOR UPDATE`. Creating and editing stay with `manage:projects`.
+- **A sign-in log.** Each sign-in, wrong email or password, attempt held back by
+  the account limit, and sign-out (`POST /auth/logout`, new) is a row of
+  `sign_in_events` with the address and browser, kept 12 months by the server's
+  hourly sweep, and listed for Admins (`GET /sign-ins`, Settings → Security).
+  Writing it is best-effort: a sign-in isn't refused because its row failed. A
+  sign-in left alone ends when its token runs out, which writes nothing.
+- **A recipient can name its user account** (`recipients.user_id`, unique; a
+  worker or contractor only). A slip whose recipient is the account that posted
+  it is listed by `GET /reports/self-issued` (last 30 days, `view:audit_log`)
+  and shown on the Dashboard. *Choice within the recommendation:* flagged, not
+  refused, because one store controller works the counter alone.
+- **The ledger is a report.** Movements, its summary, actors and export, an
+  issue's outcomes, the tool list and a loan's history need `view:reports`.
+  Write-offs by the person responsible also need `adjust:inventory` or
+  `approve:write_off`. Every role holds `view:reports` today, so nobody sees
+  less now.
+- **Switching off a two-person check needs a reason.** Turning off
+  `inventory.requireWriteOffApproval` or
+  `purchaseOrders.requireApprovalBeforeProcessing` is refused without one; the
+  reason is kept in the setting's audit entry. Their descriptions say what
+  switching off removes, and the Dashboard tells Admins while either is off.
+- **"Reset to defaults" resets one section, after a preview.**
+  `GET /settings/reset-preview?category=` lists each setting not at its
+  default; `POST /settings/reset` takes the `category` and writes only those.
+
+Migration `20260101000059_controls` (numbered after main's `…058_sales_rfq_equipment_lines`) adds the two tables, the recipient's
+account link, the two permissions with their grants, and the two settings'
+new descriptions.
+
+**Consequences:** The store controller asks Procurement to price an item. A
+project's manager, or an Admin, closes it; a project with no manager is closed
+by an Admin. Scripts or tools that called the two retired routes must post a
+goods receipt or a counter receipt instead. Tests: `material.service.test.ts`,
+`write-off-limit` callers' tests, `procurement.service.test.ts`,
+`project.service.test.ts`, `auth.routes.test.ts`, `sign-in-log.test.ts`,
+`settings.service.test.ts`, `inventory.routes.test.ts`,
+`controls.real-http.test.ts`, `procurement.real-http.test.ts`,
+`MaterialDetail.test.tsx`, `projectClose.test.ts`, `SignInLog.test.ts`,
+`DashboardControls.test.ts`.

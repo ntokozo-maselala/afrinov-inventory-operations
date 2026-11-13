@@ -29,6 +29,7 @@ export async function requestAdjustment(input: AdjustmentInput, check: WriteOffC
       actorId: input.actorId, action: 'WRITE_OFF_REQUEST', entityType: 'AdjustmentRequest', entityId: request.id,
       after: {
         quantity: quantity.toString(), reasonCode: input.reasonCode, value: check.value?.toString() ?? null, limit: check.limit.toString(),
+        ...(check.recentValue ? { recentValue: check.recentValue.toString() } : {}),
         referenceType: input.referenceType ?? null, referenceId: input.referenceId ?? null,
       },
     },

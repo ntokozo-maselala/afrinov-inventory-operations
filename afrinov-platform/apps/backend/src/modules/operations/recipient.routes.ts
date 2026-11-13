@@ -4,6 +4,7 @@ import { RecipientService, RECIPIENT_TYPES } from './recipient.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { PIN_PATTERN } from './recipient-pin.js';
+import { selfIssuedSlips } from './self-issue.js';
 
 const recipientTypeEnum = z.enum(RECIPIENT_TYPES as ['WORKER', 'MACHINE', 'SITE', 'CONTRACTOR']);
 
@@ -17,6 +18,8 @@ export const createRecipientSchema = z.object({
   name: z.string().trim().min(1).max(120),
   type: recipientTypeEnum,
   notes: z.string().max(1000).optional(),
+  /** The person's user account (system audit F5). */
+  userId: z.uuid().optional(),
 });
 
 export const updateRecipientSchema = z.object({
@@ -24,6 +27,7 @@ export const updateRecipientSchema = z.object({
   type: recipientTypeEnum.optional(),
   notes: z.string().max(1000).nullable().optional(),
   active: z.boolean().optional(),
+  userId: z.uuid().nullable().optional(),
 });
 
 export const setPinSchema = z.object({
@@ -39,6 +43,13 @@ function actorId(req: unknown): string {
 }
 
 export async function recipientRoutes(app: FastifyInstance): Promise<void> {
+  // Slips someone issued or lent to themselves in the last 30 days (system
+  // audit F5), for the Dashboard: for those who read Activity.
+  app.get('/reports/self-issued', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewAuditLog);
+    return selfIssuedSlips();
+  });
+
   // Any signed-in user can read the list: it fills the "Issued To" dropdown.
   app.get('/recipients', { preHandler: [app.authenticate] }, async (req, reply) => {
     const parsed = listRecipientsQuerySchema.safeParse(req.query ?? {});

@@ -337,16 +337,31 @@ export interface MockRfqLine {
 /** A role's hourly selling rate, as labour_rates keeps it. */
 export interface MockLabourRate { id: string; role: string; hourlyRate: string; active: boolean }
 
-/** A Sales RFQ, as sales-rfq.service.ts keeps it: labour lines and the orders its material comes from. */
+/** One equipment line of a Sales RFQ: its labour, quotes and other costs for one unit. */
+export interface MockSalesEquipmentLine {
+  id: string;
+  lineNo: number;
+  equipment: string | null;
+  details: string | null;
+  quantity: number;
+  /** Its own markup; null: the job's. */
+  markupPercent: string | null;
+  labour: Array<{ id: string; lineNo: number; labourRateId: string; role: string; hours: string; hourlyRate: string }>;
+  /** One supplier's quote per Procurement RFQ, valued as it was when last saved or submitted. */
+  materials: Array<{ rfqId: string; supplierId: string; quoteTotal: string; currency: string; amount: string }>;
+  otherCosts: Array<{ id: string; lineNo: number; description: string; quantity: string; unitCost: string }>;
+}
+
+/** A Sales RFQ, as sales-rfq.service.ts keeps it: its equipment lines and what each costs. */
 export interface MockSalesRfq {
   id: string;
   number: string;
   quoteReference: string | null;
   status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'CANCELLED';
   projectNumber: string;
-  equipment: string | null;
   description: string | null;
   notes: string | null;
+  quoteNotes: string | null;
   penaltiesApply: boolean;
   markupPercent: string | null;
   deliveryPrice: string;
@@ -371,9 +386,7 @@ export interface MockSalesRfq {
   returnReason: string | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
-  labour: Array<{ id: string; lineNo: number; labourRateId: string; role: string; hours: string; hourlyRate: string }>;
-  /** One supplier's quote per Procurement RFQ, valued as it was when last saved or submitted. */
-  materials: Array<{ rfqId: string; supplierId: string; quoteTotal: string; currency: string; amount: string }>;
+  equipmentLines: MockSalesEquipmentLine[];
   history: Array<{ id: string; action: string; actorId: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; createdAt: string }>;
 }
 

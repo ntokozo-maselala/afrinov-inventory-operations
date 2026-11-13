@@ -27,6 +27,8 @@ export interface Recipient {
   type: RecipientType;
   notes?: string | null;
   active: boolean;
+  /** The person's user account, so a slip they issue to themselves shows (system audit F5). */
+  userId?: string | null;
   /** Counter PIN (ADR-034): whether one is set, and whether it locked after too many wrong tries. */
   pinSet?: boolean;
   pinLocked?: boolean;
@@ -248,6 +250,9 @@ function RecipientForm({ initial, onCancel, onSaved }: {
   const [name, setName] = useState(initial?.name ?? '');
   const [type, setType] = useState<RecipientType>(initial?.type ?? 'WORKER');
   const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [userId, setUserId] = useState(initial?.userId ?? '');
+  // Active accounts, for a worker or contractor who signs in too (system audit F5).
+  const accounts = useApi<Array<{ id: string; name: string }>>('/users/lookup');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -257,7 +262,12 @@ function RecipientForm({ initial, onCancel, onSaved }: {
     if (!name.trim()) { setError('Name is required.'); return; }
     setBusy(true);
     try {
-      const body = { name: name.trim(), type, notes: notes.trim() || (initial ? null : undefined) };
+      const person = holdsPin(type);
+      const body = {
+        name: name.trim(), type, notes: notes.trim() || (initial ? null : undefined),
+        // Only a person has an account; a machine or site loses its link on the server.
+        ...(person ? (initial ? (userId !== (initial.userId ?? '') ? { userId: userId || null } : {}) : (userId ? { userId } : {})) : {}),
+      };
       if (initial) await api.patch(`/recipients/${initial.id}`, body);
       else await api.post('/recipients', body);
       onSaved(name.trim());
@@ -286,6 +296,14 @@ function RecipientForm({ initial, onCancel, onSaved }: {
           {(Object.keys(RECIPIENT_TYPE_LABEL) as RecipientType[]).map((t) => <option key={t} value={t}>{RECIPIENT_TYPE_LABEL[t]}</option>)}
         </Select>
       </Field>
+      {holdsPin(type) && (
+        <Field label="User account" htmlFor="rcp-user" help="If this person also signs in to the system. A slip they issue or lend to themselves then shows on the Dashboard." error={accounts.error ? "Couldn't load the accounts." : null}>
+          <Select id="rcp-user" value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">No account</option>
+            {(Array.isArray(accounts.data) ? accounts.data : []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </Select>
+        </Field>
+      )}
       <Field label="Notes" htmlFor="rcp-notes">
         <Textarea id="rcp-notes" rows={2} value={notes ?? ''} onChange={(e) => setNotes(e.target.value)} maxLength={1000} placeholder="Optional, e.g. employee number or company contact" />
       </Field>

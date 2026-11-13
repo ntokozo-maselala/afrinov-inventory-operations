@@ -355,51 +355,29 @@ describe('PurchaseOrderService lifecycle', () => {
     return po;
   }
 
+  /** An order whose every line arrived, as Receive stock leaves it once the last delivery posts. */
+  async function receivedPO(orderedQty = 7) {
+    const po = await approvedPO(orderedQty);
+    for (const line of [...db.lines.values()].filter((l) => l.purchaseOrderId === po.id)) {
+      db.lines.set(line.id, { ...line, receivedQty: new Prisma.Decimal(orderedQty) });
+    }
+    db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'RECEIVED' });
+    return po;
+  }
+
   it('has no shipping stage', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     expect('ship' in PurchaseOrderService).toBe(false);
     expect('deliver' in PurchaseOrderService).toBe(false);
   });
 
-  it('receive from APPROVED books every outstanding line into stock and marks the order RECEIVED', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
+  it('refuses to receive the whole order in one call: deliveries go through Receive stock (system audit D3)', async () => {
+    const { PurchaseOrderService, RECEIVE_ON_RECEIVE_STOCK } = await import('./procurement.service.js');
     const po = await approvedPO(7);
-    const received = await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
-    expect(received?.status).toBe('RECEIVED');
-    expect(received?.deliveredById).toBe('user-4');
-    expect(db.transactions.length).toBe(1);
-    expect(db.transactions[0]).toMatchObject({ materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', referenceType: 'PurchaseOrder' });
-    expect(db.transactions[0]!.quantity.toString()).toBe('7');
-    expect(db.balances.get(balKey('mat-1', 'loc-1'))?.quantity.toString()).toBe('7');
-    expect(db.audit.find((a) => a.action === 'PO_RECEIVE')).toBeDefined();
-  });
-
-  it('receive from PARTIALLY_RECEIVED books only the shortfall', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await approvedPO(7);
-    const line = [...db.lines.values()].find((l) => l.purchaseOrderId === po.id)!;
-    db.lines.set(line.id, { ...line, receivedQty: new Prisma.Decimal(3) });
-    db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'PARTIALLY_RECEIVED' });
-    const received = await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
-    expect(received?.status).toBe('RECEIVED');
-    expect(db.transactions.map((t) => t.quantity.toString())).toEqual(['4']);
-  });
-
-  it('refuses to receive a draft or pending order', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
-    await expect(PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4')).rejects.toThrow(/approved or partly received/i);
-    await PurchaseOrderService.submit(po.id, 'user-1');
-    await expect(PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4')).rejects.toThrow(/approved or partly received/i);
+    await expect(PurchaseOrderService.receive({ id: po.id }, 'user-4')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: RECEIVE_ON_RECEIVE_STOCK });
+    await expect(PurchaseOrderService.receive({ id: 'po-none' }, 'user-4')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(db.pos.get(po.id)?.status).toBe('APPROVED');
     expect(db.transactions.length).toBe(0);
-  });
-
-  it('rejects receiving twice via the status guard', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await approvedPO(1);
-    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
-    await expect(PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4')).rejects.toThrow();
-    expect(db.transactions.length).toBe(1);
   });
 
   it('cancel records reason and canceller', async () => {
@@ -413,22 +391,19 @@ describe('PurchaseOrderService lifecycle', () => {
 
   it('rejects cancel once anything has been received', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await approvedPO(1);
-    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    const po = await receivedPO(1);
     await expect(PurchaseOrderService.cancel({ id: po.id, reason: 'x' }, 'user-1')).rejects.toThrow(/cancel/i);
   });
 
   it('update is blocked once RECEIVED', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await approvedPO(1);
-    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    const po = await receivedPO(1);
     await expect(PurchaseOrderService.update({ id: po.id, notes: 'late edit' }, 'user-1')).rejects.toThrow(/editable/i);
   });
 
   it('closes a fully received order without a reason', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await approvedPO(2);
-    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    const po = await receivedPO(2);
     const closed = await PurchaseOrderService.close({ id: po.id }, 'user-1');
     expect(closed?.status).toBe('CLOSED');
     expect(closed?.closedById).toBe('user-1');
@@ -483,7 +458,7 @@ describe('PurchaseOrderService lifecycle', () => {
     // the value on the underlying prisma.setting.update path.
     const { SettingsService } = await import('../settings/settings.service.js');
     await SettingsService.ensureSeeded();
-    await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', false, 'user-1');
+    await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', false, 'user-1', 'Testing with it off');
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
     const submitted = await PurchaseOrderService.submit(po.id, 'user-1');
@@ -996,7 +971,7 @@ describe('PurchaseOrderService signing an order', () => {
       const { PurchaseOrderService } = await import('./procurement.service.js');
       const { SettingsService } = await import('../settings/settings.service.js');
       await SettingsService.ensureSeeded();
-      await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', false, 'user-1');
+      await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', false, 'user-1', 'Testing with it off');
       await SettingsService.set('purchaseOrders.exchangeRateEUR', 0, 'user-1');
       try {
         const po = await euroOrder(10);
@@ -1206,13 +1181,25 @@ describe('PurchaseOrderService numbers and revisions (procurement roadmap Phase 
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1');
     await PurchaseOrderService.submit(po.id, 'user-1');
     await PurchaseOrderService.approve(po.id, 'u-ona');
-    await PurchaseOrderService.update({ id: po.id, shippingTerms: 'Ex works' }, 'user-1');
+    await PurchaseOrderService.update({ id: po.id, supplierContactName: 'Thabo' }, 'user-1');
     expect(db.pos.get(po.id)!.revision).toBe(1);
-    await PurchaseOrderService.update({ id: po.id, shippingTerms: 'Delivered to site' }, 'user-1');
+    await PurchaseOrderService.update({ id: po.id, supplierContactName: 'Lerato' }, 'user-1');
     expect(db.pos.get(po.id)!.revision).toBe(2);
+    expect(db.pos.get(po.id)!.status).toBe('APPROVED');
     const entry = db.audit.filter((a) => a.action === 'UPDATE' && a.entityId === po.id).pop()!;
-    expect(entry.before).toEqual({ shippingTerms: 'Ex works', revision: 1 });
-    expect(entry.after).toEqual({ shippingTerms: 'Delivered to site', revision: 2 });
+    expect(entry.before).toEqual({ supplierContactName: 'Thabo', revision: 1 });
+    expect(entry.after).toEqual({ supplierContactName: 'Lerato', revision: 2 });
+  });
+
+  it('sends an approved order back for signing when its signed terms change (system audit D1)', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    for (const change of [{ paymentTerms: '60 days' }, { settlementDiscount: 2 }, { penaltiesApply: true }, { shippingTerms: 'Ex works' }, { deliveryAddress: '1 New Road' }]) {
+      const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1');
+      await PurchaseOrderService.submit(po.id, 'user-1');
+      await PurchaseOrderService.approve(po.id, 'u-ona');
+      await PurchaseOrderService.update({ id: po.id, ...change }, 'user-1');
+      expect(db.pos.get(po.id)).toMatchObject({ status: 'PENDING_APPROVAL', approvedById: null });
+    }
   });
 
   it('raises no revision and writes no log for a save that changes nothing', async () => {
@@ -1233,25 +1220,6 @@ describe('PurchaseOrderService numbers and revisions (procurement roadmap Phase 
 // what it works from.
 describe('PurchaseOrderService and the order row lock', () => {
   const lineOf = (poId: string, materialId: string) => [...db.lines.values()].find((l) => l.purchaseOrderId === poId && l.materialId === materialId)!;
-
-  it('receiving the whole order books only what a goods receipt posted meanwhile left outstanding', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
-    db.materials.set('mat-2', { id: 'mat-2', sku: 'B-1', name: 'Bolt', active: true });
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [
-      { materialId: 'mat-1', orderedQty: 10, unitPrice: 10 },
-      { materialId: 'mat-2', orderedQty: 5, unitPrice: 10 },
-    ] }, 'user-1');
-    await PurchaseOrderService.submit(po.id, 'user-1');
-    await PurchaseOrderService.approve(po.id, 'user-2');
-    const a = lineOf(po.id, 'mat-1');
-    db.lines.set(a.id, { ...a, receivedQty: new Prisma.Decimal(4) });
-    db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'PARTIALLY_RECEIVED' });
-    // The other 6 of line A arrive on a goods receipt; the order stays partly received.
-    onOrderLock = () => { db.lines.set(a.id, { ...lineOf(po.id, 'mat-1'), receivedQty: new Prisma.Decimal(10) }); };
-
-    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
-    expect(db.transactions.map((t) => [t.materialId, t.quantity.toString()])).toEqual([['mat-2', '5']]);
-  });
 
   it('signing counts a price saved while it waited for the order', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');

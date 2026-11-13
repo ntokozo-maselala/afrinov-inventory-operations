@@ -20,7 +20,6 @@ export const createProjectSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   notes: z.string().max(2000).optional(),
-  active: z.boolean().optional(),
 });
 
 export const updateProjectSchema = z.object({
@@ -33,7 +32,6 @@ export const updateProjectSchema = z.object({
   startDate: z.string().nullable().optional(),
   endDate: z.string().nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
-  active: z.boolean().optional(),
 });
 
 // ── Job tracking (ADR-032, Project Tracking Roadmap, Phase 1) ─────────────
@@ -157,13 +155,22 @@ export async function projectRoutes(app: FastifyInstance, opts: { procurementEna
         error: { code: 'VALIDATION_ERROR', message: 'Invalid project payload', details: parsed.error.flatten() },
       });
     }
-    return ProjectService.update({ projectNumber, ...parsed.data }, actorId(req));
+    // Completing, cancelling and handing it on take close:project, or being its manager (system audit E3).
+    return ProjectService.update({ projectNumber, ...parsed.data }, actorId(req), { canClose: await userHasPermission(req, PermissionCode.CloseProject) });
+  });
+
+  // System audit E1: what must be dealt with before completing or cancelling it.
+  app.get('/projects/:projectNumber/closing-check', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ManageProjects);
+    const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
+    const to = (req.query as { to?: string }).to === 'COMPLETED' ? 'COMPLETED' : 'CANCELLED';
+    return ProjectService.closingCheck(projectNumber, to);
   });
 
   app.delete('/projects/:projectNumber', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ManageProjects);
     const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
-    const after = await ProjectService.archive(projectNumber, actorId(req));
+    const after = await ProjectService.archive(projectNumber, actorId(req), { canClose: await userHasPermission(req, PermissionCode.CloseProject) });
     return reply.send(after);
   });
 

@@ -5,6 +5,7 @@
 import type { MyStep, ScheduleStatus, ScheduleStep } from '../api/types';
 import { formatDate } from './format';
 import { endOfWeek, today } from './dates';
+import { workingDaysBetween } from './workingDays';
 
 export const SCHEDULE_STATUS_LABEL: Record<ScheduleStatus, string> = {
   PLANNING: 'Planning',
@@ -67,4 +68,35 @@ export function dueOf(step: Pick<MyStep, 'late' | 'expectedEnd' | 'scheduleStatu
 /** When the step is now expected to end: its actual end once done, else its forecast, else its plan. */
 export function expectedEnd(step: ScheduleStep): string | null {
   return step.done ? step.actualEnd : (step.forecastEnd ?? step.baselineEnd);
+}
+
+/**
+ * A step's Actual columns, as the workbook's blue ones: the day work began, else
+ * the day it is now due to begin; the day it finished, else the day it is now due
+ * to finish. A date is final only once it happened (begun, or finished at 100%).
+ */
+export function actualOf(step: ScheduleStep): { start: string | null; end: string | null; startFinal: boolean; endFinal: boolean } {
+  return {
+    start: step.actualStart ?? step.forecastStart,
+    end: step.done ? step.actualEnd : step.forecastEnd,
+    startFinal: !!step.actualStart,
+    endFinal: step.done,
+  };
+}
+
+/** Working days from start to end, as the step's Days columns count them; null without both. */
+export function stepDays(start: string | null, end: string | null, closed: ReadonlySet<string>): number | null {
+  return start && end ? workingDaysBetween(start, end, closed) : null;
+}
+
+/**
+ * The step's variance, as the workbook's column M: working days its planned end
+ * is after its actual end (or the end it is now due), so late is negative and
+ * early positive. Null until both dates are known.
+ */
+export function stepVariance(step: ScheduleStep, closed: ReadonlySet<string>): number | null {
+  const end = actualOf(step).end;
+  if (!step.baselineEnd || !end) return null;
+  const late = workingDaysBetween(step.baselineEnd, end, closed);
+  return late === null ? null : (late === 0 ? 0 : -late);
 }

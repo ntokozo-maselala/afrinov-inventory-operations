@@ -21,6 +21,9 @@ const db = vi.hoisted(() => ({
   settings: {} as Record<string, unknown>,
   requests: [] as Array<Record<string, unknown>>,
   projectEnd: null as string | null,
+  projectStatus: 'ACTIVE',
+  /** Locations closed since (system audit A2). */
+  closed: new Set<string>(),
   materials: [
     { id: 'm-drill', sku: 'TL-0001', name: 'Makita Hand Drill', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: '34322', active: true, unitCost: 1800 },
     { id: 'm-scraper', sku: 'TL-0002', name: 'Scraper', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: null, active: true },
@@ -35,14 +38,14 @@ const daysFromNow = (n: number) => new Date(Date.now() + n * DAY);
 const balance = (materialId: string, locationId: string) =>
   db.ledger.filter((r) => r.materialId === materialId && r.locationId === locationId).reduce((a, r) => a.plus(r.quantity), D(0));
 
-const names: Record<string, string> = { 'l-store': 'Main Storeroom', 'r-sabelo': 'Sabelo', 'r-bukho': 'Bukho', 'u-1': 'Vusi' };
+const names: Record<string, string> = { 'l-store': 'Main Storeroom', 'l-bay': 'Bay 2', 'r-sabelo': 'Sabelo', 'r-bukho': 'Bukho', 'u-1': 'Vusi' };
 const types: Record<string, string> = { 'r-sabelo': 'WORKER', 'r-bukho': 'CONTRACTOR' };
 const matches = (r: Row, where: Record<string, unknown>) => Object.entries(where).every(([k, v]) => {
   const value = (r as unknown as Record<string, unknown>)[k];
   if (v && typeof v === 'object' && 'in' in (v as object)) return (v as { in: unknown[] }).in.includes(value);
   return value === v;
 });
-const project = () => ({ projectNumber: 'AFRI-1325', active: true, endDate: db.projectEnd ? new Date(`${db.projectEnd}T00:00:00Z`) : null });
+const project = () => ({ projectNumber: 'AFRI-1325', active: true, status: db.projectStatus, endDate: db.projectEnd ? new Date(`${db.projectEnd}T00:00:00Z`) : null });
 const withRelations = (r: Row) => ({
   ...r,
   dueOn: r.dueOn ?? null,
@@ -66,7 +69,7 @@ const client = {
       ? db.materials.filter((m) => where.id!.in.includes(m.id)).map((m) => ({ ...m, unit: { kind: 'COUNTED' as const } }))
       : db.materials.filter((m) => m.category === where.category)),
   },
-  location: { findUnique: async ({ where }: { where: { id: string } }) => (where.id === 'l-store' ? { id: 'l-store', active: true } : null) },
+  location: { findUnique: async ({ where }: { where: { id: string } }) => (names[where.id] && where.id.startsWith('l-') ? { id: where.id, name: names[where.id], active: !db.closed.has(where.id) } : null) },
   recipient: {
     findUnique: async ({ where }: { where: { id: string } }) => (names[where.id] ? { id: where.id, active: true, name: names[where.id], type: types[where.id] } : null),
   },
@@ -91,6 +94,8 @@ const client = {
       for (const r of db.ledger.filter((x) => matches(x, where))) sums.set(r.referenceId!, (sums.get(r.referenceId!) ?? D(0)).plus(r.quantity));
       return [...sums].map(([referenceId, quantity]) => ({ referenceId, _sum: { quantity } }));
     },
+    // What the same person wrote off of the item in 7 days (system audit C2): nothing here.
+    aggregate: async () => ({ _sum: { quantity: null } }),
   },
   toolLoanExtension: {
     create: async ({ data }: { data: Omit<Extension, 'id' | 'createdAt'> }) => {
@@ -103,8 +108,8 @@ const client = {
   adjustmentRequest: {
     create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `req-${db.requests.length + 1}`, status: 'PENDING', ...data }; db.requests.push(row); return row; },
     // Lost tools waiting for their write-off, by loan.
-    findMany: async ({ where }: { where: { referenceId: { in: string[] } } }) => db.requests
-      .filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && where.referenceId.in.includes(r.referenceId as string))
+    findMany: async ({ where }: { where: { referenceId?: { in: string[] } } }) => !where.referenceId ? [] : db.requests
+      .filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && where.referenceId!.in.includes(r.referenceId as string))
       .map((r) => ({ referenceId: r.referenceId, quantity: r.quantity })),
   },
 };
@@ -147,6 +152,8 @@ beforeEach(() => {
   db.settings = { 'inventory.requireWriteOffApproval': false };
   db.requests.length = 0;
   db.projectEnd = null;
+  db.projectStatus = 'ACTIVE';
+  db.closed.clear();
   seq = 0;
   receive('m-drill', 1);
   receive('m-scraper', 11);
@@ -282,6 +289,40 @@ describe('ToolLoanService due dates', () => {
     const { dueOn } = await lendScraper('r-sabelo');
     expect(dueOn).toBe(day(daysFromNow(2)));
     expect(await tool('m-scraper', daysFromNow(5))).toMatchObject({ loans: [expect.objectContaining({ daysLate: 3, state: 'NEEDS_DECISION' })] });
+  });
+
+  // System audit B1: as issuing stock, no lending to a closed project.
+  it('lends to no completed or cancelled project', async () => {
+    db.projectStatus = 'COMPLETED';
+    await expect(lendScraper('r-sabelo', { projectNumber: 'AFRI-1325' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Project AFRI-1325 is completed, so no more tools are lent to it.' });
+    db.projectStatus = 'CANCELLED';
+    await expect(lendScraper('r-sabelo', { projectNumber: 'AFRI-1325' })).rejects.toMatchObject({ message: expect.stringMatching(/is cancelled/) });
+  });
+
+  // System audit A2: a tool lent from a location closed since can still come back.
+  it('checks a tool in to another location when the one it came from has closed', async () => {
+    const { loanIds: [loanId] } = await lendScraper('r-sabelo');
+    db.closed.add('l-store');
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'GOOD' }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Main Storeroom, where TL-0002 was lent from, is closed: choose where it goes back.' });
+    db.closed.add('l-bay');
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'GOOD', locationId: 'l-bay' }] }))
+      .rejects.toMatchObject({ message: 'Bay 2 is inactive: choose another location to check TL-0002 in to.' });
+    db.closed.delete('l-bay');
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'GOOD', locationId: 'l-bay' }] });
+    const back = db.ledger.find((r) => r.type === 'LOAN_RETURN')!;
+    expect([back.locationId, back.referenceId]).toEqual(['l-bay', loanId]);
+    expect(balance('m-scraper', 'l-bay').toString()).toBe('1');
+    expect((await tool('m-scraper')).loans).toEqual([]);
+  });
+
+  it('writes off a lost tool even when the location it was lent from has closed', async () => {
+    const { loanIds: [loanId] } = await ToolLoanService.checkOut({ recipientId: 'r-sabelo', actorId: 'u-1', lines: [{ materialId: 'm-drill', locationId: 'l-store', quantity: 1 }] });
+    db.closed.add('l-store');
+    const { writeOffIds } = await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'LOST', note: 'Fell off the truck' }] });
+    expect(writeOffIds).toHaveLength(1);
+    expect(balance('m-drill', 'l-store').toString()).toBe('0');
   });
 
   it('holds the due date to the project end date, and refuses one past it', async () => {

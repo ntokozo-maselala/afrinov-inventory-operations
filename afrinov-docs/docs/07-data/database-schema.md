@@ -53,14 +53,22 @@ How Sales prices one piece of equipment for the client, the "Costing: Sales Rep.
 
 | Table (model) | Key columns | Constraints and notes |
 |---|---|---|
-| `sales_rfqs` (SalesRfq) | number, quote_reference, status, project_number, equipment, description, notes, markup_percent, delivery_price, vat_rate, client_name, client_address, contact_name, client_reference, payment_terms, validity, delivery_duration, delivery_terms, signer_phone, signer_email, issued_at, closing_date, created/submitted/approved/returned/cancelled by and at, return_reason, cancellation_reason | number unique, in one sequence per project with Procurement's RFQs; quote_reference unique, AFRI-02A-<project>-04-<n>, given on approval; vat_rate fixed on submission |
-| `sales_rfq_labour_lines` (SalesRfqLabourLine) | sales_rfq_id, line_no, labour_rate_id, role, hours, hourly_rate | (sales_rfq_id, line_no) unique; the role and rate as they were when the line was saved; cascade on delete |
-| `sales_rfq_materials` (SalesRfqMaterial) | sales_rfq_id, rfq_id, supplier_id, quote_total, currency, amount | composite PK (sales_rfq_id, rfq_id): one quote per Procurement RFQ; quote_total in the quote's currency and amount in rand at the Settings exchange rate, both excl. VAT, refreshed on save and fixed on submission |
+| `sales_rfqs` (SalesRfq) | number, quote_reference, status, project_number, description, notes, quote_notes, markup_percent, delivery_price, vat_rate, client_name, client_address, contact_name, client_reference, payment_terms, validity, delivery_duration, delivery_terms, signer_phone, signer_email, issued_at, closing_date, created/submitted/approved/returned/cancelled by and at, return_reason, cancellation_reason | number unique, in one sequence per project with Procurement's RFQs; quote_reference unique, AFRI-02A-<project>-04-<n>, given on approval; vat_rate fixed on submission; quote_notes printed on the quotation under the company's Notes, one per line (notes are remarks, not printed) |
+| `sales_rfq_equipment_lines` (SalesRfqEquipmentLine) | sales_rfq_id, line_no, equipment, details, quantity, markup_percent | (sales_rfq_id, line_no) unique; one row per line of the quotation, at least one per Sales RFQ; details printed under it, one per line; quantity a whole number, the line's costs being for one unit, 0 for a line priced for the client to see but not charged (printed "R -"; at least one line charged to submit); markup_percent its own markup, null to take the job's (`sales_rfqs.markup_percent`), every line needing one or the other to submit; cascade on delete |
+| `sales_rfq_labour_lines` (SalesRfqLabourLine) | sales_rfq_id, equipment_line_id, line_no, labour_rate_id, role, hours, hourly_rate | (sales_rfq_id, line_no) unique, numbered through the Sales RFQ; the role and rate as they were when the line was saved; cascade on delete of the Sales RFQ or its equipment line |
+| `sales_rfq_materials` (SalesRfqMaterial) | sales_rfq_id, rfq_id, equipment_line_id, supplier_id, quote_total, currency, amount | composite PK (sales_rfq_id, rfq_id): one quote per Procurement RFQ, on one equipment line; quote_total in the quote's currency and amount in rand at the Settings exchange rate, both excl. VAT, refreshed on save and fixed on submission |
+| `sales_rfq_other_costs` (SalesRfqOtherCost) | sales_rfq_id, equipment_line_id, line_no, description, quantity, unit_cost | (sales_rfq_id, line_no) unique, numbered through the Sales RFQ; accommodation, LOA, travel or hire on a line, for one unit, in rand excl. VAT, before markup; cascade on delete |
 | `labour_rates` (LabourRate) | role, hourly_rate, active | role unique; the Manpower Rate list's selling rates, kept by the Workshop Manager; made inactive rather than deleted |
 
 Procurement recommends a quote for costing on its RFQ: `rfqs.recommended_supplier_id`, `recommended_at`, `recommended_by_id`. It is not an award and raises no order; it changes only while the RFQ is sent, and is cleared when that supplier declines.
 
 The migration `20260101000055_sales_rfq_costing` refuses to run while any supplier price or quotation PDF is recorded on a Sales RFQ, rather than drop it: those rows are exported and deleted first. A Sales RFQ that was sent becomes a draft.
+
+The migration `20260101000058_sales_rfq_equipment_lines` gives every Sales RFQ one equipment line, quantity 1, named as its equipment was, and moves its labour and quotes onto it; `sales_rfqs.equipment` is then dropped. One line of quantity 1 with no other costs adds up exactly as before (`sales-costing.ts`), so no approved price moves.
+
+The migration `20260101000061_sales_rfq_line_markup` adds `sales_rfq_equipment_lines.markup_percent`, null on every line kept so far, so each takes the job's markup and no price moves.
+
+The migration `20260101000060_quotation_notes` adds `sales_rfqs.quote_notes`. An equipment line of quantity 0 needs no migration: the column already takes any whole number, and the service now allows 0.
 
 ## Inventory ledger
 | Table (model) | Key columns | Constraints and notes |

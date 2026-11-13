@@ -1,5 +1,5 @@
 // A schedule's chart (Project Tracking Roadmap, Phase 3.1): each step's plan
-// and its expected or actual dates, closed days shaded, today and the due date.
+// and its Actual dates, closed days shaded, today and the due date.
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ProjectGantt, chartSpan } from './ProjectGantt';
@@ -32,18 +32,18 @@ describe('ProjectGantt', () => {
     expect(chartSpan(schedule(), '2026-11-08')?.end).toBe('2026-03-21');
   });
 
-  it('draws each step’s plan, and its actual or expected dates with how it stands', () => {
+  it('draws each step’s plan, and its Actual dates with how it stands', () => {
     render(<ProjectGantt schedule={schedule()} closedDays={new Set()} today="2026-03-12" />);
     expect(screen.getByRole('img', { name: 'Engineering: planned 02 Mar 2026 – 06 Mar 2026' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Engineering: finished 02 Mar 2026 – 10 Mar 2026' }).lastElementChild).toHaveClass('bg-success-500');
     // Expected after its plan: drawn as behind.
-    const manufacturing = screen.getByRole('img', { name: 'Manufacturing: expected 11 Mar 2026 – 17 Mar 2026, 40% done' });
+    const manufacturing = screen.getByRole('img', { name: 'Manufacturing: actual 11 Mar 2026 – 17 Mar 2026, not final, 40% done' });
     expect(manufacturing.lastElementChild).toHaveClass('bg-warning-500');
     // The faded track, then the part done at full strength on top of it.
     expect(manufacturing.firstElementChild).toHaveClass('opacity-30');
     expect(manufacturing.lastElementChild).toHaveStyle({ width: '40%' });
     expect(manufacturing.lastElementChild).not.toHaveClass('opacity-30');
-    expect(screen.getByRole('img', { name: /^FAT: expected/ }).lastElementChild).toHaveClass('bg-info-500');
+    expect(screen.getByRole('img', { name: /^FAT: actual .*not final/ }).lastElementChild).toHaveClass('bg-info-500');
     expect(screen.getByTitle('Today')).toBeInTheDocument();
     expect(screen.getByTitle('Due 20 Mar 2026')).toBeInTheDocument();
   });
@@ -55,9 +55,9 @@ describe('ProjectGantt', () => {
     expect(plan.style.width).toBe(`${(5 / 21) * 100}%`);
   });
 
-  it('shows no expected dates while the schedule is being planned', () => {
+  it('shows no Actual dates while the schedule is being planned', () => {
     render(<ProjectGantt schedule={schedule({ status: 'PLANNING' })} closedDays={new Set()} today="2026-03-12" />);
-    expect(screen.queryByRole('img', { name: /expected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /not final/ })).not.toBeInTheDocument();
     expect(screen.getAllByRole('img', { name: /planned/ })).toHaveLength(3);
   });
 

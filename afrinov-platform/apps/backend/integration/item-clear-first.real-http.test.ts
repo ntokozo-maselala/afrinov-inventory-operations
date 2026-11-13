@@ -5,7 +5,7 @@
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ADMIN_EMAIL, client, ledgerAndBalance, login, prisma, requireAdminPassword, retireAsBefore, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, ledgerAndBalance, login, prisma, receiveOutstanding, requireAdminPassword, retireAsBefore, runId, startServer, type TestServer } from './helpers.js';
 import { checkItemStatus } from '../src/modules/inventory/item-status-check.js';
 import { checkMaterialActive } from '../src/modules/inventory/inventory.service.js';
 import { recomputeBalance, storesStock } from '../src/shared/inventory/balances.js';
@@ -186,7 +186,7 @@ describe('clear first, and nothing moves, over real HTTP', () => {
       const i = await item();
       const po = await order(i.id);
       await retireAsBefore(i.id);
-      expectInactiveRefusal(await api('POST', `/purchase-orders/${po.id}/receive`, { locationId: location }), i.sku);
+      expectInactiveRefusal(await receiveOutstanding(api, po.id, location), i.sku);
       expect((await ledgerAndBalance(i.id, location)).balance).toBe('0');
       expect((await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: po.id } })).status).toBe('APPROVED');
     });

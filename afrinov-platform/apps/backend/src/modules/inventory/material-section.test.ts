@@ -62,9 +62,9 @@ const { MaterialService } = await import('./material.service.js');
 const { refuseUnassigned } = await import('./material-section.js');
 
 const projectItem = (sku: string, projectNumber?: string, extra: Record<string, unknown> = {}) =>
-  MaterialService.create({ sku, name: `Pipe ${sku}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber, ...extra }, 'admin');
+  MaterialService.create({ sku, name: `Pipe ${sku}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber, ...extra }, 'admin', { canSetCost: true });
 const storesItem = (sku: string, extra: Record<string, unknown> = {}) =>
-  MaterialService.create({ sku, name: `Disc ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'each', ...extra }, 'admin');
+  MaterialService.create({ sku, name: `Disc ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'each', ...extra }, 'admin', { canSetCost: true });
 
 beforeEach(() => {
   db.materials.clear();
@@ -116,34 +116,34 @@ describe('changing a material', () => {
   it('assigns a first project to an unassigned item, even with stock', async () => {
     unassigned('old-1');
     db.movements.set('old-1', 3);
-    expect(await MaterialService.update({ id: 'old-1', projectNumber: '1369' }, 'admin')).toMatchObject({ projectNumber: '1369', section: 'PROJECTS' });
+    expect(await MaterialService.update({ id: 'old-1', projectNumber: '1369' }, 'admin', { canSetCost: true })).toMatchObject({ projectNumber: '1369', section: 'PROJECTS' });
   });
 
   it('moves an item to another project only while it has no movements', async () => {
     const m = await projectItem('PIPE', '1369');
-    expect(await MaterialService.update({ id: m.id, projectNumber: '1402' }, 'admin')).toMatchObject({ projectNumber: '1402' });
+    expect(await MaterialService.update({ id: m.id, projectNumber: '1402' }, 'admin', { canSetCost: true })).toMatchObject({ projectNumber: '1402' });
     db.movements.set(m.id, 1);
-    await expect(MaterialService.update({ id: m.id, projectNumber: '1369' }, 'admin'))
+    await expect(MaterialService.update({ id: m.id, projectNumber: '1369' }, 'admin', { canSetCost: true }))
       .rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringMatching(/stays with that project/) });
   });
 
   it('leaves the project alone when it is sent unchanged, or not at all', async () => {
     const m = await projectItem('PIPE', '1369');
     db.movements.set(m.id, 4);
-    expect(await MaterialService.update({ id: m.id, projectNumber: '1369', name: 'Pipe 150NB' }, 'admin')).toMatchObject({ projectNumber: '1369', name: 'Pipe 150NB' });
+    expect(await MaterialService.update({ id: m.id, projectNumber: '1369', name: 'Pipe 150NB' }, 'admin', { canSetCost: true })).toMatchObject({ projectNumber: '1369', name: 'Pipe 150NB' });
   });
 
   it('refuses Required Stock on a Projects material, and a project on a Stores one', async () => {
     const p = await projectItem('PIPE', '1369');
-    await expect(MaterialService.update({ id: p.id, requiredStock: 10 }, 'admin')).rejects.toMatchObject({ message: expect.stringMatching(/no Required Stock/) });
-    expect(await MaterialService.update({ id: p.id, requiredStock: 0 }, 'admin')).toMatchObject({ requiredStock: 0 });
+    await expect(MaterialService.update({ id: p.id, requiredStock: 10 }, 'admin', { canSetCost: true })).rejects.toMatchObject({ message: expect.stringMatching(/no Required Stock/) });
+    expect(await MaterialService.update({ id: p.id, requiredStock: 0 }, 'admin', { canSetCost: true })).toMatchObject({ requiredStock: 0 });
     const s = await storesItem('CON-1');
-    await expect(MaterialService.update({ id: s.id, projectNumber: '1369' }, 'admin')).rejects.toMatchObject({ message: expect.stringMatching(/Stores material has no project/) });
+    await expect(MaterialService.update({ id: s.id, projectNumber: '1369' }, 'admin', { canSetCost: true })).rejects.toMatchObject({ message: expect.stringMatching(/Stores material has no project/) });
   });
 
   it('refuses a closed project when assigning', async () => {
     unassigned('old-2');
-    await expect(MaterialService.update({ id: 'old-2', projectNumber: '1200' }, 'admin')).rejects.toMatchObject({ message: expect.stringMatching(/is closed/) });
+    await expect(MaterialService.update({ id: 'old-2', projectNumber: '1200' }, 'admin', { canSetCost: true })).rejects.toMatchObject({ message: expect.stringMatching(/is closed/) });
   });
 });
 

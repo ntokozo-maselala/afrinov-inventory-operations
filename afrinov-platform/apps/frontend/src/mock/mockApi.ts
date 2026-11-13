@@ -276,10 +276,11 @@ function refuseUnassigned(materialId: string) {
 function assertProjectOpen(projectNumber: string) {
   const project = state.projects.find((p) => p.projectNumber === projectNumber);
   if (!project) throw err('VALIDATION_ERROR', `No project ${projectNumber}`);
-  if (project.active === false) throw err('VALIDATION_ERROR', `Project ${projectNumber} is inactive`);
+  // The status first, as the server (system audit E2): it says why.
   if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
     throw err('VALIDATION_ERROR', `Project ${projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so nothing more is ordered for it.`);
   }
+  if (project.active === false) throw err('VALIDATION_ERROR', `Project ${projectNumber} is inactive`);
 }
 
 // As the server (checkProjectMaterial): a project's leftovers go only to that
@@ -322,6 +323,15 @@ function refuseProjectMaterialOnStoresOrder(projectNumber: string | null | undef
 
 // As the server: a project order goes to site, so it isn't received into stock.
 const DELIVERY_IS_RECEIVED = 'Project orders are received into stock now: the store books each delivery on Receive stock.';
+/** As the server (system audit C9): switching off a two-person check needs a reason. */
+const TWO_PERSON_SETTINGS = ['inventory.requireWriteOffApproval', 'purchaseOrders.requireApprovalBeforeProcessing'];
+function mockSwitchOffReason(key: string, before: unknown, after: unknown, reason: string | undefined): string | null {
+  if (!TWO_PERSON_SETTINGS.includes(key) || after !== false || before === false) return null;
+  if (!reason?.trim()) throw err('VALIDATION_ERROR', 'Say why: switching this off removes the second person who checks.', { fieldErrors: { reason: ['Say why: switching this off removes the second person who checks.'] } });
+  return reason.trim();
+}
+const RECEIVE_ON_RECEIVE_STOCK = 'Deliveries are received on Receive stock: count what arrived against the order there.';
+const STOCK_ITEMS_RETIRED = 'Add the item on Materials, then receive its stock on Receive stock.';
 
 function projectRef(projectNumber: string | null | undefined) {
   if (!projectNumber) return null;
@@ -607,36 +617,53 @@ function mockQuoteValue(rfq: MockRfq, supplierId: string): { total: string; curr
   return { total: cents(total).toFixed(2), currency, amount: rate ? cents(total * rate).toFixed(2) : null, unpricedLines };
 }
 
-/** As the server's withCosting: a draft's orders valued today, a submitted one's as they were then. */
+/** As the server's withCosting: each line priced for one unit, times its quantity; a draft's quotes valued today, a submitted one's as they were then. */
 function salesRfqView(r: MockSalesRfq) {
   const draft = r.status === 'DRAFT';
-  const materials = r.materials.map((m) => {
-    const rfq = state.rfqs.find((x) => x.id === m.rfqId);
-    const live = rfq ? mockQuoteValue(rfq, m.supplierId) : null;
-    const usable = !!rfq && SALES_COSTED.includes(rfq.status) && !!live && live.amount !== null;
-    const now = draft && live && live.amount !== null ? live : null;
-    const recommendedId = rfq?.recommendedSupplierId ?? null;
+  const jobMarkup = r.markupPercent === null ? null : Number(r.markupPercent);
+  const fixed = (n: number | null) => (n === null ? null : n.toFixed(2));
+  const lines = r.equipmentLines.map((line) => {
+    const materials = line.materials.map((m) => {
+      const rfq = state.rfqs.find((x) => x.id === m.rfqId);
+      const live = rfq ? mockQuoteValue(rfq, m.supplierId) : null;
+      const usable = !!rfq && SALES_COSTED.includes(rfq.status) && !!live && live.amount !== null;
+      const now = draft && live && live.amount !== null ? live : null;
+      const recommendedId = rfq?.recommendedSupplierId ?? null;
+      return {
+        rfqId: m.rfqId, rfqNumber: rfq?.number ?? m.rfqId, rfqStatus: rfq?.status ?? 'CANCELLED', description: rfq?.description ?? null,
+        supplierId: m.supplierId, supplier: findSupplier(m.supplierId)?.name ?? m.supplierId,
+        currency: now?.currency ?? m.currency, quoteTotal: now?.total ?? m.quoteTotal, amount: now?.amount ?? m.amount, unpricedLines: live?.unpricedLines ?? 0,
+        recommendedSupplier: recommendedId ? { id: recommendedId, name: findSupplier(recommendedId)?.name ?? recommendedId } : null,
+        recommended: recommendedId === null || recommendedId === m.supplierId,
+        unusable: draft && !usable,
+      };
+    });
+    const labour = line.labour.map((l) => ({ ...l, total: cents(Number(l.hours) * Number(l.hourlyRate)).toFixed(2) }));
+    const otherCosts = line.otherCosts.map((c) => ({ ...c, total: cents(Number(c.quantity) * Number(c.unitCost)).toFixed(2) }));
+    const labourTotal = cents(labour.reduce((sum, l) => sum + Number(l.total), 0));
+    const material = cents(materials.reduce((sum, m) => sum + Number(m.amount), 0));
+    const other = cents(otherCosts.reduce((sum, c) => sum + Number(c.total), 0));
+    const unitCost = cents(labourTotal + material + other);
+    // Its own markup, or the job's.
+    const markupPercent = line.markupPercent !== null && line.markupPercent !== undefined ? Number(line.markupPercent) : jobMarkup;
+    const unitMarkup = markupPercent === null ? null : cents((unitCost * markupPercent) / 100);
+    const unitPrice = unitMarkup === null ? null : cents(unitCost + unitMarkup);
+    const total = unitPrice === null ? null : cents(unitPrice * line.quantity);
     return {
-      rfqId: m.rfqId, rfqNumber: rfq?.number ?? m.rfqId, rfqStatus: rfq?.status ?? 'CANCELLED', description: rfq?.description ?? null,
-      supplierId: m.supplierId, supplier: findSupplier(m.supplierId)?.name ?? m.supplierId,
-      currency: now?.currency ?? m.currency, quoteTotal: now?.total ?? m.quoteTotal, amount: now?.amount ?? m.amount, unpricedLines: live?.unpricedLines ?? 0,
-      recommendedSupplier: recommendedId ? { id: recommendedId, name: findSupplier(recommendedId)?.name ?? recommendedId } : null,
-      recommended: recommendedId === null || recommendedId === m.supplierId,
-      unusable: draft && !usable,
+      id: line.id, lineNo: line.lineNo, equipment: line.equipment, details: line.details, quantity: line.quantity, markupPercent: line.markupPercent ?? null, labour, materials, otherCosts,
+      sums: { labourTotal, material, other, unitCost, unitMarkup, total },
+      totals: { quantity: line.quantity, markupPercent: markupPercent === null ? null : String(markupPercent), labour: labourTotal.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), unitCost: unitCost.toFixed(2), unitMarkup: fixed(unitMarkup), unitPrice: fixed(unitPrice), total: fixed(total) },
     };
   });
-  const labour = r.labour.map((l) => ({ ...l, total: cents(Number(l.hours) * Number(l.hourlyRate)).toFixed(2) }));
   const vatRate = Number(r.vatRate ?? MOCK_SETTINGS['purchaseOrders.vatRate']?.value ?? 15);
-  const labourTotal = labour.reduce((sum, l) => sum + Number(l.total), 0);
-  const material = materials.reduce((sum, m) => sum + Number(m.amount), 0);
-  const cost = cents(labourTotal + material);
-  const markupPercent = r.markupPercent === null ? null : Number(r.markupPercent);
-  const markup = markupPercent === null ? null : cents((cost * markupPercent) / 100);
-  const equipment = markup === null ? null : cents(cost + markup);
+  const sum = (pick: (s: (typeof lines)[number]['sums']) => number) => cents(lines.reduce((s, l) => s + pick(l.sums) * l.quantity, 0));
+  // Priced once every line has a markup, its own or the job's.
+  const priced = lines.every((l) => l.sums.unitMarkup !== null);
+  const markup = priced ? sum((s) => s.unitMarkup!) : null;
+  const equipment = priced ? cents(lines.reduce((s, l) => s + l.sums.total!, 0)) : null;
   const delivery = Number(r.deliveryPrice);
   const totalExVat = equipment === null ? null : cents(equipment + delivery);
   const vat = totalExVat === null ? null : cents((totalExVat * vatRate) / 100);
-  const fixed = (n: number | null) => (n === null ? null : n.toFixed(2));
   const copy: Partial<MockSalesRfq> = { ...r };
   delete copy.history;
   const person = (on: string | null) => (on ? { id: 'mock-sales', name: MOCK_ACTOR_NAMES['u-admin'] } : null);
@@ -647,25 +674,39 @@ function salesRfqView(r: MockSalesRfq) {
     createdById: null, submittedById: null,
     createdBy: { id: 'mock-sales', name: MOCK_ACTOR_NAMES['u-admin'] },
     submittedBy: person(r.submittedAt), approvedBy: person(r.approvedAt), returnedBy: person(r.returnedAt), cancelledBy: person(r.cancelledAt),
-    labour, materials,
+    equipment: r.equipmentLines[0]?.equipment ?? null,
+    equipmentLines: lines.map(({ sums: _sums, ...l }) => l),
     totals: {
-      labour: cents(labourTotal).toFixed(2), material: cents(material).toFixed(2), cost: cost.toFixed(2), markup: fixed(markup), equipment: fixed(equipment),
+      labour: sum((s) => s.labourTotal).toFixed(2), material: sum((s) => s.material).toFixed(2), other: sum((s) => s.other).toFixed(2), cost: sum((s) => s.unitCost).toFixed(2),
+      markup: fixed(markup), equipment: fixed(equipment),
       delivery: delivery.toFixed(2), totalExVat: fixed(totalExVat), vatRate: String(vatRate), vat: fixed(vat), totalIncVat: totalExVat === null || vat === null ? null : (cents(totalExVat + vat)).toFixed(2),
     },
   };
 }
 
 /**
- * Sales RFQs, as sales-rfq.service.ts: one piece of equipment priced from labour
- * at the listed rates and the project's approved orders, with the markup, then
- * submitted, approved or sent back by the Director, or cancelled.
+ * Sales RFQs, as sales-rfq.service.ts: one or more equipment lines, each priced
+ * from labour at the listed rates, the project's Procurement quotes and other
+ * costs, with the markup, times its quantity; then submitted, approved or sent
+ * back by the Director, or cancelled.
  */
 function routeSalesRfq(method: string, p: string, qs: Record<string, string>, body: unknown): unknown {
-  type Body = Partial<Record<'equipment' | 'description' | 'notes' | 'clientName' | 'clientAddress' | 'contactName' | 'clientReference' | 'paymentTerms' | 'validity' | 'deliveryDuration' | 'deliveryTerms' | 'signerPhone' | 'signerEmail', string | null>> & {
-    projectNumber?: string; penaltiesApply?: boolean; markupPercent?: number | null; deliveryPrice?: number; closingDate?: string | null;
-    labour?: Array<{ labourRateId: string; hours: number }>; materials?: Array<{ rfqId: string; supplierId: string }>; reason?: string;
+  type LineBody = {
+    equipment?: string | null; details?: string | null; quantity?: number; markupPercent?: number | null;
+    labour?: Array<{ labourRateId: string; hours: number }>; materials?: Array<{ rfqId: string; supplierId: string }>;
+    otherCosts?: Array<{ description: string; quantity: number; unitCost: number }>;
   };
-  const TEXT = ['equipment', 'description', 'notes', 'clientName', 'clientAddress', 'contactName', 'clientReference', 'paymentTerms', 'validity', 'deliveryDuration', 'deliveryTerms', 'signerPhone', 'signerEmail'] as const;
+  type Body = Partial<Record<'description' | 'notes' | 'quoteNotes' | 'clientName' | 'clientAddress' | 'contactName' | 'clientReference' | 'paymentTerms' | 'validity' | 'deliveryDuration' | 'deliveryTerms' | 'signerPhone' | 'signerEmail', string | null>> & {
+    projectNumber?: string; penaltiesApply?: boolean; markupPercent?: number | null; deliveryPrice?: number; closingDate?: string | null;
+    equipmentLines?: LineBody[]; reason?: string;
+  };
+  const TEXT = ['description', 'notes', 'quoteNotes', 'clientName', 'clientAddress', 'contactName', 'clientReference', 'paymentTerms', 'validity', 'deliveryDuration', 'deliveryTerms', 'signerPhone', 'signerEmail'] as const;
+  /** The address, remarks and details keep their lines, as the server keeps them. */
+  const lines = (v: string | null | undefined) => {
+    const kept = (v ?? '').split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    return kept.length ? kept.join('\n') : null;
+  };
+  const cleanField = (k: (typeof TEXT)[number], v: string | null | undefined) => (k === 'clientAddress' || k === 'notes' || k === 'quoteNotes' ? lines(v) : rfqText(v));
   const b = (body ?? {}) as Body;
   const now = new Date().toISOString();
   const entry = (action: string, after: Record<string, unknown>) => ({ id: nextId('audit'), action, actorId: 'u-admin', before: null, after, createdAt: now });
@@ -682,14 +723,40 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     }, 0);
     return `${prefix}${String(highest + 1).padStart(2, '0')}`;
   };
-  const labourRows = (lines: NonNullable<Body['labour']>, had: MockSalesRfq['labour']) => lines.map((l, i) => {
+  type KeptLabour = MockSalesRfq['equipmentLines'][number]['labour'];
+  const labourRows = (rows: NonNullable<LineBody['labour']>, had: KeptLabour, on: string) => rows.map((l, i) => {
     const rate = state.labourRates.find((r) => r.id === l.labourRateId);
-    if (!rate) throw err('VALIDATION_ERROR', `Labour line ${i + 1}: that role isn't on the rates list`);
+    if (!rate) throw err('VALIDATION_ERROR', `${on}Labour line ${i + 1}: that role isn't on the rates list`);
     const kept = had.find((h) => h.labourRateId === rate.id);
-    if (!rate.active && !kept) throw err('VALIDATION_ERROR', `Labour line ${i + 1}: ${rate.role} is no longer used. Choose another role, or ask the Workshop Manager to make it active again.`);
-    if (!(l.hours > 0) || Math.abs(l.hours * 100 - Math.round(l.hours * 100)) > 1e-6) throw err('VALIDATION_ERROR', `Labour line ${i + 1} needs its hours, more than 0`);
-    return { id: nextId('srfql'), lineNo: i + 1, labourRateId: rate.id, role: rate.active ? rate.role : kept!.role, hours: String(l.hours), hourlyRate: rate.active ? rate.hourlyRate : kept!.hourlyRate };
+    if (!rate.active && !kept) throw err('VALIDATION_ERROR', `${on}Labour line ${i + 1}: ${rate.role} is no longer used. Choose another role, or ask the Workshop Manager to make it active again.`);
+    if (!(l.hours > 0) || Math.abs(l.hours * 100 - Math.round(l.hours * 100)) > 1e-6) throw err('VALIDATION_ERROR', `${on}Labour line ${i + 1} needs its hours, more than 0`);
+    return { id: nextId('srfql'), lineNo: 0, labourRateId: rate.id, role: rate.active ? rate.role : kept!.role, hours: String(l.hours), hourlyRate: rate.active ? rate.hourlyRate : kept!.hourlyRate };
   });
+  /** The lines as kept, labour and other costs numbered through the whole Sales RFQ, each RFQ's quote on one line only. */
+  const lineRows = (input: LineBody[], had: KeptLabour, projectNumber: string): MockSalesRfq['equipmentLines'] => {
+    if (input.length === 0) throw err('VALIDATION_ERROR', 'A Sales RFQ has at least one equipment line');
+    const allPicks = input.flatMap((l) => l.materials ?? []);
+    if (new Set(allPicks.map((m) => m.rfqId)).size !== allPicks.length) throw err('VALIDATION_ERROR', 'Pick one quote on each request for quotation, on one equipment line');
+    let labourNo = 0;
+    let otherNo = 0;
+    return input.map((l, i) => {
+      const on = input.length > 1 ? `Equipment line ${i + 1}: ` : '';
+      const quantity = l.quantity ?? 1;
+      if (!Number.isInteger(quantity) || quantity < 0) throw err('VALIDATION_ERROR', `${on}the quantity is a whole number, 0 or more (0 prices it without charging it)`);
+      return {
+        id: nextId('srfqe'), lineNo: i + 1, equipment: rfqText(l.equipment), details: lines(l.details), quantity,
+        markupPercent: l.markupPercent === null || l.markupPercent === undefined ? null : String(l.markupPercent),
+        labour: labourRows(l.labour ?? [], had, on).map((x) => ({ ...x, lineNo: ++labourNo })),
+        materials: materialRows(l.materials ?? [], projectNumber),
+        otherCosts: (l.otherCosts ?? []).map((c, j) => {
+          const description = rfqText(c.description);
+          if (!description) throw err('VALIDATION_ERROR', `${on}Other cost ${j + 1} needs a description, e.g. Accommodation`);
+          if (!(c.quantity > 0) || !(c.unitCost > 0)) throw err('VALIDATION_ERROR', `${on}Other cost ${j + 1}: the quantity and unit cost are more than 0`);
+          return { id: nextId('srfqo'), lineNo: ++otherNo, description, quantity: String(c.quantity), unitCost: String(c.unitCost) };
+        }),
+      };
+    });
+  };
   const materialRows = (picks: Array<{ rfqId: string; supplierId: string }>, projectNumber: string) => {
     if (new Set(picks.map((m) => m.rfqId)).size !== picks.length) throw err('VALIDATION_ERROR', 'Pick one quote on each request for quotation');
     return picks.map((m) => {
@@ -723,7 +790,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
           const value = mockQuoteValue(r, q.supplierId);
           return value ? [{ supplierId: q.supplierId, supplier: findSupplier(q.supplierId)?.name ?? q.supplierId, ...value, recommended: r.recommendedSupplierId === q.supplierId }] : [];
         }),
-        salesRfqs: state.salesRfqs.filter((s) => s.status !== 'CANCELLED' && s.materials.some((m) => m.rfqId === r.id)).map((s) => ({ id: s.id, number: s.number })),
+        salesRfqs: state.salesRfqs.filter((s) => s.status !== 'CANCELLED' && s.equipmentLines.some((l) => l.materials.some((m) => m.rfqId === r.id))).map((s) => ({ id: s.id, number: s.number })),
       }));
   }
   if (method === 'POST' && p === '/sales-rfqs') {
@@ -731,11 +798,11 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     assertProjectOpen(b.projectNumber);
     checkMoney(b.markupPercent, b.deliveryPrice);
     const project = state.projects.find((x) => x.projectNumber === b.projectNumber);
-    const text = (k: (typeof TEXT)[number], fallback: string | null = null) => (b[k] === undefined ? fallback : rfqText(b[k]));
+    const text = (k: (typeof TEXT)[number], fallback: string | null = null) => (b[k] === undefined ? fallback : cleanField(k, b[k]));
     const clientName = text('clientName', rfqText(project?.client ?? null));
     const created: MockSalesRfq = {
       id: nextId('srfq'), number: number(b.projectNumber), quoteReference: null, status: 'DRAFT', projectNumber: b.projectNumber,
-      equipment: text('equipment'), description: text('description', rfqText(project?.name ?? null)), notes: text('notes'), penaltiesApply: b.penaltiesApply ?? false,
+      description: text('description', rfqText(project?.name ?? null)), notes: text('notes'), quoteNotes: text('quoteNotes'), penaltiesApply: b.penaltiesApply ?? false,
       markupPercent: b.markupPercent === null || b.markupPercent === undefined ? null : String(b.markupPercent), deliveryPrice: String(b.deliveryPrice ?? 0), vatRate: null,
       clientName, clientAddress: text('clientAddress'), contactName: text('contactName'), clientReference: text('clientReference'),
       paymentTerms: text('paymentTerms', '30 days from invoice date.'), validity: text('validity', '30 days from issue of quotation.'),
@@ -743,7 +810,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
       signerPhone: text('signerPhone'), signerEmail: text('signerEmail', 'admin@afrinov.local'),
       issuedAt: null, closingDate: b.closingDate ? `${b.closingDate}T00:00:00.000Z` : null, createdAt: now, updatedAt: now,
       submittedAt: null, approvedAt: null, returnedAt: null, returnReason: null, cancelledAt: null, cancellationReason: null,
-      labour: labourRows(b.labour ?? [], []), materials: materialRows(b.materials ?? [], b.projectNumber), history: [],
+      equipmentLines: lineRows(b.equipmentLines ?? [{}], [], b.projectNumber), history: [],
     };
     created.history.push(entry('CREATE', { number: created.number }));
     state.salesRfqs.push(created);
@@ -765,26 +832,32 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     if (moved) assertProjectOpen(moved);
     const projectNumber = moved ?? rfq.projectNumber;
     const next: MockSalesRfq = { ...rfq, updatedAt: now, projectNumber, number: moved ? number(moved) : rfq.number };
-    for (const k of TEXT) if (b[k] !== undefined) next[k] = rfqText(b[k]);
+    for (const k of TEXT) if (b[k] !== undefined) next[k] = cleanField(k, b[k]);
     if (b.penaltiesApply !== undefined) next.penaltiesApply = b.penaltiesApply;
     if (b.markupPercent !== undefined) next.markupPercent = b.markupPercent === null ? null : String(b.markupPercent);
     if (b.deliveryPrice !== undefined) next.deliveryPrice = String(b.deliveryPrice);
     if (b.closingDate !== undefined) next.closingDate = b.closingDate ? `${b.closingDate}T00:00:00.000Z` : null;
-    if (b.labour !== undefined) next.labour = labourRows(b.labour, rfq.labour);
-    if (b.materials !== undefined || moved) next.materials = materialRows(b.materials ?? (moved ? [] : rfq.materials.map((m) => ({ rfqId: m.rfqId, supplierId: m.supplierId }))), projectNumber);
+    if (b.equipmentLines !== undefined) next.equipmentLines = lineRows(b.equipmentLines, rfq.equipmentLines.flatMap((l) => l.labour), projectNumber);
+    else if (moved) next.equipmentLines = rfq.equipmentLines.map((l) => ({ ...l, materials: [] }));
     next.history = [...rfq.history, entry('UPDATE', Object.fromEntries(Object.keys(b).map((k) => [k, (b as Record<string, unknown>)[k]])))];
     return save(next);
   }
   if (method === 'POST' && p === `${base}/submit`) {
     if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `${rfq.number} is ${words[rfq.status]}, so it can't be submitted`);
+    const one = rfq.equipmentLines.length === 1;
     const missing = [
-      !rfq.equipment && 'the equipment being quoted', !rfq.clientName && "the client's name", rfq.markupPercent === null && 'the markup',
-      rfq.labour.length === 0 && rfq.materials.length === 0 && 'labour or a quote to cost',
+      ...rfq.equipmentLines.flatMap((l) => [
+        !l.equipment && (one ? 'the equipment being quoted' : `the equipment on line ${l.lineNo}`),
+        l.labour.length === 0 && l.materials.length === 0 && l.otherCosts.length === 0 && (one ? 'labour, a quote or another cost to price' : `labour, a quote or another cost on line ${l.lineNo}`),
+      ]),
+      rfq.equipmentLines.length > 0 && rfq.equipmentLines.every((l) => l.quantity === 0) && (one ? 'a quantity of 1 or more' : 'a quantity of 1 or more on at least one line'),
+      !rfq.clientName && "the client's name",
+      rfq.markupPercent === null && rfq.equipmentLines.some((l) => l.markupPercent === null) && 'the markup',
     ].filter((m): m is string => !!m);
     if (missing.length) throw err('VALIDATION_ERROR', `Before submitting ${rfq.number}, add ${missing.join(', ')}.`);
-    const materials = materialRows(rfq.materials.map((m) => ({ rfqId: m.rfqId, supplierId: m.supplierId })), rfq.projectNumber);
+    const equipmentLines = rfq.equipmentLines.map((l) => ({ ...l, materials: materialRows(l.materials.map((m) => ({ rfqId: m.rfqId, supplierId: m.supplierId })), rfq.projectNumber) }));
     const vatRate = String(Number(MOCK_SETTINGS['purchaseOrders.vatRate']?.value ?? 15));
-    const next = { ...rfq, status: 'PENDING_APPROVAL' as const, updatedAt: now, submittedAt: now, vatRate, materials, returnedAt: null, returnReason: null };
+    const next = { ...rfq, status: 'PENDING_APPROVAL' as const, updatedAt: now, submittedAt: now, vatRate, equipmentLines, returnedAt: null, returnReason: null };
     return save({ ...next, history: [...rfq.history, entry('SALES_RFQ_SUBMIT', { status: 'PENDING_APPROVAL', totalExVat: salesRfqView(next).totals.totalExVat })] });
   }
   if (method === 'POST' && p === `${base}/approve`) {
@@ -1369,6 +1442,14 @@ function route(method: string, path: string, body?: unknown): unknown {
         inventoryCount: balances.filter((b) => b.locationId === l.id).length,
       }));
   }
+  // System audit A1: stock on it keeps a location open (tools out are kept on the server's list only).
+  if (method === 'GET' && /^\/locations\/[^/]+\/deactivation-check$/.test(p)) {
+    const id = p.split('/')[2]!;
+    if (!findLocation(id)) throw err('NOT_FOUND', 'Location not found');
+    const blockers = computeBalances().filter((b) => b.locationId === id && Number(b.quantity) !== 0)
+      .map((b) => ({ kind: 'STOCK', text: `${b.quantity} of ${findMaterial(b.materialId)?.sku ?? b.materialId}` }));
+    return { blockers };
+  }
   if (method === 'GET' && p.startsWith('/locations/')) {
     const id = p.slice('/locations/'.length);
     const l = findLocation(id);
@@ -1413,7 +1494,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!l) throw err('NOT_FOUND', 'Location not found');
     const b = body as { active?: boolean };
     if (typeof b?.active !== 'boolean') throw err('VALIDATION_ERROR', 'active is required');
-    if (!b.active && l.active) mockAssertNoActiveChildren(l);
+    if (!b.active && l.active) {
+      mockAssertNoActiveChildren(l);
+      if (computeBalances().some((x) => x.locationId === id && Number(x.quantity) !== 0)) throw err('CONFLICT', `${l.name} is not clear yet: stock is still on it.`);
+    }
     if (b.active && !l.active) mockAssertRoomActive(l.name, l.parentId);
     l.active = b.active;
     l.updatedAt = new Date().toISOString();
@@ -1723,43 +1807,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!state.purchaseOrders.some((x) => x.id === id)) throw err('NOT_FOUND', 'Purchase order not found');
     throw err('VALIDATION_ERROR', DELIVERY_IS_RECEIVED);
   }
-  if (method === 'POST' && p.endsWith('/receive')) {
+  // As the server (system audit D3): retired, as every delivery is counted in on Receive stock.
+  if (method === 'POST' && /^\/purchase-orders\/[^/]+\/receive$/.test(p)) {
     const id = p.slice('/purchase-orders/'.length, -'/receive'.length);
-    const po = state.purchaseOrders.find((x) => x.id === id);
-    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive from ${po.status}`);
-    const b = (body as { locationId?: string; deliveryNotes?: string }) ?? {};
-    if (!b.locationId) throw err('VALIDATION_ERROR', 'locationId is required');
-    if (!state.locations.find((l) => l.id === b.locationId)) throw err('NOT_FOUND', 'Location not found');
-    const before = { status: po.status };
-    po.status = 'RECEIVED';
-    po.deliveredAt = new Date().toISOString();
-    po.deliveredBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
-    po.deliveryNotes = b.deliveryNotes ?? null;
-    for (const line of po.lines) {
-      const orderedQty = Number(line.orderedQty);
-      const alreadyReceived = Number(line.receivedQty);
-      const toReceive = orderedQty - alreadyReceived;
-      line.receivedQty = String(orderedQty);
-      if (toReceive > 0) {
-        state.transactions.push({
-          id: nextId('tx'),
-          materialId: line.materialId,
-          locationId: b.locationId,
-          quantity: String(toReceive),
-          type: 'RECEIPT',
-          reasonCode: 'PO_RECEIPT',
-          referenceType: 'PurchaseOrder',
-          referenceId: po.id,
-          postedAt: new Date().toISOString(),
-          actorId: 'u-admin',
-          heldForProject: po.projectNumber ?? undefined,
-        });
-      }
-    }
-    po.history = po.history ?? [];
-    po.history.push({ id: nextId('audit'), action: 'PO_RECEIVE', actorId: 'u-admin', before, after: { status: po.status, locationId: b.locationId }, createdAt: new Date().toISOString() });
-    return po;
+    if (!state.purchaseOrders.some((x) => x.id === id)) throw err('NOT_FOUND', 'Purchase order not found');
+    throw err('VALIDATION_ERROR', RECEIVE_ON_RECEIVE_STOCK);
   }
   if (method === 'POST' && p.endsWith('/close')) {
     const id = p.slice('/purchase-orders/'.length, -'/close'.length);
@@ -2096,12 +2148,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     return handleReversal(reversalMatch[1]!, body as { reason?: string } | undefined);
   }
 
-  if (method === 'POST' && p === '/stock-items') {
-    return handleStockItemCreate(body as {
-      sku: string; name: string; category: string; description?: string; unitOfMeasure: string;
-      requiredStock?: number; unitCost?: number; initialQuantity?: number; locationId?: string; supplierId?: string;
-    });
-  }
+  // As the server (system audit D3): retired. The item is added on Materials and its stock received on Receive stock.
+  if (method === 'POST' && p === '/stock-items') throw err('VALIDATION_ERROR', STOCK_ITEMS_RETIRED);
 
   // Proof of receipt (mockReceipts.ts): confirming a slip, and counter PINs.
   const receipts = routeReceipts(method, p, body, {
@@ -2253,6 +2301,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (q) list = list.filter((p) => `${p.projectNumber} ${p.name} ${p.code ?? ''} ${p.client ?? ''}`.toLowerCase().includes(q));
     return list;
   }
+  // System audit E1: open orders keep a project open (the server also counts RFQs, tool loans and write-offs).
+  if (method === 'GET' && /^\/projects\/[^/]+\/closing-check$/.test(p)) {
+    return { blockers: mockOpenOrdersFor(decodeURIComponent(p.split('/')[2]!)) };
+  }
   if (method === 'GET' && p.startsWith('/projects/')) {
     const projectNumber = decodeURIComponent(p.slice('/projects/'.length));
     return state.projects.find((p) => p.projectNumber === projectNumber) ?? null;
@@ -2298,12 +2350,19 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.startDate !== undefined && b.startDate && proj.endDate && new Date(proj.endDate) < new Date(b.startDate)) {
       throw err('VALIDATION_ERROR', 'End date cannot be earlier than start date');
     }
+    // As the server (system audit E1): not closed while its orders are open.
+    if ((b.status === 'COMPLETED' || b.status === 'CANCELLED') && proj.status !== b.status) {
+      const open = mockOpenOrdersFor(projectNumber);
+      if (open.length > 0) throw err('INVALID_STATE', `Project ${projectNumber} can't be closed yet: ${open.map((o) => o.text).join('; ')}.`);
+    }
     // As the server (ADR-032): a job is completed when every schedule is done or cancelled.
     if (b.status === 'COMPLETED' && proj.status !== 'COMPLETED') {
       const open = mockOpenSchedules(projectNumber);
       if (open > 0) throw err('INVALID_STATE', `This project has ${open} open schedule${open === 1 ? '' : 's'}: finish or cancel ${open === 1 ? 'it' : 'them'} before marking the project Completed.`);
     }
     Object.assign(proj, b);
+    // Status decides whether it is active (system audit E2).
+    if (b.status) proj.active = b.status !== 'COMPLETED' && b.status !== 'CANCELLED';
     proj.updatedAt = new Date().toISOString();
     return proj;
   }
@@ -2424,6 +2483,8 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/settings') {
     return Object.values(MOCK_SETTINGS);
   }
+  // As the server (system audit F5): the demo's recipients aren't linked to accounts, so nobody issues to themselves.
+  if (method === 'GET' && p === '/reports/self-issued') return { days: 30, slips: [] };
   if (method === 'GET' && p === '/settings/values') {
     // `p` is the path with the query string already stripped (see
     // `route()` above). Parse the query from the original `path`
@@ -2437,6 +2498,14 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
     return out;
   }
+  // As the server (system audit C10): what resetting one section would change.
+  if (method === 'GET' && p.startsWith('/settings/reset-preview')) {
+    const category = parseQuery(p)['category'];
+    const defs = Object.values(MOCK_SETTINGS).filter((d) => d.category === category && d.isEditable !== false);
+    if (defs.length === 0) throw err('NOT_FOUND', 'Settings section not found');
+    return defs.filter((d) => JSON.stringify(d.value) !== JSON.stringify(d.defaultValue))
+      .map((d) => ({ key: d.key, description: d.description, from: d.value, to: d.defaultValue }));
+  }
   if (method === 'GET' && p.startsWith('/settings/')) {
     const key = p.slice('/settings/'.length);
     if (key in MOCK_SETTINGS) return MOCK_SETTINGS[key];
@@ -2446,42 +2515,54 @@ function route(method: string, path: string, body?: unknown): unknown {
     const key = p.slice('/settings/'.length);
     const def = MOCK_SETTINGS[key];
     if (!def) throw err('NOT_FOUND', 'Setting not found');
-    const b = body as { value: unknown };
+    const b = body as { value: unknown; reason?: string };
     const validated = validateMockSetting(key, b.value);
     if (validated.error) throw err('VALIDATION_ERROR', validated.error);
+    const why = mockSwitchOffReason(key, def.value, validated.value, b.reason);
     const before = { value: def.value };
     def.value = validated.value;
     def.updatedAt = new Date().toISOString();
     def.updatedById = 'u-admin';
-    MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value }, createdAt: new Date().toISOString(), actorId: 'user-1' });
+    MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value, ...(why ? { reason: why } : {}) }, createdAt: new Date().toISOString(), actorId: 'user-1' });
     return def;
   }
   if (method === 'PATCH' && p === '/settings') {
-    const b = body as { updates: Record<string, unknown> };
+    const b = body as { updates: Record<string, unknown>; reason?: string };
     if (!b?.updates || typeof b.updates !== 'object') throw err('VALIDATION_ERROR', 'updates is required');
+    // Checked for every key first, so a refusal changes nothing, as the server's transaction.
+    for (const [key, raw] of Object.entries(b.updates)) {
+      const def = MOCK_SETTINGS[key];
+      if (def) mockSwitchOffReason(key, def.value, validateMockSetting(key, raw).value, b.reason);
+    }
     const out: MockSetting[] = [];
     for (const [key, raw] of Object.entries(b.updates)) {
       const def = MOCK_SETTINGS[key];
       if (!def) throw err('NOT_FOUND', `Setting ${key} not found`);
       const validated = validateMockSetting(key, raw);
       if (validated.error) throw err('VALIDATION_ERROR', `${key}: ${validated.error}`);
+      const why = mockSwitchOffReason(key, def.value, validated.value, b.reason);
       const before = { value: def.value };
       def.value = validated.value;
       def.updatedAt = new Date().toISOString();
       def.updatedById = 'u-admin';
-      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_BULK_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value }, createdAt: new Date().toISOString(), actorId: 'user-1' });
+      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_BULK_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value, ...(why ? { reason: why } : {}) }, createdAt: new Date().toISOString(), actorId: 'user-1' });
       out.push({ ...def });
     }
     return out;
   }
+  // One section at a time, as the server (system audit C10).
   if (method === 'POST' && p === '/settings/reset') {
-    for (const def of Object.values(MOCK_SETTINGS)) {
+    const category = (body as { category?: string } | undefined)?.category;
+    const defs = Object.values(MOCK_SETTINGS).filter((d) => d.category === category && d.isEditable !== false);
+    if (!category || defs.length === 0) throw err('VALIDATION_ERROR', 'Name the settings section to reset');
+    const changed = defs.filter((d) => JSON.stringify(d.value) !== JSON.stringify(d.defaultValue));
+    for (const def of changed) {
       def.value = def.defaultValue;
       def.updatedAt = new Date().toISOString();
       def.updatedById = 'u-admin';
-      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_RESET', entityType: 'Setting', entityId: def.key, before: { value: def.value }, after: { value: def.value, reset: true }, createdAt: new Date().toISOString(), actorId: 'user-1' });
+      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_RESET', entityType: 'Setting', entityId: def.key, before: { value: def.value }, after: { value: def.value, reset: true, section: category }, createdAt: new Date().toISOString(), actorId: 'user-1' });
     }
-    return Object.values(MOCK_SETTINGS);
+    return changed;
   }
 
   // ── Audit log ─────────────────────────────────────────────────────────
@@ -2679,56 +2760,6 @@ function devUser(): MockUser {
   };
 }
 
-function handleStockItemCreate(b: {
-  sku: string; name: string; category: string; description?: string; unitOfMeasure: string;
-  requiredStock?: number; unitCost?: number; initialQuantity?: number; locationId?: string; supplierId?: string;
-}): { material: MockMaterial; initialTransactionId: string | null } {
-  if (!b.sku || !b.name || !b.category || !b.unitOfMeasure) {
-    throw err('VALIDATION_ERROR', 'SKU, name, category and unit of measure are required');
-  }
-  if (state.materials.some((m) => m.sku === b.sku)) {
-    throw err('CONFLICT', `An item with this SKU already exists.`);
-  }
-  const qty = b.initialQuantity ?? 0;
-  if (qty < 0) throw err('VALIDATION_ERROR', 'Initial quantity cannot be negative');
-  if (qty > 0 && !b.locationId) throw err('VALIDATION_ERROR', 'A location is required when an initial quantity is supplied');
-  const loc = b.locationId ? findLocation(b.locationId) : null;
-  if (b.locationId && !loc) throw err('NOT_FOUND', 'Location not found');
-  if (loc && !loc.active) throw err('VALIDATION_ERROR', 'Location is inactive');
-
-  const created: MockMaterial = {
-    id: nextId('mat'),
-    sku: b.sku,
-    name: b.name,
-    description: b.description,
-    category: b.category as MockMaterial['category'],
-    unitOfMeasure: mockUnitCode(b.unitOfMeasure),
-    requiredStock: String(b.requiredStock ?? 0),
-    unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
-    active: true,
-  };
-  state.materials.push(created);
-
-  let initialTransactionId: string | null = null;
-  if (qty > 0 && b.locationId) {
-    const txId = nextId('t');
-    state.transactions.push({
-      id: txId,
-      postedAt: new Date().toISOString(),
-      type: 'RECEIPT',
-      materialId: created.id,
-      locationId: b.locationId,
-      quantity: String(qty),
-      actorId: 'user-1',
-      referenceType: 'InitialStock',
-      referenceId: created.id,
-    });
-    initialTransactionId = txId;
-  }
-
-  return { material: created, initialTransactionId };
-}
-
 // Mirrors InventoryService.issue: one recipient (required), an optional
 // project, several lines; all-or-nothing, with repeated items checked as one total.
 interface IssueBody {
@@ -2796,10 +2827,10 @@ function handleIssue(b: IssueBody): { issueId: string; transactionIds: string[] 
   if (b.projectNumber) {
     const project = state.projects.find((x) => x.projectNumber === b.projectNumber);
     if (!project) throw err('NOT_FOUND', 'Project not found');
-    if (project.active === false) throw err('VALIDATION_ERROR', 'Project is inactive');
     if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
       throw err('VALIDATION_ERROR', `Project ${b.projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
     }
+    if (project.active === false) throw err('VALIDATION_ERROR', 'Project is inactive');
   }
   // As the server: a project's own stock goes to that project only; Stores
   // stock follows the item's rules (Project Material Through the Store Roadmap, Phase 3).
@@ -4498,4 +4529,11 @@ function dueDateChangeRow(c: State['toolLoanExtensions'][number]): MockMovementR
     returnedQuantity: null, usedUpQuantity: null, brokenQuantity: null, otherLocationName: null, returnOf: null,
     dueOn: c.dueOn, previousDueOn: dueOnBefore(loan, c.id), currentDueOn: null, daysLate: null, overdueOverrideReason: null,
   };
+}
+
+/** A project's orders still open, as the server's closing check lists them (system audit E1). */
+function mockOpenOrdersFor(projectNumber: string): Array<{ kind: string; text: string; id: string }> {
+  return state.purchaseOrders
+    .filter((po) => po.projectNumber === projectNumber && ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'].includes(po.status))
+    .map((po) => ({ kind: 'ORDER', id: po.id, text: `Order ${po.number} is ${po.status.toLowerCase().replace('_', ' ')}: close, cancel or finish receiving it` }));
 }

@@ -69,7 +69,7 @@ describe('verifyPin', () => {
 
 describe('publicRecipient', () => {
   it('drops the hash and says whether a PIN is set or locked', () => {
-    const r = { id: 'r1', name: 'S', type: 'WORKER' as const, notes: null, active: true, createdAt: new Date(), updatedAt: new Date(), pinHash: 'x', pinSetAt: new Date(), pinFailedTries: 0, pinLockedAt: null };
+    const r = { id: 'r1', name: 'S', type: 'WORKER' as const, notes: null, active: true, createdAt: new Date(), updatedAt: new Date(), pinHash: 'x', pinSetAt: new Date(), pinFailedTries: 0, pinLockedAt: null, userId: null };
     const out = publicRecipient(r);
     expect(out).not.toHaveProperty('pinHash');
     expect(out).toMatchObject({ pinSet: true, pinLocked: false });

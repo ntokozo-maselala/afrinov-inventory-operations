@@ -11,6 +11,7 @@ import {
   ledgerAndBalance,
   letAdminSign, login,
   prisma,
+  receiveOutstanding,
   requireAdminPassword,
   runId,
   secondAdmin,
@@ -315,22 +316,20 @@ describe('receiving stock over real HTTP', () => {
   });
 
   describe('receiving a whole order and closing', () => {
-    it('receive books everything outstanding once and marks the order RECEIVED', async () => {
+    it('refuses to receive the whole order in one call; Receive stock receives it, then it closes', async () => {
       const order = await approvedOrder(8);
 
-      const received = await api<PurchaseOrder>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
-      expect(received.status).toBe(200);
-      expect(received.body.status).toBe('RECEIVED');
+      const whole = await api<{ error: { message: string } }>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
+      expect(whole.status).toBe(400);
+      expect(whole.body.error.message).toMatch(/Deliveries are received on Receive stock/);
+      await expectStock('10');
+      expect((await getOrder(order.id)).status).toBe('APPROVED');
 
+      const received = await receiveOutstanding(api, order.id, locationId);
+      expect(received.status).toBe(201);
+      expect(received.body.status).toBe('POSTED');
       await expectStock('18'); // 10 from the goods receipts + 8 received
-      const ledger = await prisma.inventoryTransaction.findMany({ where: { referenceId: order.id } });
-      expect(ledger).toHaveLength(1);
-      expect(ledger[0]!.referenceType).toBe('PurchaseOrder');
-      expect(ledger[0]!.quantity.toString()).toBe('8');
-
-      const again = await api('POST', `/purchase-orders/${order.id}/receive`, { locationId });
-      expect(again.status).toBe(409);
-      await expectStock('18');
+      expect((await getOrder(order.id)).status).toBe('RECEIVED');
 
       const closed = await api<PurchaseOrder>('POST', `/purchase-orders/${order.id}/close`, {});
       expect(closed.status).toBe(200);
@@ -343,9 +342,9 @@ describe('receiving stock over real HTTP', () => {
         lines: [{ materialId, orderedQty: 3 }],
       });
       expect(draft.status).toBe(201);
-      const res = await api<{ error: { code: string } }>('POST', `/purchase-orders/${draft.body.id}/receive`, { locationId });
-      expect(res.status).toBe(409);
-      expect(res.body.error.code).toBe('INVALID_STATE');
+      const res = await receiveOutstanding(api, draft.body.id, locationId);
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
       await expectStock('18');
     });
 
@@ -550,7 +549,7 @@ describe('receiving stock over real HTTP', () => {
         const after = await api<{ signatures: unknown[] }>('GET', `/purchase-orders/${po.body.id}`);
         expect(after.body.signatures).toEqual([]);
       } finally {
-        await api('PUT', approvalKey, { value: approvalWas });
+        await api('PUT', approvalKey, { value: approvalWas, reason: 'Put back as the test found it' });
       }
     });
 
@@ -575,7 +574,7 @@ describe('receiving stock over real HTTP', () => {
         expect(view.body).toMatchObject({ exchangeRate: '18.5', randValue: '1850.00' });
       } finally {
         await api('PUT', key, { value: was });
-        await api('PUT', approvalKey, { value: approvalWas });
+        await api('PUT', approvalKey, { value: approvalWas, reason: 'Put back as the test found it' });
       }
     });
   });
@@ -708,23 +707,21 @@ describe('receiving stock over real HTTP', () => {
     // and a receipt against an order the other way round, so the two could
     // deadlock (Postgres aborted one: "deadlock detected"). Every receiving
     // path now locks the number first. With procurement on, a delivery is
-    // always against an order, so the two ways in are a receipt against an
-    // order and receiving a whole order. Twelve of each, as fewer rarely overlap.
-    it('posts receipts against orders and whole-order receipts for one item at once, none failing', async () => {
+    // always against an order, and receiving a whole order in one call is
+    // retired (system audit D3), so every delivery is a receipt against its
+    // order. Twenty-four at once, as fewer rarely overlap.
+    it('posts receipts against many orders for one item at once, none failing', async () => {
       const each = 12;
       const orders = await Promise.all(Array.from({ length: each * 2 }, () => approvedOrder(1)));
       const { ledger: before } = await ledgerAndBalance(materialId, locationId);
 
-      const results = await Promise.all([
-        ...orders.slice(0, each).map((order) => api('POST', '/goods-receipts', {
-          purchaseOrderId: order.id, supplierId,
-          lines: [{ materialId, locationId, quantity: 1, purchaseOrderLineId: order.lines[0]!.id }],
-          post: true,
-        })),
-        ...orders.slice(each).map((order) => api('POST', `/purchase-orders/${order.id}/receive`, { locationId })),
-      ]);
+      const results = await Promise.all(orders.map((order) => api('POST', '/goods-receipts', {
+        purchaseOrderId: order.id, supplierId,
+        lines: [{ materialId, locationId, quantity: 1, purchaseOrderLineId: order.lines[0]!.id }],
+        post: true,
+      })));
 
-      expect(results.map((r) => r.status)).toEqual([...Array(each).fill(201), ...Array(each).fill(200)]);
+      expect(results.map((r) => r.status)).toEqual(Array(each * 2).fill(201));
       await expectStock(String(Number(before) + each * 2));
     });
   });
@@ -909,7 +906,7 @@ describe('receiving stock over real HTTP', () => {
         expect((await manager('POST', '/purchase-orders', storesOrder())).status).toBe(403);
         expect((await manager('POST', '/purchase-orders', projectOrder())).status).toBe(403);
       } finally {
-        await api('PUT', approvalKey, { value: approvalWas });
+        await api('PUT', approvalKey, { value: approvalWas, reason: 'Put back as the test found it' });
       }
     });
 
@@ -932,7 +929,7 @@ describe('receiving stock over real HTTP', () => {
         expect(refused.body.error.message).toMatch(/^You raised this order, so someone else must sign it\. Ask .*IT Checker/);
         expect((await checker<{ status: string }>('POST', `/purchase-orders/${own.body.id}/approve`)).body.status).toBe('APPROVED');
       } finally {
-        await api('PUT', approvalKey, { value: approvalWas });
+        await api('PUT', approvalKey, { value: approvalWas, reason: 'Put back as the test found it' });
       }
     });
 
@@ -1066,16 +1063,17 @@ describe('receiving stock over real HTTP', () => {
         expect(await prisma.inventoryTransaction.count({ where: { referenceId: order.id } })).toBe(0);
       });
 
-      it('receives the rest of it whole with Receive, held for the project', async () => {
+      it('refuses to receive the rest of it whole: it is counted in on Receive stock, held for the project', async () => {
         const order = await approvedProjectOrder();
         const before = await held();
         expect((await receive(storeman, order, 1)).status).toBe(201);
-        const whole = await storeman<{ status: string }>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
-        expect(whole.status).toBe(200);
-        expect(whole.body.status).toBe('RECEIVED');
+        const whole = await storeman<{ error: { message: string } }>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
+        expect(whole.status).toBe(400);
+        expect(whole.body.error.message).toMatch(/received on Receive stock/);
+        const rest = await receiveOutstanding(storeman, order.id, locationId);
+        expect(rest.status).toBe(201);
+        expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('RECEIVED');
         expect(Number((await held()).ledger) - Number(before.ledger)).toBe(4);
-        const rest = await prisma.inventoryTransaction.findMany({ where: { referenceType: 'PurchaseOrder', referenceId: order.id } });
-        expect(rest.map((m) => [m.quantity.toString(), m.heldForProject])).toEqual([['3', projectNumber]]);
       });
 
       it('posts a receipt saved against it before, into the project\'s stock', async () => {
@@ -1119,7 +1117,7 @@ describe('receiving stock over real HTTP', () => {
           expect(created.status).toBe(201);
           const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${created.body.id}/submit`);
           if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${created.body.id}/approve`)).status).toBe(200);
-          expect((await storeman('POST', `/purchase-orders/${created.body.id}/receive`, { locationId })).status).toBe(200);
+          expect((await receiveOutstanding(storeman, created.body.id, locationId)).status).toBe(201);
         }
         const issue = (projectFor: string | undefined, heldForProject: string | null, quantity: number) =>
           storeman<{ transactionIds: string[]; error?: { message: string } }>('POST', '/inventory-issues', {
@@ -1199,7 +1197,7 @@ describe('receiving stock over real HTTP', () => {
           const po = await buyer<{ id: string }>('POST', '/purchase-orders', { supplierId, projectNumber: closing, lines: [{ materialId: rod.body.id, orderedQty: 4, unitPrice: 40 }] });
           const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${po.body.id}/submit`);
           if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${po.body.id}/approve`)).status).toBe(200);
-          expect((await storeman('POST', `/purchase-orders/${po.body.id}/receive`, { locationId })).status).toBe(200);
+          expect((await receiveOutstanding(storeman, po.body.id, locationId)).status).toBe(201);
           expect((await ledgerAndBalance(rod.body.id, locationId, closing)).balance).toBe('4');
 
           // Not while the project is open; listed with its leftovers once it is closed.
@@ -1243,7 +1241,7 @@ describe('receiving stock over real HTTP', () => {
           const po = await buyer<{ id: string }>('POST', '/purchase-orders', { supplierId, projectNumber: closing, lines: [{ materialId: bar.body.id, orderedQty: 3, unitPrice: 10 }] });
           const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${po.body.id}/submit`);
           if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${po.body.id}/approve`)).status).toBe(200);
-          expect((await storeman('POST', `/purchase-orders/${po.body.id}/receive`, { locationId })).status).toBe(200);
+          expect((await receiveOutstanding(storeman, po.body.id, locationId)).status).toBe(201);
           expect((await api('PATCH', `/projects/${closing}`, { status: 'COMPLETED' })).status).toBe(200);
 
           // Moved with no category: the item keeps what it is.

@@ -78,6 +78,8 @@ const ALL_INVENTORY_PERMS = [
   'transfer:inventory',
   'adjust:inventory',
   'reverse:inventory_transaction',
+  // The ledger is a report (system audit F6).
+  'view:reports',
 ];
 
 describe('inventory routes', () => {
@@ -107,6 +109,16 @@ describe('inventory routes', () => {
     userPermissions.set(userId, perms);
     return { authorization: `Bearer ${sign(userId)}` };
   }
+
+  // System audit F6: the ledger needs view:reports, and who lost what more.
+  describe('reading the ledger', () => {
+    it('needs view:reports, and adjust or approve rights for write-offs by person', async () => {
+      const reader = authed('user-reader', ['view:reports']);
+      expect((await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions', headers: authed('user-none', []) })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions/writeoffs-by-responsible', headers: reader })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions/writeoffs-by-responsible', headers: authed('user-approver', ['view:reports', 'approve:write_off']) })).statusCode).not.toBe(403);
+    });
+  });
 
   describe('POST /api/v1/inventory-issues', () => {
     it('returns 401 when no Authorization header is supplied', async () => {

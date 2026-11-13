@@ -13,7 +13,7 @@ import { generateGRNumber, parseReceivedAt } from '../procurement/goods-receipt.
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { sectionOf } from './material-section.js';
 import { checkWholeUnits } from '../../shared/units.js';
-import { inactiveMessage } from './material-status.js';
+import { checkMaterialActive } from './inventory.service.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -138,18 +138,20 @@ export const StockReceiptService = {
       const checked = new Set<string>();
       for (const l of lines) {
         if (!checked.has(`m:${l.materialId}`)) {
-          const m = await tx.material.findUnique({ where: { id: l.materialId } });
-          if (!m) throw Errors.notFound('Material');
-          if (!m.active) throw Errors.validation(inactiveMessage(m.sku));
+          // Holds the item's row, as every path that moves stock does after its
+          // balance lock (ADR-033; system audit A5): a deactivation can't slip in.
+          const m = await checkMaterialActive(l.materialId, tx);
           // A Projects item with no project isn't issued (refuseUnassigned), so
-          // it isn't received into the store either: as /stock-items requires
-          // (Project on the Order Roadmap; Qodo, PR #131).
+          // it isn't received into the store either (Project on the Order
+          // Roadmap; Qodo, PR #131).
           if (sectionOf(m.category) === 'PROJECTS' && !m.projectNumber) {
             throw Errors.validation(`${m.sku} is project material with no project, so it isn't received into the store: stock with no project can't be issued.`);
           }
           checked.add(`m:${l.materialId}`);
         }
         if (!checked.has(`l:${l.locationId}`)) {
+          // Held as checkLocationActive does (system audit A1).
+          await tx.$executeRaw`SELECT 1 FROM locations WHERE id = ${l.locationId} FOR SHARE`;
           const loc = await tx.location.findUnique({ where: { id: l.locationId } });
           if (!loc) throw Errors.notFound('Location');
           if (!loc.active) throw Errors.validation(`Location ${loc.name} is inactive`);

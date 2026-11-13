@@ -48,7 +48,7 @@ describe('ProjectBoard', () => {
     expect(rows.map((r) => within(r).getAllByRole('link')[0]!.textContent)).toEqual(['AFRI-1086', 'AFRI-0993', 'AFRI-1119']);
     expect(within(rows[0]!).getByRole('link', { name: 'AFRI-1086' })).toHaveAttribute('href', '/projects/AFRI-1086');
     expect(within(rows[0]!).getByText('2 working days late')).toBeInTheDocument();
-    expect(within(rows[0]!).getByText('Expected 1 working day after')).toBeInTheDocument();
+    expect(within(rows[0]!).getByText('Finishing 1 working day after')).toBeInTheDocument();
     expect(within(rows[0]!).getByText('Manufacturing')).toBeInTheDocument();
     expect(within(rows[1]!).getByText('1 working day early')).toBeInTheDocument();
     expect(within(rows[2]!).getByText('Being planned')).toBeInTheDocument();

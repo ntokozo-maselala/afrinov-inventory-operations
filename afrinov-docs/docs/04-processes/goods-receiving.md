@@ -43,8 +43,9 @@ own or a project's (ADR-027).
    line by line and to a location, with the delivery note and date, as a goods
    receipt recorded and posted in one step (`POST /goods-receipts` with
    `post: true` and an `Idempotency-Key`). The order's page and Order stock
-   open Receive stock with the order chosen (`?order=<id>`). Or "receive
-   everything outstanding" with `POST /purchase-orders/:id/receive`.
+   open Receive stock with the order chosen (`?order=<id>`). Receiving
+   everything outstanding in one call (`POST /purchase-orders/:id/receive`) is
+   retired: it skipped the count of what arrived (system audit D3, ADR-039).
    A receipt with no order is refused, by `POST /stock-receipts`, by
    `POST /goods-receipts` without `purchaseOrderId`, and by posting one saved
    with no order before this rule (`POST /goods-receipts/:id/post`), all 400.
@@ -76,9 +77,9 @@ own or a project's (ADR-027).
 ## Exceptions
 - Duplicate delivery note number → warn, don't block. **Planned** — no
   duplicate check exists.
-- Material not yet in the Material master → add it from Receive stock, or
-  create it with an opening quantity in one step (`POST /stock-items`,
-  needs `create:material` and `receive:inventory`).
+- Material not yet in the Material master → add it from Receive stock, then
+  receive it. Creating an item with stock in one call (`POST /stock-items`) is
+  retired (system audit D3, ADR-039).
 
 ## Outputs
 GoodsReceipt (+ lines), InventoryTransaction(s), updated InventoryBalance,

@@ -27,7 +27,7 @@ describe('demoAuth config', () => {
   it('exposes the documented sign-in copy', async () => {
     const { SIGN_IN_TITLE, SIGN_IN_TAGLINE, SIGN_IN_SUBTITLE } = await import('./demoAuth');
     expect(SIGN_IN_TAGLINE).toBe('Welcome to your Inventory management system');
-    expect(SIGN_IN_TITLE).toBe('Sign in to Afrinov IMS');
+    expect(SIGN_IN_TITLE).toBe('Sign in to Afrinov OMS');
     expect(SIGN_IN_SUBTITLE).toBe('Access your inventory management workspace');
   });
 

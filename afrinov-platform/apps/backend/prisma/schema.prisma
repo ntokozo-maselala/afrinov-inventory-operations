@@ -37,11 +37,11 @@ enum ApprovalStep {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  name          String
-  passwordHash  String   @map("password_hash")
-  active        Boolean  @default(true)
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  name               String
+  passwordHash       String    @map("password_hash")
+  active             Boolean   @default(true)
   // Set when an Admin gives a temporary password (ADR-036): until the person
   // chooses their own, they can do nothing else.
   mustChangePassword Boolean   @default(false) @map("must_change_password")
@@ -50,9 +50,9 @@ model User {
   passwordChangedAt  DateTime? @map("password_changed_at")
   // No longer read: who signs an order goes by role and the order's value. Kept
   // so older records keep their history.
-  approvalLimit Decimal? @map("approval_limit") @db.Decimal(18, 2)
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  approvalLimit      Decimal?  @map("approval_limit") @db.Decimal(18, 2)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   roles                   UserRole[]
   settingsUpdated         Setting[]                @relation("SettingUpdatedBy")
@@ -86,6 +86,10 @@ model User {
   createdProjectSchedules ProjectSchedule[]        @relation("ProjectScheduleCreatedBy")
   assignedProjectSteps    ProjectStep[]            @relation("ProjectStepAssignee")
   capturedReceipts        ReceiptConfirmation[]    @relation("ReceiptCapturedBy")
+  costChanges             MaterialCostChange[]
+  signIns                 SignInEvent[]
+  // The recipient this person is at the counter, when they are one (system audit F5).
+  recipient               Recipient?
 
   @@map("users")
 }
@@ -198,6 +202,7 @@ model Material {
   rfqLines              RfqLine[]
   adjustmentRequests    AdjustmentRequest[]
   statusChanges         MaterialStatusChange[]
+  costChanges           MaterialCostChange[]
   project               Project?               @relation(fields: [projectNumber], references: [projectNumber])
   unit                  UnitOfMeasure          @relation(fields: [unitOfMeasure], references: [code])
 
@@ -399,21 +404,25 @@ enum RecipientType {
 // Names are unique ignoring case (index in migration 20260101000005).
 // Deactivate instead of deleting, so issue history keeps its recipient.
 model Recipient {
-  id        String        @id @default(uuid())
-  name      String
-  type      RecipientType
-  notes     String?
-  active    Boolean       @default(true)
-  createdAt DateTime      @default(now()) @map("created_at")
-  updatedAt DateTime      @updatedAt @map("updated_at")
+  id             String        @id @default(uuid())
+  name           String
+  type           RecipientType
+  notes          String?
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
   // Counter PIN (ADR-034): workers and contractors confirm what they take with
   // it. Only the bcrypt hash is kept, and it never leaves the server. Wrong
   // tries count up to inventory.receiptPinTries, then the PIN locks until a
   // store controller unlocks it.
-  pinHash        String?   @map("pin_hash")
-  pinSetAt       DateTime? @map("pin_set_at")
-  pinFailedTries Int       @default(0) @map("pin_failed_tries")
-  pinLockedAt    DateTime? @map("pin_locked_at")
+  pinHash        String?       @map("pin_hash")
+  pinSetAt       DateTime?     @map("pin_set_at")
+  pinFailedTries Int           @default(0) @map("pin_failed_tries")
+  pinLockedAt    DateTime?     @map("pin_locked_at")
+  // The user account of this person, when they have one, so a slip they issue
+  // to themselves is seen (system audit F5). One account per recipient.
+  userId         String?       @unique @map("user_id")
+  user           User?         @relation(fields: [userId], references: [id])
 
   inventoryTransactions InventoryTransaction[]
   adjustmentRequests    AdjustmentRequest[]
@@ -787,14 +796,18 @@ model SalesRfq {
   quoteReference     String?        @unique @map("quote_reference")
   status             SalesRfqStatus @default(DRAFT)
   projectNumber      String         @map("project_number")
-  // What is being priced, the quotation's one equipment line: "Main Piston Pump".
-  equipment          String?
+  // What the job is, for Sales and the Director; not on the quotation. What is
+  // priced is its equipment lines.
   description        String?
   // Remarks for Sales and the Director; not printed on the quotation.
   notes              String?
+  // This quotation's own Notes, printed under the company's (Settings), one per
+  // line: "All Flexibles to be free issued by client".
+  quoteNotes         String?        @map("quote_notes")
   penaltiesApply     Boolean        @default(false) @map("penalties_apply")
-  // The job's markup on labour and material together, as a percentage: 40 for the
-  // sheet's "× 1.4". Needed to submit, not to save a draft.
+  // The job's markup on each equipment line's labour, material and other costs,
+  // as a percentage: 40 for the sheet's "× 1.4", on every line that has none of
+  // its own. Needed to submit, unless every line has its own; not to save a draft.
   markupPercent      Decimal?       @map("markup_percent") @db.Decimal(7, 2)
   // Rand excl. VAT, without markup: the quotation's Delivery line.
   deliveryPrice      Decimal        @default(0) @map("delivery_price") @db.Decimal(18, 2)
@@ -840,40 +853,77 @@ model SalesRfq {
   approvedBy     User?                   @relation("SalesRfq_ApprovedBy", fields: [approvedById], references: [id])
   returnedBy     User?                   @relation("SalesRfq_ReturnedBy", fields: [returnedById], references: [id])
   cancelledBy    User?                   @relation("SalesRfq_CancelledBy", fields: [cancelledById], references: [id])
+  equipmentLines SalesRfqEquipmentLine[]
   labour         SalesRfqLabourLine[]
   materials      SalesRfqMaterial[]
+  otherCosts     SalesRfqOtherCost[]
 
   @@index([status])
   @@index([projectNumber])
   @@map("sales_rfqs")
 }
 
-// One role's hours on the job, priced at its selling rate when the line was saved.
-model SalesRfqLabourLine {
-  id           String  @id @default(uuid())
-  rfqId        String  @map("sales_rfq_id")
-  lineNo       Int     @map("line_no")
-  labourRateId String  @map("labour_rate_id")
-  // The role as it was named when the line was saved.
-  role         String
-  hours        Decimal @db.Decimal(10, 2)
-  // Rand per hour, excl. VAT, before markup.
-  hourlyRate   Decimal @map("hourly_rate") @db.Decimal(18, 2)
+// One line of the quotation's table, priced like the others: its own labour,
+// quotes and other costs for one unit, with the job's markup, times its
+// quantity. A Sales RFQ has at least one.
+model SalesRfqEquipmentLine {
+  id         String  @id @default(uuid())
+  salesRfqId String  @map("sales_rfq_id")
+  // The quotation's Item: 1, 2, 3, … Delivery comes after the last.
+  lineNo     Int     @map("line_no")
+  // "Installation:", "Main Piston Pump". Needed to submit.
+  equipment  String?
+  // Printed under it, one per line: "Accommodation & LOA".
+  details    String?
+  // How many; the labour, quotes and other costs are for one. 0 prints the line
+  // with its unit price and "R -", charging nothing: an item the client supplies
+  // or hasn't taken, priced for them to see (AFRI-0413 lines 3 and 4).
+  quantity   Int     @default(1)
+  // This line's markup, as a percentage, when it differs from the job's: the
+  // costing sheet marks each line up on its own (AFRI-0413: × 1.3 × 1.2 on the
+  // maintenance, × 1.35 × 1.2 on the spares, so 56 and 62). Null: the job's.
+  markupPercent Decimal? @map("markup_percent") @db.Decimal(7, 2)
 
-  rfq        SalesRfq   @relation(fields: [rfqId], references: [id], onDelete: Cascade)
-  labourRate LabourRate @relation(fields: [labourRateId], references: [id])
+  salesRfq   SalesRfq             @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
+  labour     SalesRfqLabourLine[]
+  materials  SalesRfqMaterial[]
+  otherCosts SalesRfqOtherCost[]
+
+  @@unique([salesRfqId, lineNo])
+  @@map("sales_rfq_equipment_lines")
+}
+
+// One role's hours on an equipment line, priced at its selling rate when the line was saved.
+model SalesRfqLabourLine {
+  id              String  @id @default(uuid())
+  rfqId           String  @map("sales_rfq_id")
+  equipmentLineId String  @map("equipment_line_id")
+  // Numbered through the whole Sales RFQ, in the order of its equipment lines.
+  lineNo          Int     @map("line_no")
+  labourRateId    String  @map("labour_rate_id")
+  // The role as it was named when the line was saved.
+  role            String
+  hours           Decimal @db.Decimal(10, 2)
+  // Rand per hour, excl. VAT, before markup.
+  hourlyRate      Decimal @map("hourly_rate") @db.Decimal(18, 2)
+
+  rfq           SalesRfq              @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  equipmentLine SalesRfqEquipmentLine @relation(fields: [equipmentLineId], references: [id], onDelete: Cascade)
+  labourRate    LabourRate            @relation(fields: [labourRateId], references: [id])
 
   @@unique([rfqId, lineNo])
   @@index([labourRateId])
+  @@index([equipmentLineId])
   @@map("sales_rfq_labour_lines")
 }
 
 // One Procurement RFQ's quote counted as material: one supplier's whole quote
-// per RFQ.
+// per RFQ, on one of the equipment lines.
 model SalesRfqMaterial {
-  salesRfqId String   @map("sales_rfq_id")
-  rfqId      String   @map("rfq_id")
-  supplierId String   @map("supplier_id")
+  salesRfqId      String   @map("sales_rfq_id")
+  rfqId           String   @map("rfq_id")
+  equipmentLineId String   @map("equipment_line_id")
+  supplierId      String   @map("supplier_id")
   // The quote's total excl. VAT in its own currency, and in rand at the day's
   // exchange rate: refreshed on save, fixed on submission, so what was approved
   // stays put if the quote is corrected afterwards.
@@ -882,13 +932,37 @@ model SalesRfqMaterial {
   amount     Decimal  @db.Decimal(18, 2)
   addedAt    DateTime @default(now()) @map("added_at")
 
-  salesRfq SalesRfq @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
-  rfq      Rfq      @relation(fields: [rfqId], references: [id])
-  supplier Supplier @relation(fields: [supplierId], references: [id])
+  salesRfq      SalesRfq              @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
+  equipmentLine SalesRfqEquipmentLine @relation(fields: [equipmentLineId], references: [id], onDelete: Cascade)
+  rfq           Rfq                   @relation(fields: [rfqId], references: [id])
+  supplier      Supplier              @relation(fields: [supplierId], references: [id])
 
   @@id([salesRfqId, rfqId])
   @@index([rfqId])
+  @@index([equipmentLineId])
   @@map("sales_rfq_materials")
+}
+
+// A cost on an equipment line that is neither labour nor a supplier's quote:
+// accommodation, LOA, travel, hire. Typed by Sales as quantity × unit cost, for
+// one unit of the line, before markup.
+model SalesRfqOtherCost {
+  id              String  @id @default(uuid())
+  salesRfqId      String  @map("sales_rfq_id")
+  equipmentLineId String  @map("equipment_line_id")
+  // Numbered through the whole Sales RFQ, in the order of its equipment lines.
+  lineNo          Int     @map("line_no")
+  description     String
+  quantity        Decimal @db.Decimal(12, 2)
+  // Rand excl. VAT.
+  unitCost        Decimal @map("unit_cost") @db.Decimal(18, 2)
+
+  salesRfq      SalesRfq              @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
+  equipmentLine SalesRfqEquipmentLine @relation(fields: [equipmentLineId], references: [id], onDelete: Cascade)
+
+  @@unique([salesRfqId, lineNo])
+  @@index([equipmentLineId])
+  @@map("sales_rfq_other_costs")
 }
 
 // The hourly selling rate for each role, as the sheet's Manpower Rate list (A–B),
@@ -1373,4 +1447,43 @@ model BackupRun {
 
   @@index([kind, finishedAt])
   @@map("backup_runs")
+}
+
+// A change of an item's unit cost, with why (system audit C3, ADR-039). Unit
+// cost values stock and decides whether a write-off needs someone else's
+// approval, so each change is kept and shown on the item.
+model MaterialCostChange {
+  id         String   @id @default(uuid())
+  materialId String   @map("material_id")
+  before     Decimal? @db.Decimal(18, 4)
+  after      Decimal? @db.Decimal(18, 4)
+  reason     String
+  actorId    String   @map("actor_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  material Material @relation(fields: [materialId], references: [id])
+  actor    User     @relation(fields: [actorId], references: [id])
+
+  @@index([materialId, createdAt])
+  @@map("material_cost_changes")
+}
+
+// Sign-ins and failed sign-ins, kept 12 months (system audit F3, ADR-039), so
+// an Admin can see who signed in when, and repeated wrong passwords.
+model SignInEvent {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  // As typed, lower case: kept for a failed sign-in with no such account too.
+  email     String
+  // SIGN_IN, FAILED, THROTTLED or SIGN_OUT (checked in the migration).
+  outcome   String
+  ip        String?
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("sign_in_events")
 }

@@ -13,6 +13,7 @@ import { Alert } from './Alert';
 import { Icon } from './Icon';
 import { RecipientSelect, ProjectSelect, useIssueOptions } from './IssueFields';
 import { api, type ApiError } from '../api/client';
+import { useApi } from '../hooks/useApi';
 import { formatDate, formatNumber } from '../lib/format';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, movedWay, overdueBlocks, suggestedDueOn, useLoanTerms } from '../lib/toolLoans';
@@ -235,7 +236,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
 }
 
 type Condition = 'GOOD' | 'DAMAGED' | 'LOST';
-interface Back { quantity: string; condition: Condition; note: string }
+interface Back { quantity: string; condition: Condition; note: string; /** Where it goes back to, when its own location has closed. */ locationId: string }
 
 export function CheckInForm({ tool, onCancel, onDone }: {
   tool: ToolRow;
@@ -244,7 +245,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
 }) {
   // With one loan, all of it is coming back; with several, the storeman fills in the ones that are.
   const [back, setBack] = useState<Record<string, Back>>(() => Object.fromEntries(tool.loans.map((l) => [
-    l.loanId, { quantity: tool.loans.length === 1 ? String(canComeBack(l)) : '', condition: 'GOOD' as Condition, note: '' },
+    l.loanId, { quantity: tool.loans.length === 1 ? String(canComeBack(l)) : '', condition: 'GOOD' as Condition, note: '', locationId: '' },
   ])));
   // Lost writes the tool off, which the store does, not the borrower (adjust:inventory).
   const canWriteOff = usePermissions().hasPermission('inventory:adjust');
@@ -252,6 +253,10 @@ export function CheckInForm({ tool, onCancel, onDone }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const update = (loanId: string, patch: Partial<Back>) => setBack((b) => ({ ...b, [loanId]: { ...b[loanId]!, ...patch } }));
+  // A loan whose location has closed since goes back somewhere open (system audit A2).
+  const closedFrom = tool.loans.some((l) => l.locationActive === false);
+  const openLocations = useApi<Array<{ id: string; name: string }>>(closedFrom ? '/locations?active=true' : null);
+  const needsPlace = (l: OpenLoan) => l.locationActive === false && back[l.loanId]?.condition !== 'LOST';
   const tooMany = (l: OpenLoan) => readQuantity(back[l.loanId]?.quantity ?? '') > canComeBack(l);
 
   async function submit(e: React.FormEvent) {
@@ -267,12 +272,14 @@ export function CheckInForm({ tool, onCancel, onDone }: {
     if (lines.length === 0) { setError('Enter how many came back.'); return; }
     if (lines.some(tooMany)) { setError('Some check-outs get back more than is out.'); return; }
     if (lines.some((l) => back[l.loanId]!.condition === 'LOST' && !back[l.loanId]!.note.trim())) { setError('Say what happened to a lost tool.'); return; }
+    const homeless = lines.find((l) => needsPlace(l) && !back[l.loanId]!.locationId);
+    if (homeless) { setError(`${homeless.locationName} has closed: choose where it goes back.`); return; }
     setBusy(true);
     try {
       const result = await api.post<{ heldLoanIds?: string[] }>('/tools/check-in', {
         lines: lines.map((l) => {
           const b = back[l.loanId]!;
-          return { loanId: l.loanId, quantity: readQuantity(b.quantity), condition: b.condition, note: b.note.trim() || undefined };
+          return { loanId: l.loanId, quantity: readQuantity(b.quantity), condition: b.condition, note: b.note.trim() || undefined, ...(needsPlace(l) ? { locationId: b.locationId } : {}) };
         }),
       });
       // A lost tool over the write-off limit is written off once someone else
@@ -304,7 +311,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
               <span className="text-surface-600"> · {formatNumber(Number(l.out))} out since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
               {Number(l.lostWaiting ?? 0) > 0 && <div className="text-xs text-surface-500">{formatNumber(Number(l.lostWaiting))} lost, waiting for the write-off to be approved under Write-offs to approve.</div>}
               <div><LoanDue loan={l} /></div>
-              <div className="text-xs text-surface-500">From {l.locationName}; it goes back there. Checked out by {l.checkedOutBy}.{l.note ? ` ${l.note}` : ''}</div>
+              <div className="text-xs text-surface-500">From {l.locationName}{l.locationActive === false ? ', which has closed since' : '; it goes back there'}. Checked out by {l.checkedOutBy}.{l.note ? ` ${l.note}` : ''}</div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-[6rem_10rem_1fr] gap-2 items-start">
               <Field label="Back now" htmlFor={`back-qty-${l.loanId}`} error={tooMany(l) ? 'More than out' : null}>
@@ -321,6 +328,14 @@ export function CheckInForm({ tool, onCancel, onDone }: {
                 <Input id={`back-note-${l.loanId}`} maxLength={500} value={b.note} onChange={(e) => update(l.loanId, { note: e.target.value })} placeholder={b.condition === 'DAMAGED' ? 'e.g. Chuck damaged' : undefined} />
               </Field>
             </div>
+            {needsPlace(l) && (
+              <Field label="Goes back to" htmlFor={`back-loc-${l.loanId}`} required help={`${l.locationName} has closed, so choose an open location.`}>
+                <Select id={`back-loc-${l.loanId}`} value={b.locationId} onChange={(e) => update(l.loanId, { locationId: e.target.value })}>
+                  <option value="">Choose a location</option>
+                  {(openLocations.data ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </Select>
+              </Field>
+            )}
           </fieldset>
         );
       })}

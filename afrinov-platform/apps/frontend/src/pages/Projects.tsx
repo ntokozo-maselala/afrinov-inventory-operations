@@ -9,11 +9,11 @@ import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Modal';
 import { EmptyState, ErrorState } from '../components/EmptyState';
-import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ClearFirstDialog } from '../components/ClearFirstDialog';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, useCanManageUsers } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { today } from '../lib/dates';
@@ -21,7 +21,8 @@ import { LeftoversNotice, ReceivedNotIssuedNotice } from '../components/Leftover
 import type { CurrentStockRow } from '../api/types';
 import { ClosedProjectToolsNotice, ClosingProjectTools } from '../components/ProjectToolsNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
-import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE } from '../lib/projectStatus';
+import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE, canCloseProject, isClosedProjectStatus } from '../lib/projectStatus';
+import { useAuth } from '../auth';
 import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface UserOpt { id: string; name: string }
@@ -70,9 +71,16 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
   const [startDate, setStartDate] = useState(initial?.startDate?.slice(0, 10) ?? '');
   const [endDate, setEndDate] = useState(initial?.endDate?.slice(0, 10) ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
-  const [active, setActive] = useState(initial?.active ?? true);
 
-  const users = useApi<UserOpt[]>('/users');
+  // Only an Admin may read the user list (manage:users), so only an Admin is
+  // offered the managers to choose from. Anyone else who sets up projects sees
+  // the manager as it stands, rather than a list that fails to load.
+  const canChooseManager = useCanManageUsers();
+  const users = useApi<UserOpt[]>(canChooseManager ? '/users' : null);
+  // Completing, cancelling and handing it to another manager take an Admin or
+  // its manager (system audit E3); a new project is anyone's to set up.
+  const { user } = useAuth();
+  const mayClose = !initial?.projectNumber || canCloseProject(user, initial.managerId);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -105,7 +113,6 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
         startDate: startDate ? new Date(startDate).toISOString() : undefined,
         endDate: endDate ? new Date(endDate).toISOString() : undefined,
         notes: notes.trim() || undefined,
-        active,
       };
       if (initial?.projectNumber) {
         await api.patch(`/projects/${encodeURIComponent(initial.projectNumber)}`, payload);
@@ -122,8 +129,11 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
         setValidation('A project with this code already exists.');
       } else if (e.code === 'VALIDATION_ERROR') {
         setValidation('Please correct the highlighted fields.');
+      } else if (e.code === 'INVALID_STATE') {
+        // Closing it while something still depends on it (system audit E1): the server lists what.
+        setValidation(e.message);
       } else if (e.code === 'FORBIDDEN') {
-        setValidation("You don't have permission to manage projects.");
+        setValidation(mayClose ? "You don't have permission to manage projects." : "Only an Admin or the project's manager completes, cancels or hands on a project.");
       } else {
         setValidation('We couldn\u2019t save the project. Please try again.');
       }
@@ -156,17 +166,25 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
       </Field>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Status" htmlFor="pj-status">
+        <Field label="Status" htmlFor="pj-status" help={mayClose ? undefined : 'Only an Admin or the project’s manager completes or cancels it.'}>
           <Select id="pj-status" value={status} onChange={(e) => setStatus(e.target.value as Project['status'])}>
-            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value} disabled={!mayClose && isClosedProjectStatus(o.value) && o.value !== initial?.status}>{o.label}</option>)}
           </Select>
         </Field>
-        <Field label="Project manager" htmlFor="pj-mgr" help="Optional. The user responsible for the project." error={users.error ? "Couldn't load users. Close and reopen to try again." : null}>
-          <Select id="pj-mgr" value={managerId ?? ''} onChange={(e) => setManagerId(e.target.value)}>
-            <option value="">Unassigned</option>
-            {(users.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </Select>
-        </Field>
+        {canChooseManager ? (
+          <Field label="Project manager" htmlFor="pj-mgr" help={mayClose ? 'Optional. The user responsible for the project.' : 'Only an Admin or the project’s manager hands it to another manager.'} error={users.error ? "Couldn't load users. Close and reopen to try again." : null}>
+            <Select id="pj-mgr" value={managerId ?? ''} onChange={(e) => setManagerId(e.target.value)} disabled={!mayClose}>
+              <option value="">Unassigned</option>
+              {(users.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </Select>
+          </Field>
+        ) : (
+          <Field label="Project manager" htmlFor="pj-mgr" help="An Admin assigns the project manager.">
+            <Select id="pj-mgr" value={managerId ?? ''} disabled>
+              <option value={managerId ?? ''}>{initial?.manager?.name ?? 'Unassigned'}</option>
+            </Select>
+          </Field>
+        )}
       </div>
 
       <ClosingProjectTools projectNumber={initial?.projectNumber} status={status} />
@@ -187,11 +205,6 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
       <Field label="Notes" htmlFor="pj-notes">
         <Textarea id="pj-notes" rows={2} value={notes ?? ''} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes" />
       </Field>
-
-      <div className="flex items-center gap-2">
-        <input id="pj-active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="h-4 w-4" />
-        <label htmlFor="pj-active" className="text-sm">Project is active</label>
-      </div>
 
       {validation && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
 
@@ -217,6 +230,7 @@ export function Projects() {
   // Adding, editing and archiving need manage:projects on the server.
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('projects:manage');
+  const { user } = useAuth();
   // A project's orders are Procurement's: shown to those who see project orders,
   // while procurement is on (off, the order pages aren't there: Qodo, PR #131).
   const canSeeOrders = PROCUREMENT_ENABLED && hasPermission('orders:view');
@@ -302,6 +316,7 @@ export function Projects() {
             canSeeOrders,
             onEdit: (p) => setDrawer({ mode: 'edit', project: p }),
             onArchive: (p) => setArchive(p),
+            mayClose: (p) => canCloseProject(user, p.managerId),
           })}
           emptyState={
             <EmptyState
@@ -330,15 +345,16 @@ export function Projects() {
         </Drawer>
       )}
 
+      {/* System audit E1: a project is cancelled only once nothing still depends on it. */}
       {archive && (
-        <ConfirmDialog
-          open
+        <ClearFirstDialog
           onClose={() => setArchive(null)}
           onConfirm={() => void performArchive()}
           title={`Archive project ${archive.projectNumber}?`}
-          description="Archiving marks the project inactive and sets its status to Cancelled. Historical inventory references are preserved. This action can be reversed by editing the project."
+          description="Archiving cancels the project, so it takes no more stock, tools or orders. Its history stays, and stock still held for it shows under Leftovers to move to Stores. To reopen it, change its status."
+          checkPath={`/projects/${encodeURIComponent(archive.projectNumber)}/closing-check?to=CANCELLED`}
+          blockedIntro="It can't be archived yet: deliveries, loans or write-offs would land on a cancelled job. First deal with:"
           confirmLabel="Archive"
-          destructive
           loading={archiving}
         />
       )}
@@ -359,7 +375,7 @@ function stockUsedLink(p: Project): string {
  * When `canManage` is true, add buttons that call `onEdit` or `onArchive` with the row;
  * archiving is disabled for inactive projects.
  */
-function columns({ canManage, canSeeOrders, onEdit, onArchive }: { canManage: boolean; canSeeOrders: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
+function columns({ canManage, canSeeOrders, onEdit, onArchive, mayClose }: { canManage: boolean; canSeeOrders: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void; mayClose: (p: Project) => boolean }): DataTableColumn<Project>[] {
   return [
     // A project's page holds its schedules (Project Tracking Roadmap, Phase 2).
     { key: 'num', header: 'Number', render: (p) => <Link to={`/projects/${encodeURIComponent(p.projectNumber)}`} className="font-mono btn-link">{p.projectNumber}</Link>, width: '10rem' },
@@ -380,7 +396,7 @@ function columns({ canManage, canSeeOrders, onEdit, onArchive }: { canManage: bo
       render: (p: Project) => (
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => onEdit(p)}>Edit</Button>
-          <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onArchive(p)} disabled={!p.active}>Archive</Button>
+          {mayClose(p) && <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onArchive(p)} disabled={!p.active}>Archive</Button>}
         </div>
       ),
     }] : []),

@@ -14,14 +14,14 @@ import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { InventoryService, checkAdjustment, checkRequestedAdjustment, type AdjustmentInput } from './inventory.service.js';
-import { checkWriteOff } from './write-off-limit.js';
+import { checkWriteOff, recentWriteOffQuantity } from './write-off-limit.js';
 import { requestAdjustment } from './write-off-requests.js';
 import { lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { ToolLoanService, TOOL_LOAN_REFERENCE } from './tool-loan.service.js';
 
 export type AdjustOutcome =
   | { status: 'POSTED'; transactionId: string }
-  | { status: 'PENDING_APPROVAL'; requestId: string; value: string | null; limit: string };
+  | { status: 'PENDING_APPROVAL'; requestId: string; value: string | null; limit: string; recentValue: string | null };
 
 const OWN_REQUEST = 'You asked for this adjustment, so someone else must approve it.';
 
@@ -65,13 +65,15 @@ export const WriteOffApprovalService = {
         throw Errors.invalidState(`${material.sku} here already has an adjustment waiting for approval. Approve or reject it under Write-offs to approve, then adjust again.`, { requestId: waiting.id });
       }
       const qty = await checkAdjustment(input, tx);
-      const check = await checkWriteOff(qty, material.unitCost, tx);
+      // Judged with this person's other write-offs of the item this week (system audit C2).
+      const recent = qty.isNegative() ? await recentWriteOffQuantity({ actorId: input.actorId, materialId: input.materialId }, tx) : undefined;
+      const check = await checkWriteOff(qty, material.unitCost, tx, recent);
       if (!check.needsApproval) {
         const { transactionId } = await InventoryService.adjust(input, tx);
         return { status: 'POSTED', transactionId };
       }
       const { requestId } = await requestAdjustment({ ...input, quantity: qty }, check, tx);
-      return { status: 'PENDING_APPROVAL', requestId, value: check.value?.toFixed(2) ?? null, limit: check.limit.toFixed(2) };
+      return { status: 'PENDING_APPROVAL', requestId, value: check.value?.toFixed(2) ?? null, limit: check.limit.toFixed(2), recentValue: check.recentValue?.toFixed(2) ?? null };
     });
   },
 

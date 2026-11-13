@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockGet, mockPatch, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPatch: vi.fn(), perms: { manage: true } }));
+const { mockGet, mockPatch, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPatch: vi.fn(), perms: { manage: true, cost: true } }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet, patch: mockPatch },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
@@ -10,7 +10,7 @@ vi.mock('../api/client', () => ({
 vi.mock('../hooks/usePermissions', () => ({
   useCanManageMaterials: () => perms.manage,
   useHasRole: () => perms.manage,
-  usePermissions: () => ({ hasPermission: () => perms.manage }),
+  usePermissions: () => ({ hasPermission: (p: string) => (p === 'materials:cost' ? perms.cost : perms.manage) }),
 }));
 
 const { MaterialDetail } = await import('./MaterialDetail');
@@ -70,16 +70,40 @@ describe('MaterialDetail editing', () => {
 
     fireEvent.change(screen.getByLabelText(/Required stock/), { target: { value: '40' } });
     fireEvent.change(screen.getByLabelText(/Unit cost/), { target: { value: '' } });
+    // A changed cost says why (system audit C3).
+    fireEvent.change(screen.getByLabelText(/Why the unit cost changed/), { target: { value: 'Price no longer valid' } });
     const before = { item: gets('/materials/'), stock: gets('/reports/current-stock') };
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
     expect(mockPatch).toHaveBeenCalledWith('/materials/m-1', {
-      name: 'Cutting disc', unitOfMeasure: 'each', requiredStock: 40, unitCost: null, description: 'Thin', trackUse: false,
+      name: 'Cutting disc', unitOfMeasure: 'each', requiredStock: 40, unitCost: null, unitCostReason: 'Price no longer valid', description: 'Thin', trackUse: false,
     });
     expect(await screen.findByText('DISC-115 saved')).toBeInTheDocument();
     await waitFor(() => expect(gets('/materials/')).toBeGreaterThan(before.item));
     expect(gets('/reports/current-stock')).toBeGreaterThan(before.stock);
+  });
+
+  // System audit C1: the store doesn't price what it writes off.
+  it('leaves the unit cost to Procurement and Admin, and sends none without the right', async () => {
+    perms.cost = false;
+    onTestFinished(() => { perms.cost = true; });
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText(/Unit cost/)).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Required stock/), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+    expect(mockPatch.mock.calls[0]![1]).not.toHaveProperty('unitCost');
+  });
+
+  it('asks why before saving a changed unit cost', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText(/Unit cost/), { target: { value: '15' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Say why the unit cost changed.')).toBeInTheDocument();
+    expect(mockPatch).not.toHaveBeenCalled();
   });
 
   it('sends the serial number only for a tool', async () => {

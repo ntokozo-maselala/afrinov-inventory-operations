@@ -20,6 +20,7 @@ import { prisma } from './shared/db.js';
 import { accountInDb } from './shared/authorization.js';
 import { pruneIdempotencyKeys } from './shared/idempotency.js';
 import { pruneReceiptImages } from './modules/inventory/receipt-check.js';
+import { pruneSignIns } from './modules/identity/sign-in-log.js';
 import { currentIdleSeconds, nowSeconds } from './modules/identity/session.js';
 import { authTimeOf, isIdleTooLong, signInPredatesPassword } from './modules/identity/session-policy.js';
 import { serviceName, serviceVersion } from './shared/version.js';
@@ -373,8 +374,8 @@ function loadConfigOrThrow() {
 }
 
 // What someone signed in with a temporary password may still call (ADR-036):
-// who they are, renewing the sign-in, and choosing their own password.
-const PASSWORD_CHANGE_PATHS = new Set(['/api/v1/auth/me', '/api/v1/auth/refresh', '/api/v1/auth/password']);
+// who they are, renewing the sign-in, choosing their own password, and signing out.
+const PASSWORD_CHANGE_PATHS = new Set(['/api/v1/auth/me', '/api/v1/auth/refresh', '/api/v1/auth/password', '/api/v1/auth/logout']);
 
 // Strip the query string (and any fragment) from a raw request target so
 // route-identity comparisons are not defeated by `?`-suffixes.
@@ -483,6 +484,13 @@ export async function start(): Promise<void> {
       if (removed > 0) app.log.info({ removed }, 'Removed receipt images past their keep period');
     } catch (err) {
       app.log.warn({ err: (err as Error).message }, 'Receipt image removal failed');
+    }
+    // The sign-in log past its 12 months (system audit F3).
+    try {
+      const removed = await pruneSignIns();
+      if (removed > 0) app.log.info({ removed }, 'Removed sign-in log rows past 12 months');
+    } catch (err) {
+      app.log.warn({ err: (err as Error).message }, 'Sign-in log pruning failed');
     }
   };
   void pruneKeys();

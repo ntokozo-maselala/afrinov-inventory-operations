@@ -5,11 +5,20 @@ import { requirePermission } from '../../shared/authorization.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { Errors } from '../../shared/errors.js';
 
-export const setOneSchema = z.object({ value: z.unknown() });
+/** Why a two-person check is switched off: required then (system audit C9). */
+const reasonSchema = z.string().trim().max(500).optional();
+
+export const setOneSchema = z.object({ value: z.unknown(), reason: reasonSchema });
 
 export const setManySchema = z.object({
   updates: z.record(z.string().min(1), z.unknown()),
+  reason: reasonSchema,
 });
+
+/** One section at a time (system audit C10). */
+const SECTIONS = ['general', 'inventory', 'purchase_orders', 'notifications', 'users', 'appearance', 'security', 'system', 'data', 'projects'] as const;
+export const resetSectionQuerySchema = z.object({ category: z.enum(SECTIONS) });
+export const resetSectionSchema = z.object({ category: z.enum(SECTIONS), reason: reasonSchema });
 
 function roles(req: FastifyRequest): string[] {
   const u = (req as { user?: { roles?: string[]; sub?: string; email?: string; name?: string } }).user;
@@ -54,7 +63,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid payload', details: parsed.error.flatten() } });
     }
-    return SettingsService.set(key, parsed.data.value, actorId(req));
+    return SettingsService.set(key, parsed.data.value, actorId(req), parsed.data.reason);
   });
 
   app.patch('/settings', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -64,12 +73,24 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid payload', details: parsed.error.flatten() } });
     }
-    return SettingsService.setMany(parsed.data.updates, actorId(req));
+    return SettingsService.setMany(parsed.data.updates, actorId(req), parsed.data.reason);
   });
 
+  // What resetting one section would change, to show before it is done (system audit C10).
+  app.get('/settings/reset-preview', { preHandler: [app.authenticate] }, async (req) => {
+    if (!isAdmin(roles(req))) throw Errors.forbidden('Only administrators can reset settings');
+    await requirePermission(req, PermissionCode.ManageSettings);
+    const parsed = resetSectionQuerySchema.safeParse(req.query);
+    if (!parsed.success) throw Errors.validation('Name the settings section to reset', parsed.error.flatten());
+    return SettingsService.resetPreview(parsed.data.category);
+  });
+
+  // One section back to its defaults, never every setting at once (system audit C10).
   app.post('/settings/reset', { preHandler: [app.authenticate] }, async (req) => {
     if (!isAdmin(roles(req))) throw Errors.forbidden('Only administrators can reset settings');
     await requirePermission(req, PermissionCode.ManageSettings);
-    return SettingsService.resetDefaults(actorId(req));
+    const parsed = resetSectionSchema.safeParse(req.body ?? {});
+    if (!parsed.success) throw Errors.validation('Name the settings section to reset', parsed.error.flatten());
+    return SettingsService.resetDefaults(actorId(req), parsed.data.category, parsed.data.reason);
   });
 }

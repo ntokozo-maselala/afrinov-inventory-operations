@@ -16,6 +16,8 @@ export interface CreateRecipientInput {
   name: string;
   type: RecipientType;
   notes?: string;
+  /** The person's user account, for a worker or contractor (system audit F5). */
+  userId?: string | null;
 }
 
 export interface UpdateRecipientInput {
@@ -24,6 +26,7 @@ export interface UpdateRecipientInput {
   type?: RecipientType;
   notes?: string | null;
   active?: boolean;
+  userId?: string | null;
 }
 
 const NO_PIN = { pinHash: null, pinSetAt: null, pinFailedTries: 0, pinLockedAt: null } as const;
@@ -43,10 +46,28 @@ async function assertNameFree(name: string, exceptId?: string): Promise<void> {
 
 // Two requests creating the same name at once: the unique index wins.
 function rethrowNameClash(err: unknown, name: string): never {
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002' && String(err.meta?.target ?? '').includes('user_id')) {
+    throw Errors.conflict(ACCOUNT_TAKEN);
+  }
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
     throw Errors.conflict(`A recipient named "${name}" already exists`);
   }
   throw err;
+}
+
+export const ACCOUNT_TAKEN = 'That user account is already linked to another recipient.';
+
+/**
+ * The account a recipient is linked to (system audit F5): only a person, a
+ * worker or contractor, and only an active account not linked already.
+ */
+async function checkAccount(userId: string, type: RecipientType, exceptId?: string): Promise<void> {
+  if (!holdsPin(type)) throw Errors.validation('Only a worker or contractor is linked to a user account: a machine or site is collected for by someone else.');
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { active: true } });
+  if (!user) throw Errors.notFound('User');
+  if (!user.active) throw Errors.validation('That user account is inactive.');
+  const taken = await prisma.recipient.findFirst({ where: { userId, ...(exceptId ? { NOT: { id: exceptId } } : {}) }, select: { name: true } });
+  if (taken) throw Errors.conflict(ACCOUNT_TAKEN);
 }
 
 const asJson = (r: Parameters<typeof publicRecipient>[0]) => publicRecipient(r) as unknown as Prisma.InputJsonValue;
@@ -113,10 +134,11 @@ export const RecipientService = {
   async create(input: CreateRecipientInput, actorId: string) {
     const name = cleanName(input.name);
     await assertNameFree(name);
+    if (input.userId) await checkAccount(input.userId, input.type);
     try {
       return await prisma.$transaction(async (tx) => {
         const created = await tx.recipient.create({
-          data: { name, type: input.type, notes: input.notes?.trim() || null },
+          data: { name, type: input.type, notes: input.notes?.trim() || null, userId: input.userId || null },
         });
         await tx.auditLogEntry.create({
           data: {
@@ -149,6 +171,13 @@ export const RecipientService = {
     }
     if (input.notes !== undefined) data.notes = input.notes?.trim() || null;
     if (input.active !== undefined) data.active = input.active;
+    const type = input.type ?? before.type;
+    if (input.userId !== undefined && input.userId !== before.userId) {
+      if (input.userId) await checkAccount(input.userId, type, input.id);
+      data.user = input.userId ? { connect: { id: input.userId } } : { disconnect: true };
+    }
+    // A machine or site isn't a person, so it has no account.
+    if (!holdsPin(type) && before.userId && input.userId === undefined) data.user = { disconnect: true };
     try {
       return await prisma.$transaction(async (tx) => {
         const after = await tx.recipient.update({ where: { id: input.id }, data });

@@ -6,7 +6,7 @@ import { CatalogueService } from './catalogue.service.js';
 import { LocationService } from './location.service.js';
 import { LEFTOVER_CATEGORIES, ProjectLeftoversService } from './project-leftovers.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
-import { requirePermission } from '../../shared/authorization.js';
+import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { listUnits } from '../../shared/units.js';
@@ -33,8 +33,9 @@ export const updateMaterialSchema = z.object({
   description: z.string().nullable().optional(),
   unitOfMeasure: z.string().min(1).optional(),
   requiredStock: z.number().nonnegative().optional(),
-  /** null clears it: the item then has no price. */
+  /** null clears it: the item then has no price. A change needs edit:unit_cost and a reason (ADR-039). */
   unitCost: z.number().nonnegative().nullable().optional(),
+  unitCostReason: z.string().trim().max(500).optional(),
   /** Tools only; null clears it. */
   serialNumber: z.string().trim().min(1).max(64).nullable().optional(),
   /** Project Material only: assigns its project. */
@@ -112,11 +113,16 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const actorId = (req as unknown as { user: { id: string } }).user.id;
-    return MaterialService.create(parsed.data, actorId);
+    return MaterialService.create(parsed.data, actorId, { canSetCost: await userHasPermission(req, PermissionCode.EditUnitCost) });
   });
 
   app.patch('/materials/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.EditMaterial);
+    // A change of unit cost alone is for whoever sets costs (Procurement, Admin),
+    // who may not edit the rest of the item (system audit C1).
+    const fields = Object.keys((req.body as Record<string, unknown> | null) ?? {});
+    const costOnly = fields.length > 0 && fields.every((f) => f === 'unitCost' || f === 'unitCostReason');
+    const canSetCost = await userHasPermission(req, PermissionCode.EditUnitCost);
+    if (!(costOnly && canSetCost)) await requirePermission(req, PermissionCode.EditMaterial);
     const id = (req.params as { id: string }).id;
     // Refused rather than ignored: an item's status changes only with a reason, on its own route.
     if ((req.body as { active?: unknown } | null)?.active !== undefined) {
@@ -129,7 +135,13 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const actorId = (req as unknown as { user: { id: string } }).user.id;
-    return MaterialService.update({ id, ...parsed.data }, actorId);
+    return MaterialService.update({ id, ...parsed.data }, actorId, { canSetCost });
+  });
+
+  // System audit C3: every change of the item's unit cost, with who and why.
+  app.get('/materials/:id/cost-history', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return MaterialService.costHistory((req.params as { id: string }).id);
   });
 
   app.get('/materials/:id/deactivation-check', { preHandler: [app.authenticate] }, async (req) => {
@@ -263,6 +275,13 @@ export async function locationRoutes(app: FastifyInstance): Promise<void> {
     }
     const actorId = (req as unknown as { user: { id: string } }).user.id;
     return LocationService.update({ id, ...parsed.data }, actorId);
+  });
+
+  // System audit A1: what must be dealt with before the location can be deactivated.
+  app.get('/locations/:id/deactivation-check', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ManageLocationStatus);
+    const id = (req.params as { id: string }).id;
+    return LocationService.deactivationCheck(id);
   });
 
   app.patch('/locations/:id/status', { preHandler: [app.authenticate] }, async (req, reply) => {

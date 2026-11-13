@@ -116,7 +116,9 @@ export const GoodsReceiptService = {
     if (input.lines.length === 0) throw Errors.validation('Goods receipt must have at least one line');
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
-    if (!supplier.active) throw Errors.validation('Supplier is inactive');
+    // An inactive supplier gets no new orders, but what they were already
+    // ordered to deliver is still received (system audit D2).
+    if (!supplier.active && !input.purchaseOrderId) throw Errors.validation('Supplier is inactive');
     // What each order line still expects: a delivery may take exactly that,
     // even in part-units, so an order raised before the rule can be finished.
     const outstanding = new Map<string, Prisma.Decimal>();

@@ -23,6 +23,14 @@ async function approvedProjectOrder(): Promise<Order> {
   return api.get<Order>(`/purchase-orders/${po.id}`);
 }
 
+/** Receives what an order still owes on one posted goods receipt, as the store does on Receive stock (system audit D3). */
+async function receiveRest(id: string): Promise<void> {
+  const po = await api.get<{ supplierId: string; lines: Array<{ id: string; materialId: string; orderedQty: string; receivedQty: string }> }>(`/purchase-orders/${id}`);
+  const lines = po.lines.filter((l) => Number(l.orderedQty) > Number(l.receivedQty))
+    .map((l) => ({ materialId: l.materialId, locationId: 'loc-1', quantity: Number(l.orderedQty) - Number(l.receivedQty), purchaseOrderLineId: l.id }));
+  await api.post('/goods-receipts', { supplierId: po.supplierId, purchaseOrderId: id, post: true, lines });
+}
+
 describe('mock: the delivery date of a receipt', () => {
   const receipt = (receivedAt: string) => ({ supplierId: 'sup-1', deliveryRef: 'INV-1', receivedAt, lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] });
   const tomorrow = new Date(Date.now() + 36 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
@@ -54,14 +62,16 @@ describe('mock: delivery of a project order', () => {
     expect(listed.lines[0]).not.toHaveProperty('unitPrice');
   });
 
-  it('receives it into stock held for the project, by either way in', async () => {
+  it('receives it into stock held for the project on Receive stock, not in one call', async () => {
     const po = await approvedProjectOrder();
     const before = await heldFor('AFRI-1325');
     await api.post('/goods-receipts', {
       supplierId: 'sup-1', purchaseOrderId: po.id, post: true, lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity: 1, purchaseOrderLineId: po.lines[0]!.id }],
     });
     expect(await heldFor('AFRI-1325')).toBe(before + 1);
-    expect((await api.post<Order>(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' })).status).toBe('RECEIVED');
+    expect(await messageOf(api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' }))).toMatch(/received on Receive stock/);
+    await receiveRest(po.id);
+    expect((await api.get<Order>(`/purchase-orders/${po.id}`)).status).toBe('RECEIVED');
     expect(await heldFor('AFRI-1325')).toBe(before + 4);
   });
 
@@ -75,7 +85,7 @@ describe('mock: delivery of a project order', () => {
   // Project Material Through the Store Roadmap, Phase 5, as the server moves it.
   it('moves a closed project\x27s held stock to Stores stock where it is, with its item', async () => {
     const po = await approvedProjectOrder();
-    await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    await receiveRest(po.id);
     const held = await heldFor('AFRI-1325');
     expect(held).toBeGreaterThan(0);
     await api.patch('/projects/AFRI-1325', { status: 'COMPLETED' });
@@ -88,7 +98,7 @@ describe('mock: delivery of a project order', () => {
 
   it('keeps an item held for another project as project material', async () => {
     const po = await approvedProjectOrder();
-    await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    await receiveRest(po.id);
     await api.patch('/projects/AFRI-1402', { status: 'COMPLETED' });
     expect(await messageOf(api.post('/projects/AFRI-1402/leftovers/move', { items: [{ materialId: 'mat-9', category: 'CONSUMABLES' }] })))
       .toMatch(/has stock in the store held for project AFRI-1325, so it stays project material/);
@@ -99,7 +109,7 @@ describe('mock: delivery of a project order', () => {
     type Value = { total: { value: number }; projects: Array<{ projectNumber: string | null; value: number; leftovers: number }>; status: Record<string, number> };
     const before = await api.get<Value>('/reports/stock-value');
     const po = await approvedProjectOrder();
-    await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    await receiveRest(po.id);
     const after = await api.get<Value>('/reports/stock-value');
     const project = (v: Value) => v.projects.find((p) => p.projectNumber === 'AFRI-1325')?.value ?? 0;
     const added = after.total.value - before.total.value;
@@ -113,7 +123,7 @@ describe('mock: delivery of a project order', () => {
   // Project Material Through the Store Roadmap, Phase 3, as the server issues it.
   it('issues the stock to its project only, and moves it keeping its project', async () => {
     const po = await approvedProjectOrder();
-    await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    await receiveRest(po.id);
     const before = await heldFor('AFRI-1325');
     const issue = (projectNumber: string | undefined, quantity: number) => api.post('/inventory-issues', {
       recipientId: 'rcp-1', projectNumber, lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity, heldForProject: 'AFRI-1325' }],
@@ -139,7 +149,7 @@ describe('mock: delivery of a project order', () => {
     const submitted = await api.post<Order>(`/purchase-orders/${created.id}/submit`, {});
     mockOrderRaisedBy(created.id, 'user-2'); // raised by someone else: nobody approves their own
     if (submitted.status === 'PENDING_APPROVAL') await api.post(`/purchase-orders/${created.id}/approve`, {});
-    await api.post(`/purchase-orders/${created.id}/receive`, { locationId: 'loc-1' });
+    await receiveRest(created.id);
     await api.patch('/projects/AFRI-1325', { status: 'COMPLETED' });
     expect(await api.post('/projects/AFRI-1325/leftovers/move', { items: [{ materialId: 'mat-9' }] })).toEqual({ moved: 1 });
     expect(await heldFor('AFRI-1325')).toBe(0);

@@ -629,7 +629,7 @@ describe('requests for quotation over real HTTP', () => {
         expect(orderStory.map((e) => [e.action, e.actorName])).toEqual([['CREATE', buyerName], ['PO_SUBMIT', buyerName]]);
         expect(orderStory[0]).toMatchObject({ after: { rfqId: id } });
       } finally {
-        await api('PUT', approvalKey, { value: approvalWas });
+        await api('PUT', approvalKey, { value: approvalWas, reason: 'Put back as the test found it' });
       }
     });
 
