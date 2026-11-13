@@ -448,6 +448,8 @@ describe('PurchaseOrderService lifecycle', () => {
     const hist = await PurchaseOrderService.history(po.id);
     expect(hist.find((h) => h.action === 'CREATE')).toMatchObject({ actorId: 'user-1', actorName: 'Thandi Buyer', after: { number: po.number, status: 'DRAFT' } });
     expect(hist.every((h) => h.actorName === 'Thandi Buyer')).toBe(true);
+    // Their roles too, so the status bar names a step by its role where they don't hold it.
+    expect(hist.every((h) => h.actorRoles.join() === 'PROCUREMENT')).toBe(true);
   });
 
   it('with requireApprovalBeforeProcessing off, submit auto-approves', async () => {

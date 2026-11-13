@@ -27,7 +27,8 @@ type POStatus =
 
 const LIFECYCLE_ORDER: POStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED'];
 
-interface POUser { id: string; name: string; email: string }
+/** `roles` are the person's roles now, on those the page names by role where they don't hold the step's. */
+interface POUser { id: string; name: string; email: string; roles?: string[] }
 interface POLine {
   id: string;
   materialId: string;
@@ -65,7 +66,7 @@ interface PO extends OrderDetails {
   approvedAt?: string | null;
   approvedBy?: POUser | null;
   /** Who signed it, oldest first. */
-  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { id?: string; name: string } | null }>;
+  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { id?: string; name: string; roles?: string[] } | null }>;
   deliveredAt?: string | null;
   deliveredBy?: POUser | null;
   deliveryNotes?: string | null;
@@ -90,6 +91,8 @@ interface HistoryEntry {
   actorId: string | null;
   /** Who did it; null when the account no longer exists. */
   actorName?: string | null;
+  /** Their roles now. */
+  actorRoles?: string[];
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   createdAt: string;
@@ -115,14 +118,69 @@ function statusLabel(s: POStatus): string {
   } as Record<string, string>)[s] ?? s;
 }
 
+// ── Who did a step, or its role ──────────────────────────────────────────
+// A step is shown by the person who did it where they hold its role, and by the
+// role where they don't: an admin testing reads as Buyer or Store Controller,
+// and real users' names appear as soon as they do the work. Roles unknown (an
+// older reply) count as held, so a name is never hidden by mistake.
+const STEP_HOLDERS: Partial<Record<POStatus, string[]>> = {
+  DRAFT: ['PROCUREMENT'],
+  PENDING_APPROVAL: ['PROCUREMENT'],
+  APPROVED: ['PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'],
+  PARTIALLY_RECEIVED: ['STORE_CONTROLLER'],
+  RECEIVED: ['STORE_CONTROLLER'],
+  CLOSED: ['PROCUREMENT'],
+};
+const SIGNATURE_LABEL: Record<string, string> = { MANAGER: 'Procurement Manager', DIRECTOR: 'Director' };
+const SIGNATURE_ROLE: Record<string, string> = { MANAGER: 'PROCUREMENT_MANAGER', DIRECTOR: 'DIRECTOR' };
+const STAND_IN_ROLES = ['CEO', 'WORKSHOP_MANAGER'];
+
+/** Whether someone with these roles holds the step's role. */
+export function holdsStep(step: POStatus, roles: string[] | undefined): boolean {
+  if (!roles) return true;
+  return (STEP_HOLDERS[step] ?? []).some((r) => roles.includes(r));
+}
+
+type Signature = NonNullable<PO['signatures']>[number];
+
+/** Whether whoever gave a signature holds its role, or stands in for it. */
+function signatureHeld(s: Signature | undefined): boolean {
+  const roles = s?.signedBy?.roles;
+  if (!s || !roles) return true;
+  return roles.includes(SIGNATURE_ROLE[s.step] ?? '') || (!!s.standIn && roles.some((r) => STAND_IN_ROLES.includes(r)));
+}
+
+/** On the Summary: the person and their role, or the role alone where they don't hold it; the name always in the title. */
+interface ByLine { text: string; title: string }
+
 /** Who signed it, then whoever approved it without signing, as when the threshold was raised part-way. */
-function approvedByLine(po: PO): string {
+export function approvedByLine(po: Pick<PO, 'signatures' | 'approvedBy' | 'approvedAt'>): ByLine {
   const signatures = po.signatures ?? [];
-  if (signatures.length === 0) return po.approvedBy?.name ?? '—';
+  if (signatures.length === 0) {
+    if (!po.approvedBy) return { text: '—', title: '' };
+    return { text: holdsStep('APPROVED', po.approvedBy.roles) ? po.approvedBy.name : 'Approver', title: po.approvedBy.name };
+  }
+  const shown = signatures.map((s) => {
+    const label = SIGNATURE_LABEL[s.step] ?? s.step;
+    const name = s.signedBy?.name ?? 'A removed user';
+    if (!signatureHeld(s)) return label;
+    return s.standIn ? `${name} (standing in for the ${label})` : `${name} (${label})`;
+  });
   const names = signatures.map((s) => `${s.signedBy?.name ?? 'A removed user'}${s.standIn ? ' (standing in)' : ''}`);
   const finishedBy = approvedWithoutSigning(po);
-  if (finishedBy) names.push(`approved by ${finishedBy.name}`);
-  return names.join(', ');
+  const finished = finishedBy ? `, approved by ${finishedBy.name}` : '';
+  return { text: `${shown.join(', then ')}${finished}`, title: `${names.join(', ')}${finished}` };
+}
+
+/**
+ * Who received it: the Store Controller by name, or the role where someone else
+ * booked it. A delivery confirmed on site (before ADR-027) keeps the name: it
+ * was never the store's step.
+ */
+export function receivedByLine(user: POUser | null | undefined, onSite = false): ByLine {
+  if (!user) return { text: '—', title: '' };
+  if (onSite) return { text: user.name, title: user.name };
+  return { text: holdsStep('RECEIVED', user.roles) ? `${user.name} (Store Controller)` : 'Store Controller', title: user.name };
 }
 
 function isCancellable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
@@ -264,7 +322,7 @@ export function PurchaseOrderDetail() {
 
       {fresh && (
         <div className="space-y-6">
-          <LifecycleTracker status={fresh.status} history={history.data ?? []} approval={approval.data} />
+          <LifecycleTracker status={fresh.status} history={history.data ?? []} approval={approval.data} signatures={fresh.signatures} />
           {isApprovable(fresh.status) && approval.data && (
             <ApprovalPanel view={approval.data} onAddPrices={canManage ? editOrder : undefined} />
           )}
@@ -282,12 +340,16 @@ export function PurchaseOrderDetail() {
                   <><dt className="text-surface-500">Expected</dt><dd className="col-span-2 text-meta">{formatDate(fresh.expectedDeliveryDate)}</dd></>
                 )}
                 {fresh.approvedAt && (
-                  <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400">by {approvedByLine(fresh)}</span></dd></>
+                  <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400" title={approvedByLine(fresh).title}>by {approvedByLine(fresh).text}</span></dd></>
                 )}
                 {fresh.deliveredAt && (
                   // An order finished by the retired Confirm delivery went to site, not into the store; one
                   // partly confirmed, then finished by a receipt, was received (Qodo, PR #143).
-                  <><dt className="text-surface-500">{(history.data ?? []).some((h) => h.action === 'PO_DELIVERY_CONFIRMED' && h.after?.status === 'RECEIVED') ? 'Delivered to site' : 'Received'}</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.deliveredAt)}<br /><span className="text-surface-400">by {fresh.deliveredBy?.name ?? '—'}</span></dd></>
+                  (() => {
+                    const onSite = (history.data ?? []).some((h) => h.action === 'PO_DELIVERY_CONFIRMED' && h.after?.status === 'RECEIVED');
+                    const by = receivedByLine(fresh.deliveredBy, onSite);
+                    return <><dt className="text-surface-500">{onSite ? 'Delivered to site' : 'Received'}</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.deliveredAt)}<br /><span className="text-surface-400" title={by.title}>by {by.text}</span></dd></>;
+                  })()
                 )}
                 {fresh.closedAt && (
                   <><dt className="text-surface-500">Closed</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.closedAt)}<br /><span className="text-surface-400">{fresh.closeReason ?? `by ${fresh.closedBy?.name ?? '—'}`}</span></dd></>
@@ -360,7 +422,15 @@ export function shortName(name: string): string {
 }
 
 /** Under a step: who did it and when, or who it is waiting on. */
-export interface StepPerson { label: string; title: string; waiting?: boolean }
+export interface StepPerson {
+  label: string;
+  title: string;
+  waiting?: boolean;
+  /** Whether whoever did it holds the step's role; the bar shows the role where they don't. */
+  holds?: boolean;
+  /** The day it was done, to go with the role. */
+  when?: string;
+}
 
 /**
  * Who moved the order into each step, from its Activity: the latest entry that
@@ -375,7 +445,7 @@ export function stepActors(history: HistoryEntry[]): Partial<Record<POStatus, St
     if (!to || e.before?.status === to) continue;
     const name = e.actorName ?? (e.actorId ? 'A removed user' : 'System');
     const shown = e.actorName ? shortName(e.actorName) : name;
-    out[to] = { label: `${shown} · ${formatDate(e.createdAt)}`, title: `${name}, ${formatDateTime(e.createdAt)}` };
+    out[to] = { label: shown, title: `${name}, ${formatDateTime(e.createdAt)}`, holds: e.action === 'PO_DELIVERY_CONFIRMED' || holdsStep(to, e.actorRoles), when: formatDate(e.createdAt) };
   }
   return out;
 }
@@ -388,19 +458,79 @@ export function waitingOn(status: POStatus, approval: ApprovalView | null | unde
     const role = approval.next?.label ?? 'an approver';
     const names = approval.approvers.map((a) => a.name);
     if (names.length === 0) return { step: 'APPROVED', person: { label: 'No approver', title: `Nobody holds the ${role} role yet`, waiting: true } };
-    // The usual signer by name; the stand-ins are in the title.
-    const usual = approval.approvers.filter((a) => !a.standIn).map((a) => a.name);
-    const shown = usual.length > 0 ? usual : names;
-    const label = shown.length > 2 ? `${shortName(shown[0]!)} +${shown.length - 1}` : shown.map(shortName).join(' or ');
-    return { step: 'APPROVED', person: { label: `Waiting on ${label}`, title: `${role}. Any of: ${names.join(', ')}`, waiting: true } };
+    // The role on the bar; who holds it in the title, stand-ins marked.
+    const holders = approval.approvers.map((a) => (a.standIn ? `${a.name} (standing in)` : a.name));
+    // A signature still to come after this one, so the Director isn't a surprise.
+    const later = (approval.steps ?? []).slice((approval.steps ?? []).findIndex((s) => s.step === approval.next?.step) + 1).map((s) => s.label);
+    const then = approval.next && later.length > 0 ? `. Then the ${later.join(', then the ')}` : '';
+    return { step: 'APPROVED', person: { label: `Waiting on ${role}`, title: `Any of: ${holders.join(', ')}${then}`, waiting: true } };
   }
-  // Anyone who receives orders books a delivery, so it waits on the store, not a person.
-  if (status === 'APPROVED') return { step: 'PARTIALLY_RECEIVED', person: { label: 'Waiting on Stores', title: 'Booked on Receive stock when it arrives', waiting: true } };
-  if (status === 'PARTIALLY_RECEIVED') return { step: 'RECEIVED', person: { label: 'Waiting on Stores', title: 'The rest is booked on Receive stock when it arrives', waiting: true } };
+  // Anyone who receives orders books a delivery, so it waits on the role, not a person.
+  if (status === 'APPROVED') return { step: 'PARTIALLY_RECEIVED', person: { label: 'Waiting on Store Controller', title: 'Booked on Receive stock when it arrives', waiting: true } };
+  if (status === 'PARTIALLY_RECEIVED') return { step: 'RECEIVED', person: { label: 'Waiting on Store Controller', title: 'The rest is booked on Receive stock when it arrives', waiting: true } };
   return null;
 }
 
-function LifecycleTracker({ status, history, approval }: { status: POStatus; history: HistoryEntry[]; approval?: ApprovalView | null }) {
+/**
+ * The role that does each step. The signatures come from the order itself, so an
+ * order that needs the Director says so before anyone signs.
+ */
+export function stepRole(step: POStatus, approval: ApprovalView | null | undefined): string | null {
+  switch (step) {
+    case 'DRAFT':
+    case 'PENDING_APPROVAL':
+    case 'CLOSED':
+      return 'Buyer';
+    case 'APPROVED': {
+      const signers = approval?.steps?.map((s) => s.label) ?? [];
+      return signers.length > 0 ? signers.join(' → ') : 'Procurement Manager';
+    }
+    case 'PARTIALLY_RECEIVED':
+    case 'RECEIVED':
+      return 'Store Controller';
+    default:
+      return null;
+  }
+}
+
+/** How the person acted on a finished step: the signers by name for approval, else the step's role. */
+function actedAs(step: POStatus, approval: ApprovalView | null | undefined): string | null {
+  if (step === 'APPROVED') {
+    const signed = (approval?.steps ?? []).filter((s) => s.signature);
+    if (signed.length > 0) {
+      return `Signed by ${signed.map((s) => `${s.signature!.name} ${s.signature!.standIn ? 'standing in for the' : 'as'} ${s.label}`).join(', then ')}`;
+    }
+  }
+  const role = stepRole(step, approval);
+  return role ? `As ${role}` : null;
+}
+
+/**
+ * The one line under a step: who did it and when once it is done, who it is
+ * waiting on, or the role that will do it.
+ */
+export function stepLine(
+  step: POStatus,
+  reached: boolean,
+  actors: Partial<Record<POStatus, StepPerson>>,
+  next: { step: POStatus; person: StepPerson } | null,
+  approval: ApprovalView | null | undefined,
+): (StepPerson & { tone: 'done' | 'waiting' | 'ahead' }) | null {
+  const actor = reached ? actors[step] : undefined;
+  if (actor) {
+    // Done by someone who doesn't hold the role (an admin testing): the role, their name on hover.
+    const role = actor.holds === false ? stepRole(step, approval) : null;
+    if (role) return { ...actor, label: role, title: `${actor.title}, for the ${role.replace(' → ', ' and the ')}`, tone: 'done' };
+    const as = actedAs(step, approval);
+    return { ...actor, title: as ? `${actor.title}. ${as}` : actor.title, tone: 'done' };
+  }
+  if (next?.step === step) return { ...next.person, tone: 'waiting' };
+  const role = stepRole(step, approval);
+  if (!role) return null;
+  return { label: role, title: `Done by the ${role.replace(' → ', ', then the ')}`, tone: reached ? 'done' : 'ahead' };
+}
+
+function LifecycleTracker({ status, history, approval, signatures }: { status: POStatus; history: HistoryEntry[]; approval?: ApprovalView | null; signatures?: PO['signatures'] }) {
   if (status === 'CANCELLED') {
     return (
       <div className="surface-card p-4">
@@ -411,43 +541,129 @@ function LifecycleTracker({ status, history, approval }: { status: POStatus; his
       </div>
     );
   }
-  const currentIndex = LIFECYCLE_ORDER.indexOf(status);
-  const actors = stepActors(history);
-  const next = waitingOn(status, approval);
+  const steps = barSteps(status, history, approval, signatures);
   return (
     <div className="surface-card p-4">
-      <ol className="grid grid-cols-6 gap-1 sm:gap-3" aria-label="Purchase order lifecycle">
-        {LIFECYCLE_ORDER.map((s, i) => {
-          const reached = i <= currentIndex;
-          const isCurrent = i === currentIndex;
+      <ol className="grid gap-1 sm:gap-3" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }} aria-label="Purchase order lifecycle">
+        {steps.map((step, i) => {
+          const filled = (k: number) => steps[k] !== undefined && steps[k]!.mark !== 'ahead';
           return (
-            <li key={s} className="flex flex-col items-center text-center" aria-current={isCurrent ? 'step' : undefined}>
+            <li key={step.key} className="flex flex-col items-center text-center" aria-current={step.mark === 'current' ? 'step' : undefined}>
               <div className="flex items-center w-full">
-                <div className={`h-0.5 flex-1 ${i === 0 ? 'invisible' : reached ? 'bg-brand-500' : 'bg-surface-200'}`} aria-hidden="true" />
-                <span className={`flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 rounded-full border-2 text-[10px] sm:text-xs font-semibold ${isCurrent ? 'border-brand-600 bg-brand-600 text-white' : reached ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-300 dark:bg-brand-900/50 dark:text-brand-100' : 'border-surface-300 bg-surface-0 text-surface-400'}`}>
-                  {i + 1}
+                <div className={`h-0.5 flex-1 ${i === 0 ? 'invisible' : filled(i) ? 'bg-brand-500' : 'bg-surface-200'}`} aria-hidden="true" />
+                <span
+                  className={`flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 rounded-full border-2 text-[10px] sm:text-xs font-semibold ${MARK_STYLE[step.mark]}`}
+                  aria-label={MARK_LABEL[step.mark]}
+                >
+                  {step.mark === 'done' ? <Icon.Check width={14} height={14} aria-hidden="true" /> : step.mark === 'short' ? '!' : i + 1}
                 </span>
-                <div className={`h-0.5 flex-1 ${i === LIFECYCLE_ORDER.length - 1 ? 'invisible' : reached && i < currentIndex ? 'bg-brand-500' : 'bg-surface-200'}`} aria-hidden="true" />
+                <div className={`h-0.5 flex-1 ${i === steps.length - 1 ? 'invisible' : filled(i + 1) ? 'bg-brand-500' : 'bg-surface-200'}`} aria-hidden="true" />
               </div>
-              <span className={`mt-1 text-[10px] sm:text-sm truncate max-w-[72px] sm:max-w-none ${isCurrent ? 'font-semibold text-brand-700' : reached ? 'text-surface-700' : 'text-surface-400'}`}>
-                {statusLabel(s)}
+              <span className={`mt-1 text-[10px] sm:text-sm truncate max-w-[72px] sm:max-w-none ${step.mark === 'current' ? 'font-semibold text-brand-700' : step.mark === 'ahead' ? 'text-surface-400' : 'text-surface-700'}`}>
+                {step.label}
               </span>
-              {/* Too tight on a phone: the step labels alone there, the Activity below has the names. */}
-              {(() => {
-                const person = reached ? actors[s] : next?.step === s ? next.person : undefined;
-                if (!person) return null;
-                return (
-                  <span title={person.title} className={`hidden sm:block mt-0.5 text-xs truncate max-w-full ${person.waiting ? 'text-warning-700 italic' : 'text-surface-500'}`}>
-                    {person.label}
-                  </span>
-                );
-              })()}
+              {/* Who did it (the date under it), who it waits on, or the role that will. On a phone only the step it waits on. */}
+              {step.line && (
+                <span title={step.line.title} className={`${LINE_STYLE[step.line.tone]} mt-0.5 truncate max-w-full`}>
+                  {step.line.label}
+                </span>
+              )}
+              {step.line?.tone === 'done' && step.line.when && (
+                <span className="hidden sm:block text-xs text-surface-400 truncate max-w-full">{step.line.when}</span>
+              )}
             </li>
           );
         })}
       </ol>
     </div>
   );
+}
+
+type Mark = 'done' | 'current' | 'ahead' | 'short';
+const MARK_STYLE: Record<Mark, string> = {
+  done: 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-300 dark:bg-brand-900/50 dark:text-brand-100',
+  current: 'border-brand-600 bg-brand-600 text-white',
+  ahead: 'border-surface-300 bg-surface-0 text-surface-400',
+  short: 'border-warning-500 bg-warning-50 text-warning-700',
+};
+const MARK_LABEL: Record<Mark, string> = { done: 'Done', current: 'Current step', ahead: 'Not reached', short: 'Not finished' };
+type LineTone = 'done' | 'waiting' | 'ahead' | 'short';
+const LINE_STYLE: Record<LineTone, string> = {
+  done: 'hidden sm:block text-xs text-surface-500',
+  ahead: 'hidden sm:block text-xs text-surface-400',
+  waiting: 'block text-[10px] sm:text-xs text-warning-700 italic',
+  short: 'hidden sm:block text-xs text-warning-700',
+};
+
+export interface BarStep {
+  key: string;
+  label: string;
+  mark: Mark;
+  line: (StepPerson & { tone: LineTone }) | null;
+}
+
+/**
+ * The steps on the bar. An order that needs more than one signature shows each
+ * on a step of its own: Signed by the Procurement Manager, then Approved by the
+ * Director. Done steps are ticked; a receiving step an order was closed
+ * without is marked, so a short order doesn't read as complete.
+ */
+export function barSteps(
+  status: POStatus,
+  history: HistoryEntry[],
+  approval: ApprovalView | null | undefined,
+  signatures: PO['signatures'],
+): BarStep[] {
+  const currentIndex = LIFECYCLE_ORDER.indexOf(status);
+  const actors = stepActors(history);
+  const next = waitingOn(status, approval);
+  const needed = approval?.steps ?? [];
+  const split = needed.length > 1;
+  const last = needed[needed.length - 1];
+  const out: BarStep[] = [];
+
+  LIFECYCLE_ORDER.forEach((s, i) => {
+    const reached = i <= currentIndex;
+    if (s === 'APPROVED' && split) {
+      // One step for each signature before the last.
+      for (const sign of needed.slice(0, -1)) {
+        const given = sign.signature;
+        const sig = signatures?.find((x) => x.step === sign.step);
+        let line: BarStep['line'];
+        if (given) {
+          const held = signatureHeld(sig);
+          const as = given.standIn ? `Standing in for the ${sign.label}` : `As ${sign.label}`;
+          line = {
+            label: held ? shortName(given.name) : sign.label,
+            when: formatDate(given.signedAt),
+            title: `${given.name}, ${formatDateTime(given.signedAt)}. ${held ? as : `For the ${sign.label}`}`,
+            tone: 'done',
+          };
+        } else if (next?.step === 'APPROVED' && approval?.next?.step === sign.step) {
+          line = { ...next.person, tone: 'waiting' };
+        } else {
+          line = { label: sign.label, title: `Done by the ${sign.label}`, tone: reached ? 'done' : 'ahead' };
+        }
+        out.push({ key: `SIGN-${sign.step}`, label: 'Signed', mark: given || i < currentIndex ? 'done' : 'ahead', line });
+      }
+      // The last signature approves it: its role alone, and the wait only once it is that signature's turn.
+      const lastOnly = approval && last ? { ...approval, steps: [last] } : approval;
+      const nextHere = approval?.next?.step === last?.step ? next : null;
+      out.push({ key: s, label: statusLabel(s), mark: markOf(i, currentIndex), line: stepLine(s, reached, actors, nextHere, lastOnly) });
+      return;
+    }
+    const short = status === 'CLOSED' && (s === 'PARTIALLY_RECEIVED' || s === 'RECEIVED') && !actors.RECEIVED && !actors[s];
+    if (short) {
+      out.push({ key: s, label: statusLabel(s), mark: 'short', line: { label: 'Not all received', title: 'The order was closed before everything was received', tone: 'short' } });
+      return;
+    }
+    out.push({ key: s, label: statusLabel(s), mark: markOf(i, currentIndex), line: stepLine(s, reached, actors, next, approval) });
+  });
+  return out;
+}
+
+function markOf(i: number, currentIndex: number): Mark {
+  return i < currentIndex ? 'done' : i === currentIndex ? 'current' : 'ahead';
 }
 
 // ── History ───────────────────────────────────────────────────────────────
