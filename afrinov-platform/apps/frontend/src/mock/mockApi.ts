@@ -641,7 +641,9 @@ function salesRfqView(r: MockSalesRfq) {
     const labour = line.labour.map((l) => ({ ...l, total: cents(Number(l.hours) * Number(l.hourlyRate)).toFixed(2) }));
     const otherCosts = line.otherCosts.map((c) => ({ ...c, total: cents(Number(c.quantity) * Number(c.unitCost)).toFixed(2) }));
     const labourTotal = cents(labour.reduce((sum, l) => sum + Number(l.total), 0));
-    const material = cents(materials.reduce((sum, m) => sum + Number(m.amount), 0));
+    const allowances = line.allowances ?? [];
+    // Quotes and allowances alike are material.
+    const material = cents(materials.reduce((sum, m) => sum + Number(m.amount), 0) + allowances.reduce((sum, a) => sum + Number(a.amount), 0));
     const other = cents(otherCosts.reduce((sum, c) => sum + Number(c.total), 0));
     const unitCost = cents(labourTotal + material + other);
     // Its own markup, or the job's.
@@ -650,7 +652,7 @@ function salesRfqView(r: MockSalesRfq) {
     const unitPrice = unitMarkup === null ? null : cents(unitCost + unitMarkup);
     const total = unitPrice === null ? null : cents(unitPrice * line.quantity);
     return {
-      id: line.id, lineNo: line.lineNo, equipment: line.equipment, details: line.details, quantity: line.quantity, markupPercent: line.markupPercent ?? null, labour, materials, otherCosts,
+      id: line.id, lineNo: line.lineNo, equipment: line.equipment, details: line.details, quantity: line.quantity, markupPercent: line.markupPercent ?? null, labour, materials, otherCosts, allowances,
       sums: { labourTotal, material, other, unitCost, unitMarkup, total },
       totals: { quantity: line.quantity, markupPercent: markupPercent === null ? null : String(markupPercent), labour: labourTotal.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), unitCost: unitCost.toFixed(2), unitMarkup: fixed(unitMarkup), unitPrice: fixed(unitPrice), total: fixed(total) },
     };
@@ -695,6 +697,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     equipment?: string | null; details?: string | null; quantity?: number; markupPercent?: number | null;
     labour?: Array<{ labourRateId: string; hours: number }>; materials?: Array<{ rfqId: string; supplierId: string }>;
     otherCosts?: Array<{ description: string; quantity: number; unitCost: number }>;
+    allowances?: Array<{ description: string; amount: number }>;
   };
   type Body = Partial<Record<'description' | 'notes' | 'quoteNotes' | 'clientName' | 'clientAddress' | 'contactName' | 'clientReference' | 'paymentTerms' | 'validity' | 'deliveryDuration' | 'deliveryTerms' | 'signerPhone' | 'signerEmail', string | null>> & {
     projectNumber?: string; penaltiesApply?: boolean; markupPercent?: number | null; deliveryPrice?: number; closingDate?: string | null;
@@ -739,6 +742,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     if (new Set(allPicks.map((m) => m.rfqId)).size !== allPicks.length) throw err('VALIDATION_ERROR', 'Pick one quote on each request for quotation, on one equipment line');
     let labourNo = 0;
     let otherNo = 0;
+    let allowanceNo = 0;
     return input.map((l, i) => {
       const on = input.length > 1 ? `Equipment line ${i + 1}: ` : '';
       const quantity = l.quantity ?? 1;
@@ -753,6 +757,12 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
           if (!description) throw err('VALIDATION_ERROR', `${on}Other cost ${j + 1} needs a description, e.g. Accommodation`);
           if (!(c.quantity > 0) || !(c.unitCost > 0)) throw err('VALIDATION_ERROR', `${on}Other cost ${j + 1}: the quantity and unit cost are more than 0`);
           return { id: nextId('srfqo'), lineNo: ++otherNo, description, quantity: String(c.quantity), unitCost: String(c.unitCost) };
+        }),
+        allowances: (l.allowances ?? []).map((a, j) => {
+          const description = rfqText(a.description);
+          if (!description) throw err('VALIDATION_ERROR', `${on}Allowance ${j + 1} needs a description, e.g. Filters, pipe clamps, fittings`);
+          if (!(a.amount > 0)) throw err('VALIDATION_ERROR', `${on}Allowance ${j + 1}: the amount is in rand and cents, more than R0`);
+          return { id: nextId('srfqa'), lineNo: ++allowanceNo, description, amount: Number(a.amount).toFixed(2) };
         }),
       };
     });
@@ -848,7 +858,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     const missing = [
       ...rfq.equipmentLines.flatMap((l) => [
         !l.equipment && (one ? 'the equipment being quoted' : `the equipment on line ${l.lineNo}`),
-        l.labour.length === 0 && l.materials.length === 0 && l.otherCosts.length === 0 && (one ? 'labour, a quote or another cost to price' : `labour, a quote or another cost on line ${l.lineNo}`),
+        l.labour.length === 0 && l.materials.length === 0 && (l.allowances ?? []).length === 0 && l.otherCosts.length === 0 && (one ? 'labour, a quote, an allowance or another cost to price' : `labour, a quote, an allowance or another cost on line ${l.lineNo}`),
       ]),
       rfq.equipmentLines.length > 0 && rfq.equipmentLines.every((l) => l.quantity === 0) && (one ? 'a quantity of 1 or more' : 'a quantity of 1 or more on at least one line'),
       !rfq.clientName && "the client's name",

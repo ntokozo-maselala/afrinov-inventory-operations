@@ -165,7 +165,7 @@ model UnitOfMeasure {
   active      Boolean  @default(true)
   sortOrder   Int      @default(0) @map("sort_order")
 
-  materials     Material[]
+  materials Material[]
 
   @@map("units_of_measure")
 }
@@ -276,8 +276,8 @@ model Supplier {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now()) @map("created_at")
 
-  purchaseOrders    PurchaseOrder[]
-  goodsReceipts     GoodsReceipt[]
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
   rfqSuppliers   RfqSupplier[]
   recommendedOn  Rfq[]              @relation("RFQ_RecommendedSupplier")
   salesMaterials SalesRfqMaterial[]
@@ -660,47 +660,47 @@ enum RfqStatus {
 }
 
 model Rfq {
-  id                 String    @id @default(uuid())
+  id                    String    @id @default(uuid())
   // For a project, the workbook's document number, AFRI-02A-1325-02-01 for
   // AFRI-1325; without one, RFQ-0001 onwards.
-  number             String    @unique
-  status             RfqStatus @default(DRAFT)
-  projectNumber      String?   @map("project_number")
-  description        String?
+  number                String    @unique
+  status                RfqStatus @default(DRAFT)
+  projectNumber         String?   @map("project_number")
+  description           String?
   // Remarks, printed under the lines.
-  notes              String?
-  penaltiesApply     Boolean   @default(false) @map("penalties_apply")
-  issuedAt           DateTime? @map("issued_at") @db.Date
-  closingDate        DateTime? @map("closing_date") @db.Date
-  createdById        String    @map("created_by_id")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  sentAt             DateTime? @map("sent_at")
-  sentById           String?   @map("sent_by_id")
-  awardedAt          DateTime? @map("awarded_at")
-  awardedById        String?   @map("awarded_by_id")
+  notes                 String?
+  penaltiesApply        Boolean   @default(false) @map("penalties_apply")
+  issuedAt              DateTime? @map("issued_at") @db.Date
+  closingDate           DateTime? @map("closing_date") @db.Date
+  createdById           String    @map("created_by_id")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  sentAt                DateTime? @map("sent_at")
+  sentById              String?   @map("sent_by_id")
+  awardedAt             DateTime? @map("awarded_at")
+  awardedById           String?   @map("awarded_by_id")
   // The draft order the award created; its supplier is the one awarded.
-  purchaseOrderId    String?   @unique @map("purchase_order_id")
-  cancelledAt        DateTime? @map("cancelled_at")
-  cancelledById      String?   @map("cancelled_by_id")
-  cancellationReason String?   @map("cancellation_reason")
+  purchaseOrderId       String?   @unique @map("purchase_order_id")
+  cancelledAt           DateTime? @map("cancelled_at")
+  cancelledById         String?   @map("cancelled_by_id")
+  cancellationReason    String?   @map("cancellation_reason")
   // The supplier whose recorded quote Procurement recommends Sales costs the job
   // from. Not an award: no order is raised until the job is won.
   recommendedSupplierId String?   @map("recommended_supplier_id")
   recommendedAt         DateTime? @map("recommended_at")
   recommendedById       String?   @map("recommended_by_id")
 
-  project       Project?       @relation(fields: [projectNumber], references: [projectNumber])
-  recommendedSupplier Supplier? @relation("RFQ_RecommendedSupplier", fields: [recommendedSupplierId], references: [id])
-  recommendedBy       User?     @relation("RFQ_RecommendedBy", fields: [recommendedById], references: [id])
+  project             Project?           @relation(fields: [projectNumber], references: [projectNumber])
+  recommendedSupplier Supplier?          @relation("RFQ_RecommendedSupplier", fields: [recommendedSupplierId], references: [id])
+  recommendedBy       User?              @relation("RFQ_RecommendedBy", fields: [recommendedById], references: [id])
   salesMaterials      SalesRfqMaterial[]
-  createdBy     User           @relation("RFQ_CreatedBy", fields: [createdById], references: [id])
-  sentBy        User?          @relation("RFQ_SentBy", fields: [sentById], references: [id])
-  awardedBy     User?          @relation("RFQ_AwardedBy", fields: [awardedById], references: [id])
-  cancelledBy   User?          @relation("RFQ_CancelledBy", fields: [cancelledById], references: [id])
-  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
-  lines         RfqLine[]
-  suppliers     RfqSupplier[]
+  createdBy           User               @relation("RFQ_CreatedBy", fields: [createdById], references: [id])
+  sentBy              User?              @relation("RFQ_SentBy", fields: [sentById], references: [id])
+  awardedBy           User?              @relation("RFQ_AwardedBy", fields: [awardedById], references: [id])
+  cancelledBy         User?              @relation("RFQ_CancelledBy", fields: [cancelledById], references: [id])
+  purchaseOrder       PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
+  lines               RfqLine[]
+  suppliers           RfqSupplier[]
 
   @@index([status])
   @@index([projectNumber])
@@ -708,16 +708,16 @@ model Rfq {
 }
 
 model RfqLine {
-  id             String  @id @default(uuid())
-  rfqId          String  @map("rfq_id")
+  id         String  @id @default(uuid())
+  rfqId      String  @map("rfq_id")
   // The sheet's ITEM column: 1, 2, 3, … in the order the lines were entered.
-  lineNo         Int     @map("line_no")
-  materialId     String  @map("material_id")
-  quantity       Decimal @db.Decimal(18, 4)
+  lineNo     Int     @map("line_no")
+  materialId String  @map("material_id")
+  quantity   Decimal @db.Decimal(18, 4)
 
-  rfq          Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
-  material     Material        @relation(fields: [materialId], references: [id])
-  prices       RfqQuotePrice[]
+  rfq      Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  material Material        @relation(fields: [materialId], references: [id])
+  prices   RfqQuotePrice[]
 
   @@unique([rfqId, lineNo])
   @@index([materialId])
@@ -847,16 +847,17 @@ model SalesRfq {
   cancelledById      String?        @map("cancelled_by_id")
   cancellationReason String?        @map("cancellation_reason")
 
-  project        Project                 @relation(fields: [projectNumber], references: [projectNumber])
-  createdBy      User                    @relation("SalesRfq_CreatedBy", fields: [createdById], references: [id])
-  submittedBy    User?                   @relation("SalesRfq_SubmittedBy", fields: [submittedById], references: [id])
-  approvedBy     User?                   @relation("SalesRfq_ApprovedBy", fields: [approvedById], references: [id])
-  returnedBy     User?                   @relation("SalesRfq_ReturnedBy", fields: [returnedById], references: [id])
-  cancelledBy    User?                   @relation("SalesRfq_CancelledBy", fields: [cancelledById], references: [id])
+  project        Project                     @relation(fields: [projectNumber], references: [projectNumber])
+  createdBy      User                        @relation("SalesRfq_CreatedBy", fields: [createdById], references: [id])
+  submittedBy    User?                       @relation("SalesRfq_SubmittedBy", fields: [submittedById], references: [id])
+  approvedBy     User?                       @relation("SalesRfq_ApprovedBy", fields: [approvedById], references: [id])
+  returnedBy     User?                       @relation("SalesRfq_ReturnedBy", fields: [returnedById], references: [id])
+  cancelledBy    User?                       @relation("SalesRfq_CancelledBy", fields: [cancelledById], references: [id])
   equipmentLines SalesRfqEquipmentLine[]
   labour         SalesRfqLabourLine[]
   materials      SalesRfqMaterial[]
   otherCosts     SalesRfqOtherCost[]
+  allowances     SalesRfqMaterialAllowance[]
 
   @@index([status])
   @@index([projectNumber])
@@ -867,27 +868,28 @@ model SalesRfq {
 // quotes and other costs for one unit, with the job's markup, times its
 // quantity. A Sales RFQ has at least one.
 model SalesRfqEquipmentLine {
-  id         String  @id @default(uuid())
-  salesRfqId String  @map("sales_rfq_id")
+  id            String   @id @default(uuid())
+  salesRfqId    String   @map("sales_rfq_id")
   // The quotation's Item: 1, 2, 3, … Delivery comes after the last.
-  lineNo     Int     @map("line_no")
+  lineNo        Int      @map("line_no")
   // "Installation:", "Main Piston Pump". Needed to submit.
-  equipment  String?
+  equipment     String?
   // Printed under it, one per line: "Accommodation & LOA".
-  details    String?
+  details       String?
   // How many; the labour, quotes and other costs are for one. 0 prints the line
   // with its unit price and "R -", charging nothing: an item the client supplies
   // or hasn't taken, priced for them to see (AFRI-0413 lines 3 and 4).
-  quantity   Int     @default(1)
+  quantity      Int      @default(1)
   // This line's markup, as a percentage, when it differs from the job's: the
   // costing sheet marks each line up on its own (AFRI-0413: × 1.3 × 1.2 on the
   // maintenance, × 1.35 × 1.2 on the spares, so 56 and 62). Null: the job's.
   markupPercent Decimal? @map("markup_percent") @db.Decimal(7, 2)
 
-  salesRfq   SalesRfq             @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
+  salesRfq   SalesRfq                    @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
   labour     SalesRfqLabourLine[]
   materials  SalesRfqMaterial[]
   otherCosts SalesRfqOtherCost[]
+  allowances SalesRfqMaterialAllowance[]
 
   @@unique([salesRfqId, lineNo])
   @@map("sales_rfq_equipment_lines")
@@ -927,10 +929,10 @@ model SalesRfqMaterial {
   // The quote's total excl. VAT in its own currency, and in rand at the day's
   // exchange rate: refreshed on save, fixed on submission, so what was approved
   // stays put if the quote is corrected afterwards.
-  quoteTotal Decimal  @map("quote_total") @db.Decimal(18, 2)
-  currency   String
-  amount     Decimal  @db.Decimal(18, 2)
-  addedAt    DateTime @default(now()) @map("added_at")
+  quoteTotal      Decimal  @map("quote_total") @db.Decimal(18, 2)
+  currency        String
+  amount          Decimal  @db.Decimal(18, 2)
+  addedAt         DateTime @default(now()) @map("added_at")
 
   salesRfq      SalesRfq              @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
   equipmentLine SalesRfqEquipmentLine @relation(fields: [equipmentLineId], references: [id], onDelete: Cascade)
@@ -963,6 +965,30 @@ model SalesRfqOtherCost {
   @@unique([salesRfqId, lineNo])
   @@index([equipmentLineId])
   @@map("sales_rfq_other_costs")
+}
+
+// Material Sales estimates on an equipment line before any supplier has quoted
+// for it: AFRI-0413 quoted "Anticipated Spares: Filters, Pipe Clamps, Fittings"
+// at an allowance of R45 000 cost, and Procurement asked Hytec only after the
+// client's order. Counted as material (not an other cost), for one unit of the
+// line, before markup; kept apart from quotes so what was allowed can later be
+// set against what was ordered.
+model SalesRfqMaterialAllowance {
+  id              String  @id @default(uuid())
+  salesRfqId      String  @map("sales_rfq_id")
+  equipmentLineId String  @map("equipment_line_id")
+  // Numbered through the whole Sales RFQ, in the order of its equipment lines.
+  lineNo          Int     @map("line_no")
+  description     String
+  // Rand excl. VAT, before markup.
+  amount          Decimal @db.Decimal(18, 2)
+
+  salesRfq      SalesRfq              @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
+  equipmentLine SalesRfqEquipmentLine @relation(fields: [equipmentLineId], references: [id], onDelete: Cascade)
+
+  @@unique([salesRfqId, lineNo])
+  @@index([equipmentLineId])
+  @@map("sales_rfq_material_allowances")
 }
 
 // The hourly selling rate for each role, as the sheet's Manpower Rate list (A–B),

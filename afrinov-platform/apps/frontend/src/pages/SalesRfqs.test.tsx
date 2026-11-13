@@ -185,6 +185,14 @@ describe('Sales RFQ page', () => {
     expect(screen.getByText('All Flexibles to be free issued by client')).toBeInTheDocument();
   });
 
+  it('shows a material allowance as an estimate, with no quote yet', async () => {
+    const [pump] = TWO_LINES.equipmentLines;
+    current = { ...RFQ, equipmentLines: [{ ...pump!, materials: [], allowances: [{ id: 'al-1', lineNo: 1, description: 'Filters, pipe clamps, fittings', amount: '45000.00' }] }] };
+    renderAt('/sales-rfqs/r-1');
+    const table = await screen.findByRole('table', { name: 'Material allowances on line 1' });
+    expect(table).toHaveTextContent(/Filters, pipe clamps, fittings.*Estimate, no quote yet.*45.000/);
+  });
+
   it("shows each line's markup, and \"by line\" beside the total markup when they differ", async () => {
     const [pump, install] = TWO_LINES.equipmentLines;
     current = {
@@ -283,7 +291,7 @@ describe('Sales RFQ form', () => {
       projectNumber: 'AFRI-1469', clientName: 'Northam Platinum', markupPercent: 40, deliveryPrice: 0,
       equipmentLines: [{
         equipment: 'Main Piston Pump', details: null, quantity: 1, markupPercent: null,
-        labour: [{ labourRateId: 'lr-welder', hours: 10 }], materials: [{ rfqId: 'rfq-1', supplierId: 's-2' }], otherCosts: [],
+        labour: [{ labourRateId: 'lr-welder', hours: 10 }], materials: [{ rfqId: 'rfq-1', supplierId: 's-2' }], otherCosts: [], allowances: [],
       }],
     })));
     // Left blank on a new one, the server fills in the usual conditions.
@@ -325,10 +333,10 @@ describe('Sales RFQ form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
     expect((mockPost.mock.calls[0]![1] as { equipmentLines: unknown[] }).equipmentLines).toEqual([
-      { equipment: 'Main Piston Pump', details: null, quantity: 1, markupPercent: null, labour: [], materials: [{ rfqId: 'rfq-1', supplierId: 's-1' }], otherCosts: [] },
+      { equipment: 'Main Piston Pump', details: null, quantity: 1, markupPercent: null, labour: [], materials: [{ rfqId: 'rfq-1', supplierId: 's-1' }], otherCosts: [], allowances: [] },
       {
         equipment: 'Installation', details: 'Accommodation & LOA\nInstallation Labour', quantity: 2, markupPercent: null,
-        labour: [{ labourRateId: 'lr-welder', hours: 8 }], materials: [], otherCosts: [{ description: 'Accommodation', quantity: 2, unitCost: 1200 }],
+        labour: [{ labourRateId: 'lr-welder', hours: 8 }], materials: [], otherCosts: [{ description: 'Accommodation', quantity: 2, unitCost: 1200 }], allowances: [],
       },
     ]);
   });
@@ -367,6 +375,33 @@ describe('Sales RFQ form', () => {
     const body = mockPost.mock.calls[0]![1] as { markupPercent: number; equipmentLines: Array<{ markupPercent: number | null }> };
     expect(body.markupPercent).toBe(56);
     expect(body.equipmentLines.map((l) => l.markupPercent)).toEqual([null, 62]);
+  });
+
+  // AFRI-0413 quoted its spares at an allowance before Procurement asked Hytec.
+  it('allows for material no supplier has quoted yet, counted as material, and saves it', async () => {
+    renderAt('/sales-rfqs/new');
+    fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1469' } });
+    fireEvent.change(screen.getByLabelText('Equipment'), { target: { value: 'Anticipated Spares' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add allowance to the equipment line' }));
+    fireEvent.change(screen.getByLabelText('Allowance 1 description'), { target: { value: 'Filters, pipe clamps, fittings' } });
+    fireEvent.change(screen.getByLabelText('Allowance 1 amount'), { target: { value: '45000' } });
+    fireEvent.change(screen.getByLabelText('Job markup %'), { target: { value: '62' } });
+    const preview = screen.getByLabelText('Price as typed');
+    // Material, not another cost: 45 000 × 1.62 = 72 900.
+    expect(preview).toHaveTextContent(/Material\s*R\s?45.000,00/);
+    expect(preview).not.toHaveTextContent(/Other costs/);
+    expect(preview).toHaveTextContent(/Total excl. VAT.*72.900,00/);
+
+    fireEvent.change(screen.getByLabelText('Allowance 1 amount'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText('Allowance 1 needs a description and an amount in rand and cents, more than R0.')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Allowance 1 amount'), { target: { value: '45000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    const body = mockPost.mock.calls[0]![1] as { equipmentLines: Array<{ allowances: unknown[] }> };
+    expect(body.equipmentLines[0]!.allowances).toEqual([{ description: 'Filters, pipe clamps, fittings', amount: 45000 }]);
   });
 
   it('refuses a quantity that is not a whole number, naming the line', async () => {

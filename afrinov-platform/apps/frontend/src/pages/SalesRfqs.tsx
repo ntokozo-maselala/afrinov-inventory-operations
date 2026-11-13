@@ -29,7 +29,7 @@ import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney } from '../lib/poMoney';
 import { formatDay } from '../lib/rfq';
-import { SALES_STATUS_LABEL, allMaterials, isCharged, mayApprove, type SalesEquipmentLine, type SalesLabourLine, type SalesMaterial, type SalesOtherCost, type SalesRfq, type SalesRfqStatus } from '../lib/salesRfq';
+import { SALES_STATUS_LABEL, allMaterials, isCharged, mayApprove, type SalesEquipmentLine, type SalesLabourLine, type SalesMaterial, type SalesMaterialAllowance, type SalesOtherCost, type SalesRfq, type SalesRfqStatus } from '../lib/salesRfq';
 import { QUOTATION_SETTINGS, downloadQuotation, quotationCompanyFromSettings } from '../lib/salesQuotation';
 
 const LIST = { label: 'Sales RFQs', to: '/sales-rfqs' };
@@ -387,7 +387,8 @@ function markupWords(r: SalesRfq): string {
 function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipmentLine; r: SalesRfq; canEdit: boolean; linked: boolean }) {
   const t = line.totals;
   const several = r.equipmentLines.length > 1;
-  const nothing = line.labour.length === 0 && line.materials.length === 0 && line.otherCosts.length === 0;
+  const allowances = line.allowances ?? [];
+  const nothing = line.labour.length === 0 && line.materials.length === 0 && allowances.length === 0 && line.otherCosts.length === 0;
   const charged = isCharged(line);
   const priced = t.unitPrice === null
     ? `Cost ${formatMoney(t.unitCost)} a unit; priced once the markup is set`
@@ -401,7 +402,7 @@ function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipme
         description={`${priced}${line.quantity > 1 ? '. The costs below are for one unit.' : ''}`}
       />
       {line.details && <p className="text-sm text-surface-700 whitespace-pre-wrap">{line.details}</p>}
-      {nothing && <EmptyState title="Nothing priced yet" description={canEdit ? 'Edit the Sales RFQ to add labour, a quote or another cost to this line.' : 'Nothing was priced on this line.'} />}
+      {nothing && <EmptyState title="Nothing priced yet" description={canEdit ? 'Edit the Sales RFQ to add labour, a quote, an allowance or another cost to this line.' : 'Nothing was priced on this line.'} />}
       {line.labour.length > 0 && (
         <div>
           <h3 className="text-eyebrow mb-1">Production labour</h3>
@@ -413,6 +414,13 @@ function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipme
           <h3 className="text-eyebrow mb-1">Material</h3>
           <p className="text-meta mb-1">{r.status === 'DRAFT' ? 'Each quote at its total excl. VAT as it stands today.' : 'Each quote at its total excl. VAT when it was submitted.'}</p>
           <DataTable ariaLabel={`Material quotes on line ${line.lineNo}`} rows={line.materials} rowKey={(m) => m.rfqId} columns={materialColumns(linked)} />
+        </div>
+      )}
+      {allowances.length > 0 && (
+        <div>
+          <h3 className="text-eyebrow mb-1">Material allowances</h3>
+          <p className="text-meta mb-1">Estimates for material no supplier has quoted for yet, counted as material.</p>
+          <DataTable ariaLabel={`Material allowances on line ${line.lineNo}`} rows={allowances} rowKey={(a) => a.id} columns={ALLOWANCE_COLUMNS} />
         </div>
       )}
       {line.otherCosts.length > 0 && (
@@ -432,6 +440,11 @@ function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipme
     </section>
   );
 }
+
+const ALLOWANCE_COLUMNS: DataTableColumn<SalesMaterialAllowance>[] = [
+  { key: 'description', header: 'Allowance', render: (a) => <span>{a.description} <Badge tone="warning" className="ml-1">Estimate, no quote yet</Badge></span> },
+  { key: 'amount', header: 'Amount', align: 'right', width: '9rem', className: 'text-num', render: (a) => <span className="font-mono">{formatMoney(a.amount)}</span> },
+];
 
 const OTHER_COLUMNS: DataTableColumn<SalesOtherCost>[] = [
   { key: 'description', header: 'Cost', render: (c) => c.description },

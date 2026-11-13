@@ -53,6 +53,15 @@ export interface SalesOtherCost {
   total: string;
 }
 
+/** Material estimated before any supplier has quoted, for one unit of the line: counted as material. */
+export interface SalesMaterialAllowance {
+  id: string;
+  lineNo: number;
+  description: string;
+  /** Rand excl. VAT, before markup. */
+  amount: string;
+}
+
 /** One equipment line's money: for one unit, then times its quantity. */
 export interface SalesLineTotals {
   quantity: number;
@@ -80,6 +89,8 @@ export interface SalesEquipmentLine {
   labour: SalesLabourLine[];
   materials: SalesMaterial[];
   otherCosts: SalesOtherCost[];
+  /** Material allowed for before any supplier quoted; may be missing from older responses. */
+  allowances?: SalesMaterialAllowance[];
   totals: SalesLineTotals;
 }
 

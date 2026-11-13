@@ -40,6 +40,7 @@ interface SalesRfq {
     labour: Array<{ lineNo: number; role: string; hours: string; hourlyRate: string; total: string }>;
     materials: Array<{ rfqId: string; supplierId: string; amount: string; recommended: boolean; recommendedSupplier: { id: string } | null; unusable: boolean }>;
     otherCosts: Array<{ lineNo: number; description: string; quantity: string; unitCost: string; total: string }>;
+    allowances: Array<{ lineNo: number; description: string; amount: string }>;
     totals: { quantity: number; markupPercent: string | null; labour: string; material: string; other: string; unitCost: string; unitMarkup: string | null; unitPrice: string | null; total: string | null };
   }>;
   totals: Totals;
@@ -318,7 +319,7 @@ describe('Sales requests for quotation over real HTTP', () => {
       // A line with nothing to price, or no name, holds up submitting, by line.
       await sales('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump(), { details: 'Nothing yet' }] });
       const held = await sales<ApiErrorBody>('POST', `/sales-rfqs/${res.body.id}/submit`);
-      expect(held.body.error.message).toMatch(/the equipment on line 2, labour, a quote or another cost on line 2/);
+      expect(held.body.error.message).toMatch(/the equipment on line 2, labour, a quote, an allowance or another cost on line 2/);
 
       // Saving the lines replaces them; the Activity says what they were.
       const saved = await sales<SalesRfq>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump({ quantity: 3 })] });
@@ -411,6 +412,37 @@ describe('Sales requests for quotation over real HTTP', () => {
       expect(history.body[0]!.after.equipmentLines?.map((l) => l.markupPercent)).toEqual(['56', '62']);
       const submitted = await sales<SalesRfq>('POST', `/sales-rfqs/${res.body.id}/submit`);
       expect(submitted.body).toMatchObject({ status: 'PENDING_APPROVAL', totals: { totalExVat: '471636.00' } });
+    });
+
+    // AFRI-0413 quoted its spares at an allowance before Procurement asked Hytec.
+    it('allows for material no supplier has quoted yet, counted as material, as AFRI-0413 Rev 2 quotes its spares', async () => {
+      const sales = await as('SALES');
+      const res = await sales<SalesRfq>('POST', '/sales-rfqs', {
+        projectNumber, markupPercent: 62, deliveryPrice: 0, clientName: 'Samancor TC Smelters (Pty)',
+        equipmentLines: [{
+          equipment: "Anticipated Spares (1 Power Pack's): Filters, Pipe Clamps, Fittings",
+          allowances: [{ description: ' Filters,  pipe clamps, fittings ', amount: 45000 }],
+        }],
+      });
+      expect(res.status).toBe(201);
+      const [spares] = res.body.equipmentLines;
+      expect(spares!.allowances).toEqual([expect.objectContaining({ lineNo: 1, description: 'Filters, pipe clamps, fittings', amount: '45000.00' })]);
+      // Material, not another cost: 45 000 × 1.62 = 72 900.
+      expect(spares!.totals).toMatchObject({ material: '45000.00', other: '0.00', unitPrice: '72900.00', total: '72900.00' });
+      expect(res.body.totals).toMatchObject({ material: '45000.00', other: '0.00', totalExVat: '72900.00' });
+
+      // Checked, naming it.
+      const bad = await sales<ApiErrorBody>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [{ equipment: 'Spares', allowances: [{ description: ' ', amount: 10 }] }] });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error.message).toMatch(/^Allowance 1 needs a description/);
+      expect((await sales('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [{ equipment: 'Spares', allowances: [{ description: 'X', amount: 1.005 }] }] })).status).toBe(400);
+
+      // An allowance alone prices a line, so it can be submitted; the Activity keeps it.
+      const submitted = await sales<SalesRfq>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(submitted.body).toMatchObject({ status: 'PENDING_APPROVAL', totals: { totalExVat: '72900.00' } });
+      const history = await sales<Array<{ action: string; after: { equipmentLines?: Array<{ allowances: unknown[] }> } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
+      const created = history.body.find((h) => h.action === 'CREATE');
+      expect(created!.after.equipmentLines![0]!.allowances).toEqual([{ description: 'Filters, pipe clamps, fittings', amount: '45000.00' }]);
     });
 
     it('starts a new one with one empty equipment line, and moving it to another project takes its quotes off its lines', async () => {
