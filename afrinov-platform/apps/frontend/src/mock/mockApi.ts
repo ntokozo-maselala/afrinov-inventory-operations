@@ -692,17 +692,17 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     labour?: Array<{ labourRateId: string; hours: number }>; materials?: Array<{ rfqId: string; supplierId: string }>;
     otherCosts?: Array<{ description: string; quantity: number; unitCost: number }>;
   };
-  type Body = Partial<Record<'description' | 'notes' | 'clientName' | 'clientAddress' | 'contactName' | 'clientReference' | 'paymentTerms' | 'validity' | 'deliveryDuration' | 'deliveryTerms' | 'signerPhone' | 'signerEmail', string | null>> & {
+  type Body = Partial<Record<'description' | 'notes' | 'quoteNotes' | 'clientName' | 'clientAddress' | 'contactName' | 'clientReference' | 'paymentTerms' | 'validity' | 'deliveryDuration' | 'deliveryTerms' | 'signerPhone' | 'signerEmail', string | null>> & {
     projectNumber?: string; penaltiesApply?: boolean; markupPercent?: number | null; deliveryPrice?: number; closingDate?: string | null;
     equipmentLines?: LineBody[]; reason?: string;
   };
-  const TEXT = ['description', 'notes', 'clientName', 'clientAddress', 'contactName', 'clientReference', 'paymentTerms', 'validity', 'deliveryDuration', 'deliveryTerms', 'signerPhone', 'signerEmail'] as const;
+  const TEXT = ['description', 'notes', 'quoteNotes', 'clientName', 'clientAddress', 'contactName', 'clientReference', 'paymentTerms', 'validity', 'deliveryDuration', 'deliveryTerms', 'signerPhone', 'signerEmail'] as const;
   /** The address, remarks and details keep their lines, as the server keeps them. */
   const lines = (v: string | null | undefined) => {
     const kept = (v ?? '').split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
     return kept.length ? kept.join('\n') : null;
   };
-  const cleanField = (k: (typeof TEXT)[number], v: string | null | undefined) => (k === 'clientAddress' || k === 'notes' ? lines(v) : rfqText(v));
+  const cleanField = (k: (typeof TEXT)[number], v: string | null | undefined) => (k === 'clientAddress' || k === 'notes' || k === 'quoteNotes' ? lines(v) : rfqText(v));
   const b = (body ?? {}) as Body;
   const now = new Date().toISOString();
   const entry = (action: string, after: Record<string, unknown>) => ({ id: nextId('audit'), action, actorId: 'u-admin', before: null, after, createdAt: now });
@@ -738,7 +738,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     return input.map((l, i) => {
       const on = input.length > 1 ? `Equipment line ${i + 1}: ` : '';
       const quantity = l.quantity ?? 1;
-      if (!Number.isInteger(quantity) || quantity < 1) throw err('VALIDATION_ERROR', `${on}the quantity is a whole number, 1 or more`);
+      if (!Number.isInteger(quantity) || quantity < 0) throw err('VALIDATION_ERROR', `${on}the quantity is a whole number, 0 or more (0 prices it without charging it)`);
       return {
         id: nextId('srfqe'), lineNo: i + 1, equipment: rfqText(l.equipment), details: lines(l.details), quantity,
         labour: labourRows(l.labour ?? [], had, on).map((x) => ({ ...x, lineNo: ++labourNo })),
@@ -797,7 +797,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     const clientName = text('clientName', rfqText(project?.client ?? null));
     const created: MockSalesRfq = {
       id: nextId('srfq'), number: number(b.projectNumber), quoteReference: null, status: 'DRAFT', projectNumber: b.projectNumber,
-      description: text('description', rfqText(project?.name ?? null)), notes: text('notes'), penaltiesApply: b.penaltiesApply ?? false,
+      description: text('description', rfqText(project?.name ?? null)), notes: text('notes'), quoteNotes: text('quoteNotes'), penaltiesApply: b.penaltiesApply ?? false,
       markupPercent: b.markupPercent === null || b.markupPercent === undefined ? null : String(b.markupPercent), deliveryPrice: String(b.deliveryPrice ?? 0), vatRate: null,
       clientName, clientAddress: text('clientAddress'), contactName: text('contactName'), clientReference: text('clientReference'),
       paymentTerms: text('paymentTerms', '30 days from invoice date.'), validity: text('validity', '30 days from issue of quotation.'),
@@ -845,6 +845,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
         !l.equipment && (one ? 'the equipment being quoted' : `the equipment on line ${l.lineNo}`),
         l.labour.length === 0 && l.materials.length === 0 && l.otherCosts.length === 0 && (one ? 'labour, a quote or another cost to price' : `labour, a quote or another cost on line ${l.lineNo}`),
       ]),
+      rfq.equipmentLines.length > 0 && rfq.equipmentLines.every((l) => l.quantity === 0) && (one ? 'a quantity of 1 or more' : 'a quantity of 1 or more on at least one line'),
       !rfq.clientName && "the client's name", rfq.markupPercent === null && 'the markup',
     ].filter((m): m is string => !!m);
     if (missing.length) throw err('VALIDATION_ERROR', `Before submitting ${rfq.number}, add ${missing.join(', ')}.`);

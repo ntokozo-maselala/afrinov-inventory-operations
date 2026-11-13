@@ -34,6 +34,7 @@ interface SalesRfq {
   issuedAt: string | null;
   returnReason: string | null;
   clientAddress: string | null;
+  quoteNotes: string | null;
   equipmentLines: Array<{
     lineNo: number; equipment: string | null; details: string | null; quantity: number;
     labour: Array<{ lineNo: number; role: string; hours: string; hourlyRate: string; total: string }>;
@@ -327,6 +328,43 @@ describe('Sales requests for quotation over real HTTP', () => {
       const history = await sales<Array<{ action: string; after: { equipmentLines?: Array<{ quantity: number }> } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
       expect(history.body[0]!.after.equipmentLines?.map((l) => l.quantity)).toEqual([3]);
       expect((await sales<SalesRfq>('POST', `/sales-rfqs/${res.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
+    });
+
+    // AFRI-0413 Rev 2 prices the electrode flexibles at quantity 0, as the client
+    // supplies them, and adds "All Flexibles to be free issued by client".
+    it('prices a line at quantity 0 without charging it, and keeps the quotation\'s own notes, as AFRI-0413 Rev 2', async () => {
+      const sales = await as('SALES');
+      const res = await sales<SalesRfq>('POST', '/sales-rfqs', {
+        projectNumber, markupPercent: 50, deliveryPrice: 0,
+        quoteNotes: '  All Flexibles to be free issued by client \n\n Prices valid while stock lasts ',
+        equipmentLines: [
+          { equipment: 'Maintenance', otherCosts: [{ description: 'Oil testing', quantity: 1, unitCost: 1000 }] },
+          { equipment: 'Electrode Flexibles per Furnace (Supplied to Client)', quantity: 0, otherCosts: [{ description: 'Flexibles', quantity: 1, unitCost: 100080.27 }] },
+        ],
+      });
+      expect(res.status).toBe(201);
+      // Kept line by line, trimmed, blank lines dropped.
+      expect(res.body.quoteNotes).toBe('All Flexibles to be free issued by client\nPrices valid while stock lasts');
+      const [, flexibles] = res.body.equipmentLines;
+      // Its price shows; it charges nothing.
+      expect(flexibles).toMatchObject({ quantity: 0, totals: { unitCost: '100080.27', unitMarkup: '50040.14', unitPrice: '150120.41', total: '0.00' } });
+      expect(res.body.totals).toMatchObject({ cost: '1000.00', markup: '500.00', equipment: '1500.00', totalExVat: '1500.00' });
+
+      // A negative quantity is still refused.
+      expect((await sales('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [{ equipment: 'X', quantity: -1 }] })).status).toBe(400);
+      // A quotation that charges nothing isn't sent to the Director.
+      await sales('PATCH', `/sales-rfqs/${res.body.id}`, {
+        equipmentLines: [{ equipment: 'Electrode Flexibles', quantity: 0, otherCosts: [{ description: 'Flexibles', quantity: 1, unitCost: 10 }] }],
+      });
+      const nothing = await sales<ApiErrorBody>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(nothing.status).toBe(400);
+      expect(nothing.body.error.message).toMatch(/a quantity of 1 or more/);
+
+      // Clearing the notes clears them, and the Activity keeps the change.
+      const cleared = await sales<SalesRfq>('PATCH', `/sales-rfqs/${res.body.id}`, { quoteNotes: ' ' });
+      expect(cleared.body.quoteNotes).toBeNull();
+      const history = await sales<Array<{ after: { quoteNotes?: string | null } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
+      expect(history.body.some((h) => 'quoteNotes' in h.after && h.after.quoteNotes === null)).toBe(true);
     });
 
     it('starts a new one with one empty equipment line, and moving it to another project takes its quotes off its lines', async () => {

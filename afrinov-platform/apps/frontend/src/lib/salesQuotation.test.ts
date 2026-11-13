@@ -2,7 +2,8 @@
 // the price the form shows while a Sales RFQ is typed.
 import { describe, it, expect } from 'vitest';
 import {
-  buildQuotation, quotationCompanyFromSettings, quotationConditions, quotationDescription, quotationFilename, quotationHeading, quotationLines, quotationMoney, quotationStamp,
+  buildQuotation, quotationCompanyFromSettings, quotationConditions, quotationDescription, quotationFilename, quotationHeading, quotationLines, quotationMoney, quotationNotes,
+  quotationStamp,
 } from './salesQuotation';
 import { costingPreview, mayApprove, parseAmount, type SalesEquipmentLine, type SalesRfq } from './salesRfq';
 
@@ -16,7 +17,7 @@ const pumpLine = (over: Partial<SalesEquipmentLine> = {}): SalesEquipmentLine =>
 
 const rfq = (over: Partial<SalesRfq> = {}): SalesRfq => ({
   id: 'r-1', number: 'AFRI-02A-1469-02-01', quoteReference: 'AFRI-02A-1469-04-1', status: 'APPROVED', projectNumber: 'AFRI-1469',
-  equipment: 'Main Piston Pump', equipmentLines: [pumpLine()], description: null, notes: null, penaltiesApply: false, markupPercent: '0', deliveryPrice: '0', vatRate: '15',
+  equipment: 'Main Piston Pump', equipmentLines: [pumpLine()], description: null, notes: null, quoteNotes: null, penaltiesApply: false, markupPercent: '0', deliveryPrice: '0', vatRate: '15',
   clientName: 'Northam Platinum', clientAddress: 'Main Office\nFarm Zondereinde 384KQ\nDistrict of Thabazimbi, South Africa', contactName: 'Bongi', clientReference: null,
   paymentTerms: '30 days from Invoice date.', validity: '30 days from issue of quotation.', deliveryDuration: '2 - 4 weeks from date of receiving official order', deliveryTerms: 'DAP, Northam Platinum',
   signerPhone: '+27 73 805 9123', signerEmail: 'Northamplats@afrinov.co.za', issuedAt: '2026-10-27T00:00:00.000Z', closingDate: null, createdAt: '2026-10-20T08:00:00.000Z',
@@ -57,6 +58,22 @@ describe('the quotation', () => {
     ]);
   });
 
+  // AFRI-0413 Rev 2: the flexibles the client supplies are priced at quantity 0, "R -".
+  it('prints a line at quantity 0 with its unit price and R -, charging nothing', () => {
+    const flexibles = pumpLine({
+      id: 'e-3', lineNo: 2, equipment: 'Electrode Flexibles per Furnace (Supplied to Client)', quantity: 0,
+      totals: { ...pumpLine().totals, quantity: 0, unitPrice: '276660.56', total: '0.00' },
+    });
+    expect(quotationLines(rfq({ equipmentLines: [pumpLine(), flexibles] }))[1]).toEqual(['2', 'Electrode Flexibles per Furnace (Supplied to Client)', '0', 'R 276 660,56', 'R -']);
+  });
+
+  it("prints the company's Notes, then the quotation's own, one per line", () => {
+    expect(quotationNotes('Orders to be made out to Afrinov (Pty) Ltd.', rfq({ quoteNotes: 'All Flexibles to be free issued by client\n\n Second note ' })))
+      .toEqual(['Orders to be made out to Afrinov (Pty) Ltd.', 'All Flexibles to be free issued by client', 'Second note']);
+    expect(quotationNotes('', rfq({ quoteNotes: 'Only this one' }))).toEqual(['Only this one']);
+    expect(quotationNotes('', rfq())).toEqual([]);
+  });
+
   it('numbers the conditions, leaving out any left blank', () => {
     expect(quotationConditions(rfq({ validity: ' ' }))).toEqual([
       'Payments terms: 30 days from Invoice date.',
@@ -89,6 +106,13 @@ describe('the quotation', () => {
     expect(pdf).not.toContain('NOT FOR ISSUE');
     // The faint flame mark in the middle of the page, as on the example.
     expect(pdf).toMatch(/\/ca 0\.15/);
+  });
+
+  it("prints the quotation's own Notes under the company's", async () => {
+    const pdf = text(await buildQuotation(rfq({ quoteNotes: 'All Flexibles to be free issued by client' }), { name: 'Afrinov', notes: 'Orders to be made out to Afrinov (Pty) Ltd.', letterhead: '' }));
+    expect(pdf).toContain('Orders to be made out to Afrinov');
+    expect(pdf).toContain('All Flexibles to be free issued by client');
+    expect(pdf.indexOf('Orders to be made out to Afrinov')).toBeLessThan(pdf.indexOf('All Flexibles to be free issued by client'));
   });
 });
 

@@ -16,7 +16,7 @@
 import { triggerDownload } from '../api/exportReport';
 import { drawLogo, drawLogoWatermark, pdfText } from './pdf';
 import { finishPages } from './poDocument';
-import type { SalesEquipmentLine, SalesRfq } from './salesRfq';
+import { isCharged, type SalesEquipmentLine, type SalesRfq } from './salesRfq';
 
 /** The wording Settings → Purchase orders has for quotations. */
 export interface QuotationCompany { name: string; notes: string; letterhead: string }
@@ -69,14 +69,24 @@ export function quotationDescription(line: Pick<SalesEquipmentLine, 'equipment' 
   return [line.equipment?.trim() || '-', ...details].join('\n');
 }
 
-/** The table's rows: each equipment line, then Delivery when it is charged, numbered on. */
+/**
+ * The table's rows: each equipment line, then Delivery when it is charged,
+ * numbered on. A line at quantity 0 shows its unit price and "R -", as AFRI-0413
+ * Rev 2 prints the flexibles the client supplies.
+ */
 export function quotationLines(r: Pick<SalesRfq, 'equipmentLines' | 'totals'>): string[][] {
   const rows = r.equipmentLines.map((l, i) => [
-    String(i + 1), quotationDescription(l), String(l.quantity), quotationMoney(l.totals.unitPrice), quotationMoney(l.totals.total),
+    String(i + 1), quotationDescription(l), String(l.quantity), quotationMoney(l.totals.unitPrice),
+    isCharged(l) ? quotationMoney(l.totals.total) : 'R -',
   ]);
   const delivery = Number(r.totals.delivery);
   if (delivery > 0) rows.push([String(rows.length + 1), 'Delivery', '1', quotationMoney(delivery), quotationMoney(delivery)]);
   return rows;
+}
+
+/** The Notes, one per line: the company's (Settings) first, then this quotation's own. */
+export function quotationNotes(companyNotes: string, r: Pick<SalesRfq, 'quoteNotes'>): string[] {
+  return [companyNotes, r.quoteNotes ?? ''].flatMap((n) => n.split('\n')).map((l) => l.trim()).filter(Boolean);
 }
 
 /** The numbered Conditions, each left off when blank. */
@@ -182,13 +192,17 @@ export async function buildQuotation(r: SalesRfq, company: QuotationCompany, gen
   y = finalY() + 8;
 
   const ensure = (needed: number) => { if (y + needed > pageHeight - BOTTOM - 20) { doc.addPage(); watermark(); y = TOP; } };
-  if (company.notes) {
+  const notes = quotationNotes(company.notes, r);
+  if (notes.length) {
     ensure(14);
     text('Notes:', SIDE, y, { bold: true });
     y += 6;
-    for (const line of doc.splitTextToSize(pdfText(company.notes), width) as string[]) {
-      text(line, SIDE, y, { bold: true, italic: true });
-      y += 5;
+    for (const note of notes) {
+      for (const line of doc.splitTextToSize(pdfText(note), width) as string[]) {
+        ensure(6);
+        text(line, SIDE, y, { bold: true, italic: true });
+        y += 5;
+      }
     }
     y += 4;
   }

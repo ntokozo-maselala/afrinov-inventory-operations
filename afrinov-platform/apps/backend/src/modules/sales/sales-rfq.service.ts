@@ -39,7 +39,7 @@ export interface SalesEquipmentLineInput {
   equipment?: string | null;
   /** Printed under it, one per line. */
   details?: string | null;
-  /** 1 when left out. */
+  /** 1 when left out. 0 prints it with its unit price and "R -", charging nothing. */
   quantity?: number;
   labour?: SalesLabourInput[];
   /** One per Procurement RFQ; an RFQ is counted on one line only. */
@@ -51,6 +51,8 @@ export interface SalesEquipmentLineInput {
 export interface SalesRfqFields {
   description?: string | null;
   notes?: string | null;
+  /** Printed on the quotation under the company's Notes, one per line. */
+  quoteNotes?: string | null;
   penaltiesApply?: boolean;
   markupPercent?: number | null;
   deliveryPrice?: number;
@@ -74,7 +76,7 @@ export interface CreateSalesRfqInput extends SalesRfqFields { projectNumber: str
 export interface UpdateSalesRfqInput extends SalesRfqFields { id: string; projectNumber?: string }
 
 const TEXT_FIELDS = [
-  'description', 'notes', 'clientName', 'clientAddress', 'contactName', 'clientReference',
+  'description', 'notes', 'quoteNotes', 'clientName', 'clientAddress', 'contactName', 'clientReference',
   'paymentTerms', 'validity', 'deliveryDuration', 'deliveryTerms', 'signerPhone', 'signerEmail',
 ] as const;
 type TextField = (typeof TEXT_FIELDS)[number];
@@ -86,8 +88,9 @@ export function cleanLines(s: string | null | undefined): string | null {
   return lines.length ? lines.join('\n') : null;
 }
 
-/** The address and remarks keep their lines, as typed; the rest is one line. */
-const cleanField = (k: TextField, v: string | null | undefined) => (k === 'clientAddress' || k === 'notes' ? cleanLines(v) : cleanText(v));
+/** The address, remarks and quotation notes keep their lines, as typed; the rest is one line. */
+const KEEPS_LINES: ReadonlySet<TextField> = new Set(['clientAddress', 'notes', 'quoteNotes']);
+const cleanField = (k: TextField, v: string | null | undefined) => (KEEPS_LINES.has(k) ? cleanLines(v) : cleanText(v));
 
 /** At most this many equipment lines on one quotation. */
 export const MAX_EQUIPMENT_LINES = 20;
@@ -235,7 +238,9 @@ async function checkedLines(lines: SalesEquipmentLineInput[], had: KeptLabour[],
   for (const [i, line] of lines.entries()) {
     const on = lines.length > 1 ? `Equipment line ${i + 1}: ` : '';
     const quantity = line.quantity ?? 1;
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) throw Errors.validation(`${on}the quantity is a whole number, 1 or more`);
+    if (!Number.isInteger(quantity) || quantity < 0 || quantity > 100000) {
+      throw Errors.validation(`${on}the quantity is a whole number, 0 or more (0 prices it without charging it)`);
+    }
     const count = (line.materials ?? []).length;
     out.push({
       equipment: cleanText(line.equipment),
@@ -372,6 +377,8 @@ function stillNeeded(rfq: Detail): string[] {
       l.labour.length === 0 && l.materials.length === 0 && l.otherCosts.length === 0
         && (one ? 'labour, a quote or another cost to price' : `labour, a quote or another cost on line ${l.lineNo}`),
     ]),
+    // Lines at quantity 0 are priced but not charged; the quotation charges for something.
+    lines.length > 0 && lines.every((l) => l.quantity === 0) && (one ? 'a quantity of 1 or more' : 'a quantity of 1 or more on at least one line'),
     !rfq.clientName && "the client's name",
     rfq.markupPercent === null && 'the markup',
   ].filter((m): m is string => !!m);
@@ -448,6 +455,7 @@ export const SalesRfqService = {
           projectNumber,
           description: text('description', projectName),
           notes: text('notes'),
+          quoteNotes: text('quoteNotes'),
           penaltiesApply: input.penaltiesApply ?? false,
           markupPercent,
           deliveryPrice,

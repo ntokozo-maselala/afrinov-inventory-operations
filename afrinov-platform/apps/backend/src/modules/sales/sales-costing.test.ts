@@ -35,6 +35,18 @@ describe('Sales RFQ costing', () => {
     expect(t).toMatchObject({ markup: '12.50', equipment: '112.51', vat: '16.88', totalIncVat: '129.39' });
   });
 
+  // AFRI-0413 Rev 2: lines 3 and 4 show their price at quantity 0, charging nothing.
+  it('prices a line of quantity 0 for the client to see, adding nothing to the totals', () => {
+    const t = costingTotals({
+      lines: [line({ otherCosts: [{ quantity: 1, unitCost: 1000 }] }), line({ quantity: 0, otherCosts: [{ quantity: 1, unitCost: 100080.27 }] })],
+      markupPercent: 50, deliveryPrice: 0, vatRate: 15,
+    });
+    expect(t.lines[1]).toEqual({
+      quantity: 0, labour: '0.00', material: '0.00', other: '100080.27', unitCost: '100080.27', unitMarkup: '50040.14', unitPrice: '150120.41', total: '0.00',
+    });
+    expect(t).toMatchObject({ other: '1000.00', cost: '1000.00', markup: '500.00', equipment: '1500.00', totalExVat: '1500.00', vat: '225.00', totalIncVat: '1725.00' });
+  });
+
   it('matches the Northam Platinum quotation from its equipment price', () => {
     const t = costingTotals({ lines: [line({ materials: ['154866.25'] })], markupPercent: 0, deliveryPrice: 0, vatRate: 15 });
     expect(t).toMatchObject({ totalExVat: '154866.25', vat: '23229.94', totalIncVat: '178096.19' });

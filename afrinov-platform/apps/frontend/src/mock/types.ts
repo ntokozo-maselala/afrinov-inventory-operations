@@ -359,6 +359,7 @@ export interface MockSalesRfq {
   projectNumber: string;
   description: string | null;
   notes: string | null;
+  quoteNotes: string | null;
   penaltiesApply: boolean;
   markupPercent: string | null;
   deliveryPrice: string;

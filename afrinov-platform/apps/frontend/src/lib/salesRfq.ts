@@ -104,6 +104,8 @@ export interface SalesRfq {
   equipment: string | null;
   description: string | null;
   notes: string | null;
+  /** Printed on the quotation under the company's Notes, one per line. */
+  quoteNotes: string | null;
   penaltiesApply: boolean;
   markupPercent: string | null;
   deliveryPrice: string;
@@ -137,6 +139,12 @@ export interface SalesRfq {
   equipmentLines: SalesEquipmentLine[];
   totals: SalesTotals;
 }
+
+/**
+ * A line at quantity 0 is priced for the client to see but not charged: the
+ * quotation prints its unit price and "R -" (AFRI-0413 lines 3 and 4).
+ */
+export const isCharged = (l: Pick<SalesEquipmentLine, 'quantity'>) => l.quantity > 0;
 
 /** Every quote counted, on whichever line. */
 export const allMaterials = (r: Pick<SalesRfq, 'equipmentLines'>): SalesMaterial[] => r.equipmentLines.flatMap((l) => l.materials);

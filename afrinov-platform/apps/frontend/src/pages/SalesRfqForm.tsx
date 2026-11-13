@@ -72,8 +72,8 @@ const fromSaved = (l: SalesEquipmentLine): DraftLine => ({
 
 const typedLabourOf = (l: DraftLine) => l.labour.filter((x) => x.labourRateId || x.hours.trim());
 const typedOtherOf = (l: DraftLine) => l.other.filter((c) => c.description.trim() || c.unitCost.trim());
-/** A whole number, 1 or more; null otherwise. */
-const wholeQuantity = (text: string) => (/^\s*\d+\s*$/.test(text) && Number(text) >= 1 && Number(text) <= 100000 ? Number(text) : null);
+/** A whole number, 0 or more (0: priced for the client to see, not charged); null otherwise. */
+const wholeQuantity = (text: string) => (/^\s*\d+\s*$/.test(text) && Number(text) >= 0 && Number(text) <= 100000 ? Number(text) : null);
 
 export function NewSalesRfq() {
   if (!usePermissions().hasPermission('sales:manage')) {
@@ -128,6 +128,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
   const [signerPhone, setSignerPhone] = useState(rfq?.signerPhone ?? '');
   const [signerEmail, setSignerEmail] = useState(rfq?.signerEmail ?? '');
   const [notes, setNotes] = useState(rfq?.notes ?? '');
+  const [quoteNotes, setQuoteNotes] = useState(rfq?.quoteNotes ?? '');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
 
@@ -200,7 +201,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
   function linesProblem(): string | null {
     for (const [i, l] of lines.entries()) {
       const on = lines.length > 1 ? `Equipment line ${i + 1}: ` : '';
-      if (wholeQuantity(l.quantity) === null) return `${on}the quantity is a whole number, 1 or more.`;
+      if (wholeQuantity(l.quantity) === null) return `${on}the quantity is a whole number, 0 or more (0 prices it without charging it).`;
       const badLabour = typedLabourOf(l).findIndex((x) => {
         const h = parseAmount(x.hours);
         return !x.labourRateId || h === null || h <= 0 || decimals(x.hours) > 2;
@@ -252,6 +253,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
       ...(rfq || deliveryTerms.trim() ? { deliveryTerms: text(deliveryTerms) } : {}),
       signerPhone: text(signerPhone),
       ...(rfq || signerEmail.trim() ? { signerEmail: text(signerEmail) } : {}),
+      quoteNotes: text(quoteNotes),
       notes: text(notes),
     };
     setBusy(true);
@@ -384,6 +386,9 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
                 <Input id="srfq-email" type="email" maxLength={200} value={signerEmail} onChange={(e) => setSignerEmail(e.target.value)} />
               </Field>
             </div>
+            <Field label="Notes on the quotation" htmlFor="srfq-quote-notes" help="Printed under the company's Notes, one per line, e.g. All Flexibles to be free issued by client.">
+              <Textarea id="srfq-quote-notes" rows={2} maxLength={1000} value={quoteNotes} onChange={(e) => setQuoteNotes(e.target.value)} />
+            </Field>
           </fieldset>
 
           <Field label="Remarks" htmlFor="srfq-notes" help="For Sales and the Director; not on the quotation.">
@@ -407,7 +412,10 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
               ...(preview.other > 0 ? [['Other costs', preview.other]] : []),
               ['Cost', preview.cost, true],
               ['Markup', preview.markup],
-              ...lines.map((l, i) => [`${i + 1}. ${l.equipment.trim() || 'Equipment'}${(wholeQuantity(l.quantity) ?? 1) > 1 ? ` × ${wholeQuantity(l.quantity)}` : ''}`, preview.lines[i]!.total]),
+              ...lines.map((l, i) => {
+                const q = wholeQuantity(l.quantity) ?? 1;
+                return [`${i + 1}. ${l.equipment.trim() || 'Equipment'}${q > 1 ? ` × ${q}` : q === 0 ? ' (not charged)' : ''}`, preview.lines[i]!.total];
+              }),
               ...(lines.length > 1 ? [['Equipment lines', preview.equipment, true]] : []),
               ['Delivery', parseAmount(delivery) ?? 0],
               ['Total excl. VAT', preview.totalExVat, true],
@@ -492,7 +500,7 @@ function EquipmentLineCard({
         <Field label="Equipment" htmlFor={id('equipment')} help="The line on the quotation, e.g. Main Piston Pump or Installation. Needed to submit.">
           <Input id={id('equipment')} maxLength={200} value={line.equipment} onChange={(e) => onChange(() => ({ equipment: e.target.value }))} />
         </Field>
-        <Field label="Qty" htmlFor={id('quantity')} help="Whole number.">
+        <Field label="Qty" htmlFor={id('quantity')} help="Whole number. 0: priced, not charged.">
           <Input id={id('quantity')} inputMode="numeric" autoComplete="off" className="font-mono" value={line.quantity} onChange={(e) => onChange(() => ({ quantity: e.target.value }))} />
         </Field>
         <div className="sm:col-span-2">
@@ -502,6 +510,7 @@ function EquipmentLineCard({
         </div>
       </div>
       {quantity !== null && quantity > 1 && <p className="text-meta">The hours, quotes and other costs below are for one unit; the line&rsquo;s price is that times {quantity}.</p>}
+      {quantity === 0 && <p className="text-meta">Priced for the client to see, not charged: the quotation prints its unit price and R -, and it adds nothing to the total.</p>}
 
       <div>
         <div className="flex items-center justify-between mb-2">
