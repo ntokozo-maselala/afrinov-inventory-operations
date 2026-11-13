@@ -30,6 +30,8 @@ const equipmentLine = z.object({
   materials: z.array(z.object({ rfqId: z.uuid(), supplierId: supplierIdSchema })).max(50).optional(),
   // Accommodation, LOA, travel: quantity × unit cost in rand.
   otherCosts: z.array(z.object({ description: z.string().max(200), quantity: z.number().gt(0).max(1e6), unitCost: z.number().gt(0).max(1e10) })).max(50).optional(),
+  // Material estimated before any supplier has quoted: a description and rand, counted as material.
+  allowances: z.array(z.object({ description: z.string().max(200), amount: z.number().gt(0).max(1e10) })).max(50).optional(),
 });
 
 const salesFields = {

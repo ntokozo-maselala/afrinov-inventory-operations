@@ -6,7 +6,8 @@
 //
 //   labour       = Σ hours × hourly rate, each line rounded to cents
 //   material     = Σ the chosen quote on each of its Procurement RFQs, in rand
-//                  at the Settings exchange rate for another currency
+//                  at the Settings exchange rate for another currency, and any
+//                  allowance for material no supplier has quoted for yet
 //   other        = Σ quantity × unit cost (accommodation, LOA), each rounded
 //   unit cost    = labour + material + other
 //   unit markup  = unit cost × markup% (the sheet's "× 1.4" is 40%): the

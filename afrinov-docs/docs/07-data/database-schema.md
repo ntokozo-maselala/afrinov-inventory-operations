@@ -58,6 +58,7 @@ How Sales prices one piece of equipment for the client, the "Costing: Sales Rep.
 | `sales_rfq_labour_lines` (SalesRfqLabourLine) | sales_rfq_id, equipment_line_id, line_no, labour_rate_id, role, hours, hourly_rate | (sales_rfq_id, line_no) unique, numbered through the Sales RFQ; the role and rate as they were when the line was saved; cascade on delete of the Sales RFQ or its equipment line |
 | `sales_rfq_materials` (SalesRfqMaterial) | sales_rfq_id, rfq_id, equipment_line_id, supplier_id, quote_total, currency, amount | composite PK (sales_rfq_id, rfq_id): one quote per Procurement RFQ, on one equipment line; quote_total in the quote's currency and amount in rand at the Settings exchange rate, both excl. VAT, refreshed on save and fixed on submission |
 | `sales_rfq_other_costs` (SalesRfqOtherCost) | sales_rfq_id, equipment_line_id, line_no, description, quantity, unit_cost | (sales_rfq_id, line_no) unique, numbered through the Sales RFQ; accommodation, LOA, travel or hire on a line, for one unit, in rand excl. VAT, before markup; cascade on delete |
+| `sales_rfq_material_allowances` (SalesRfqMaterialAllowance) | sales_rfq_id, equipment_line_id, line_no, description, amount | (sales_rfq_id, line_no) unique, numbered through the Sales RFQ; material Sales estimates on a line before any supplier has quoted (AFRI-0413's anticipated spares), for one unit, in rand excl. VAT, before markup; counted as material, shown as an estimate; cascade on delete |
 | `labour_rates` (LabourRate) | role, hourly_rate, active | role unique; the Manpower Rate list's selling rates, kept by the Workshop Manager; made inactive rather than deleted |
 
 Procurement recommends a quote for costing on its RFQ: `rfqs.recommended_supplier_id`, `recommended_at`, `recommended_by_id`. It is not an award and raises no order; it changes only while the RFQ is sent, and is cleared when that supplier declines.
@@ -65,6 +66,8 @@ Procurement recommends a quote for costing on its RFQ: `rfqs.recommended_supplie
 The migration `20260101000055_sales_rfq_costing` refuses to run while any supplier price or quotation PDF is recorded on a Sales RFQ, rather than drop it: those rows are exported and deleted first. A Sales RFQ that was sent becomes a draft.
 
 The migration `20260101000058_sales_rfq_equipment_lines` gives every Sales RFQ one equipment line, quantity 1, named as its equipment was, and moves its labour and quotes onto it; `sales_rfqs.equipment` is then dropped. One line of quantity 1 with no other costs adds up exactly as before (`sales-costing.ts`), so no approved price moves.
+
+The migration `20260101000062_sales_rfq_material_allowances` adds `sales_rfq_material_allowances`; nothing existing changes.
 
 The migration `20260101000061_sales_rfq_line_markup` adds `sales_rfq_equipment_lines.markup_percent`, null on every line kept so far, so each takes the job's markup and no price moves.
 
