@@ -17,7 +17,7 @@ describe('Sales RFQ costing', () => {
     expect(t).toEqual({
       labour: '5650.00', material: '9000.00', other: '0.00', cost: '14650.00', markup: '5860.00', equipment: '20510.00', delivery: '500.00',
       totalExVat: '21010.00', vatRate: '15', vat: '3151.50', totalIncVat: '24161.50',
-      lines: [{ quantity: 1, labour: '5650.00', material: '9000.00', other: '0.00', unitCost: '14650.00', unitMarkup: '5860.00', unitPrice: '20510.00', total: '20510.00' }],
+      lines: [{ quantity: 1, markupPercent: '40', labour: '5650.00', material: '9000.00', other: '0.00', unitCost: '14650.00', unitMarkup: '5860.00', unitPrice: '20510.00', total: '20510.00' }],
     });
   });
 
@@ -42,9 +42,32 @@ describe('Sales RFQ costing', () => {
       markupPercent: 50, deliveryPrice: 0, vatRate: 15,
     });
     expect(t.lines[1]).toEqual({
-      quantity: 0, labour: '0.00', material: '0.00', other: '100080.27', unitCost: '100080.27', unitMarkup: '50040.14', unitPrice: '150120.41', total: '0.00',
+      quantity: 0, markupPercent: '50', labour: '0.00', material: '0.00', other: '100080.27', unitCost: '100080.27', unitMarkup: '50040.14', unitPrice: '150120.41', total: '0.00',
     });
     expect(t).toMatchObject({ other: '1000.00', cost: '1000.00', markup: '500.00', equipment: '1500.00', totalExVat: '1500.00', vat: '225.00', totalIncVat: '1725.00' });
+  });
+
+  // AFRI-0413's costing sheet: the maintenance × 1.3 × 1.2 (56%), the spares
+  // × 1.35 × 1.2 (62%), the hydraulic flexibles × 1.3 × 1.2, not charged.
+  it('marks each line up at its own markup, or the job\'s when it has none, as AFRI-0413 Rev 2', () => {
+    const t = costingTotals({
+      lines: [
+        line({ otherCosts: [{ quantity: 1, unitCost: 255600 }] }),
+        line({ markupPercent: 62, otherCosts: [{ quantity: 1, unitCost: 45000 }] }),
+        line({ quantity: 0, otherCosts: [{ quantity: 1, unitCost: 46870 }] }),
+      ],
+      markupPercent: 56, deliveryPrice: 0, vatRate: 15,
+    });
+    expect(t.lines.map((l) => [l.markupPercent, l.unitPrice, l.total])).toEqual([['56', '398736.00', '398736.00'], ['62', '72900.00', '72900.00'], ['56', '73117.20', '0.00']]);
+    expect(t).toMatchObject({ cost: '300600.00', markup: '171036.00', equipment: '471636.00', totalExVat: '471636.00', vat: '70745.40', totalIncVat: '542381.40' });
+  });
+
+  it('prices the quotation only once every line has a markup, its own or the job\'s', () => {
+    const t = costingTotals({ lines: [line({ markupPercent: 10, otherCosts: [{ quantity: 1, unitCost: 100 }] }), line({ otherCosts: [{ quantity: 1, unitCost: 50 }] })], markupPercent: null, deliveryPrice: 0, vatRate: 15 });
+    expect(t.lines.map((l) => l.unitPrice)).toEqual(['110.00', null]);
+    expect(t).toMatchObject({ cost: '150.00', markup: null, equipment: null, totalExVat: null });
+    const own = costingTotals({ lines: [line({ markupPercent: 10, otherCosts: [{ quantity: 1, unitCost: 100 }] })], markupPercent: null, deliveryPrice: 0, vatRate: 15 });
+    expect(own).toMatchObject({ markup: '10.00', totalExVat: '110.00' });
   });
 
   it('matches the Northam Platinum quotation from its equipment price', () => {
@@ -68,7 +91,7 @@ describe('Sales RFQ costing', () => {
   it('prices one unit, rounds it, then multiplies by the quantity, so Qty × Unit Price is the Total', () => {
     const l = lineTotals(line({ quantity: 3, materials: ['1000.00'], otherCosts: [{ quantity: 1, unitCost: 0.01 }] }), 33.33);
     // 1000.01 × 33.33% = 333.3033… → 333.30; unit price 1333.31; × 3.
-    expect(l).toEqual({ quantity: 3, labour: '0.00', material: '1000.00', other: '0.01', unitCost: '1000.01', unitMarkup: '333.30', unitPrice: '1333.31', total: '3999.93' });
+    expect(l).toEqual({ quantity: 3, markupPercent: '33.33', labour: '0.00', material: '1000.00', other: '0.01', unitCost: '1000.01', unitMarkup: '333.30', unitPrice: '1333.31', total: '3999.93' });
     const t = costingTotals({ lines: [line({ quantity: 3, materials: ['1000.00'], otherCosts: [{ quantity: 1, unitCost: 0.01 }] })], markupPercent: 33.33, deliveryPrice: 100, vatRate: 15 });
     // The overall figures count every unit, and still add up: cost + markup = equipment.
     expect(t).toMatchObject({ material: '3000.00', other: '0.03', cost: '3000.03', markup: '999.90', equipment: '3999.93', totalExVat: '4099.93' });

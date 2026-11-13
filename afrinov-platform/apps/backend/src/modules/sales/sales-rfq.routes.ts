@@ -23,6 +23,8 @@ const equipmentLine = z.object({
   details: rfqText(2000),
   // 0: priced for the client to see, not charged (printed "R -").
   quantity: z.number().int().min(0).max(100000).optional(),
+  // Its own markup, %; null or left out: the job's.
+  markupPercent: z.number().min(0).max(1000).nullable().optional(),
   labour: z.array(z.object({ labourRateId: z.uuid(), hours: z.number().min(0.01).max(100000) })).max(100).optional(),
   // One supplier's whole quote per Procurement RFQ, each RFQ on one line only.
   materials: z.array(z.object({ rfqId: z.uuid(), supplierId: supplierIdSchema })).max(50).optional(),

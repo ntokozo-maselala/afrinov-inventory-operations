@@ -10,8 +10,8 @@ import { costingPreview, mayApprove, parseAmount, type SalesEquipmentLine, type 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
 
 const pumpLine = (over: Partial<SalesEquipmentLine> = {}): SalesEquipmentLine => ({
-  id: 'e-1', lineNo: 1, equipment: 'Main Piston Pump', details: null, quantity: 1, labour: [], materials: [], otherCosts: [],
-  totals: { quantity: 1, labour: '0.00', material: '154866.25', other: '0.00', unitCost: '154866.25', unitMarkup: '0.00', unitPrice: '154866.25', total: '154866.25' },
+  id: 'e-1', lineNo: 1, equipment: 'Main Piston Pump', details: null, quantity: 1, markupPercent: null, labour: [], materials: [], otherCosts: [],
+  totals: { quantity: 1, markupPercent: '0', labour: '0.00', material: '154866.25', other: '0.00', unitCost: '154866.25', unitMarkup: '0.00', unitPrice: '154866.25', total: '154866.25' },
   ...over,
 });
 
@@ -121,7 +121,7 @@ describe('the price while it is typed', () => {
     const pump = { quantity: 1, labour: [{ hours: 10, hourlyRate: 400 }, { hours: 5.5, hourlyRate: 300 }], materials: [9000], otherCosts: [] };
     expect(costingPreview({ lines: [pump], markupPercent: 40, deliveryPrice: 500, vatRate: 15 })).toEqual({
       labour: 5650, material: 9000, other: 0, cost: 14650, markup: 5860, equipment: 20510, totalExVat: 21010, vat: 3151.5, totalIncVat: 24161.5,
-      lines: [{ unitCost: 14650, unitPrice: 20510, total: 20510 }],
+      lines: [{ markupPercent: 40, unitCost: 14650, unitPrice: 20510, total: 20510 }],
     });
     expect(costingPreview({ lines: [{ ...pump, labour: [], materials: [100] }], markupPercent: null, deliveryPrice: 0, vatRate: 15 }).equipment).toBeNull();
   });
@@ -135,11 +135,23 @@ describe('the price while it is typed', () => {
       ],
       markupPercent: 33.33, deliveryPrice: 0, vatRate: 15,
     });
-    expect(p.lines[0]).toEqual({ unitCost: 1000.01, unitPrice: 1333.31, total: 3999.93 });
+    expect(p.lines[0]).toEqual({ markupPercent: 33.33, unitCost: 1000.01, unitPrice: 1333.31, total: 3999.93 });
     // 3 200 + 876.25 = 4 076.25; × 33.33% = 1 358.61.
-    expect(p.lines[1]).toEqual({ unitCost: 4076.25, unitPrice: 5434.86, total: 5434.86 });
+    expect(p.lines[1]).toEqual({ markupPercent: 33.33, unitCost: 4076.25, unitPrice: 5434.86, total: 5434.86 });
     // 999.90 + 1 358.61; and cost + markup = equipment.
     expect(p).toMatchObject({ material: 3000, other: 876.28, cost: 7076.28, markup: 2358.51, equipment: 9434.79 });
+  });
+
+  // AFRI-0413's costing sheet: the maintenance at 56%, the spares at 62%.
+  it("prices each line at its own markup, or the job's, and only once every line has one, as the server does", () => {
+    const lines = [
+      { quantity: 1, labour: [], materials: [], otherCosts: [{ quantity: 1, unitCost: 255600 }] },
+      { quantity: 1, markupPercent: 62, labour: [], materials: [], otherCosts: [{ quantity: 1, unitCost: 45000 }] },
+    ];
+    const p = costingPreview({ lines, markupPercent: 56, deliveryPrice: 0, vatRate: 15 });
+    expect(p.lines.map((l) => [l.markupPercent, l.total])).toEqual([[56, 398736], [62, 72900]]);
+    expect(p).toMatchObject({ totalExVat: 471636, vat: 70745.4, totalIncVat: 542381.4 });
+    expect(costingPreview({ lines, markupPercent: null, deliveryPrice: 0, vatRate: 15 })).toMatchObject({ totalExVat: null, lines: [{ total: null }, { total: 72900 }] });
   });
 
   it('reads an amount typed with a comma or a point', () => {

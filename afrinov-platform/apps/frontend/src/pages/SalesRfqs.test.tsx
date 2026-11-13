@@ -185,6 +185,22 @@ describe('Sales RFQ page', () => {
     expect(screen.getByText('All Flexibles to be free issued by client')).toBeInTheDocument();
   });
 
+  it("shows each line's markup, and \"by line\" beside the total markup when they differ", async () => {
+    const [pump, install] = TWO_LINES.equipmentLines;
+    current = {
+      ...TWO_LINES, markupPercent: '40',
+      equipmentLines: [
+        { ...pump, markupPercent: null, totals: { ...pump!.totals, markupPercent: '40' } },
+        { ...install!, markupPercent: '62', totals: { ...install!.totals, markupPercent: '62' } },
+      ],
+    };
+    renderAt('/sales-rfqs/r-1');
+    const second = await screen.findByRole('region', { name: 'Equipment line 2' });
+    expect(within(second).getByLabelText('Price of line 2')).toHaveTextContent('Markup a unit (62%)');
+    expect(within(screen.getByRole('region', { name: 'Equipment line 1' })).getByLabelText('Price of line 1')).toHaveTextContent('Markup a unit (40%, the job’s)');
+    expect(screen.getByLabelText('Price')).toHaveTextContent(/Markup\s*by line/);
+  });
+
   it('lets Sales submit a draft, saying what goes to the Director', async () => {
     renderAt('/sales-rfqs/r-1');
     fireEvent.click(await screen.findByRole('button', { name: 'Submit for approval' }));
@@ -255,7 +271,7 @@ describe('Sales RFQ form', () => {
     // An RFQ with no quotes yet can't be counted.
     expect(screen.getByLabelText(/AFRI-02A-1469-02-03/)).toBeDisabled();
     expect(screen.queryByRole('option', { name: /Retired role/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Markup %'), { target: { value: '40' } });
+    fireEvent.change(screen.getByLabelText('Job markup %'), { target: { value: '40' } });
     const preview = screen.getByLabelText('Price as typed');
     expect(preview).toHaveTextContent(/Cost.*13.000/);
     expect(preview).toHaveTextContent(/Main Piston Pump.*18.200/);
@@ -266,7 +282,7 @@ describe('Sales RFQ form', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/sales-rfqs', expect.objectContaining({
       projectNumber: 'AFRI-1469', clientName: 'Northam Platinum', markupPercent: 40, deliveryPrice: 0,
       equipmentLines: [{
-        equipment: 'Main Piston Pump', details: null, quantity: 1,
+        equipment: 'Main Piston Pump', details: null, quantity: 1, markupPercent: null,
         labour: [{ labourRateId: 'lr-welder', hours: 10 }], materials: [{ rfqId: 'rfq-1', supplierId: 's-2' }], otherCosts: [],
       }],
     })));
@@ -299,7 +315,7 @@ describe('Sales RFQ form', () => {
     expect(rfqOnSecond).toBeDisabled();
     expect(within(second).getByText('Counted on equipment line 1')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Markup %'), { target: { value: '40' } });
+    fireEvent.change(screen.getByLabelText('Job markup %'), { target: { value: '40' } });
     // 3 200 + 2 400 = 5 600 a unit, × 1.4 = 7 840, × 2 = 15 680; the pump 9 000 × 1.4 = 12 600.
     expect(within(second).getByLabelText('Price of equipment line 2')).toHaveTextContent(/Unit price.*7.840.*Total.*15.680/);
     const preview = screen.getByLabelText('Price as typed');
@@ -309,12 +325,48 @@ describe('Sales RFQ form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
     expect((mockPost.mock.calls[0]![1] as { equipmentLines: unknown[] }).equipmentLines).toEqual([
-      { equipment: 'Main Piston Pump', details: null, quantity: 1, labour: [], materials: [{ rfqId: 'rfq-1', supplierId: 's-1' }], otherCosts: [] },
+      { equipment: 'Main Piston Pump', details: null, quantity: 1, markupPercent: null, labour: [], materials: [{ rfqId: 'rfq-1', supplierId: 's-1' }], otherCosts: [] },
       {
-        equipment: 'Installation', details: 'Accommodation & LOA\nInstallation Labour', quantity: 2,
+        equipment: 'Installation', details: 'Accommodation & LOA\nInstallation Labour', quantity: 2, markupPercent: null,
         labour: [{ labourRateId: 'lr-welder', hours: 8 }], materials: [], otherCosts: [{ description: 'Accommodation', quantity: 2, unitCost: 1200 }],
       },
     ]);
+  });
+
+  // AFRI-0413's costing sheet marks its spares up 62% where the job is at 56%.
+  it("gives a line its own markup, the job's being for the rest, and saves it", async () => {
+    renderAt('/sales-rfqs/new');
+    fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1469' } });
+    fireEvent.change(screen.getByLabelText('Equipment'), { target: { value: 'Maintenance' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add other cost to the equipment line' }));
+    fireEvent.change(screen.getByLabelText('Other cost 1 description'), { target: { value: 'Labour and costs' } });
+    fireEvent.change(screen.getByLabelText('Other cost 1 unit cost'), { target: { value: '255600' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add equipment line' }));
+    const second = screen.getByRole('group', { name: 'Equipment line 2' });
+    fireEvent.change(within(second).getByLabelText('Equipment'), { target: { value: 'Anticipated Spares' } });
+    fireEvent.click(within(second).getByRole('button', { name: 'Add other cost to equipment line 2' }));
+    fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 description'), { target: { value: 'Spares allowance' } });
+    fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 unit cost'), { target: { value: '45000' } });
+
+    fireEvent.change(screen.getByLabelText('Job markup %'), { target: { value: '56' } });
+    // A line left blank takes the job's, and says so.
+    expect(within(screen.getByRole('group', { name: 'Equipment line 1' })).getByText("Blank: the job's 56%.")).toBeInTheDocument();
+    fireEvent.change(within(second).getByLabelText('Markup %'), { target: { value: '62' } });
+    expect(within(second).getByLabelText('Price of equipment line 2')).toHaveTextContent(/Unit price.*72.900/);
+    expect(screen.getByLabelText('Price as typed')).toHaveTextContent(/Total excl. VAT.*471.636,00/);
+
+    // A line's markup is checked like the job's, naming the line.
+    fireEvent.change(within(second).getByLabelText('Markup %'), { target: { value: '6.255' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText('Equipment line 2: its markup is a percentage from 0 to 1000, to at most 2 decimal places.')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+
+    fireEvent.change(within(second).getByLabelText('Markup %'), { target: { value: '62' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    const body = mockPost.mock.calls[0]![1] as { markupPercent: number; equipmentLines: Array<{ markupPercent: number | null }> };
+    expect(body.markupPercent).toBe(56);
+    expect(body.equipmentLines.map((l) => l.markupPercent)).toEqual([null, 62]);
   });
 
   it('refuses a quantity that is not a whole number, naming the line', async () => {
@@ -345,7 +397,7 @@ describe('Sales RFQ form', () => {
     fireEvent.click(within(second).getByRole('button', { name: 'Add other cost to equipment line 2' }));
     fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 description'), { target: { value: 'Flexibles' } });
     fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 unit cost'), { target: { value: '500' } });
-    fireEvent.change(screen.getByLabelText('Markup %'), { target: { value: '50' } });
+    fireEvent.change(screen.getByLabelText('Job markup %'), { target: { value: '50' } });
 
     // Its unit price shows; only line 1 is charged: 1 000 × 1.5 = 1 500.
     expect(within(second).getByLabelText('Price of equipment line 2')).toHaveTextContent(/Unit price.*750.*Total.*0,00/);

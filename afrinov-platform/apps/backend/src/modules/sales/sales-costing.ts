@@ -9,7 +9,9 @@
 //                  at the Settings exchange rate for another currency
 //   other        = Σ quantity × unit cost (accommodation, LOA), each rounded
 //   unit cost    = labour + material + other
-//   unit markup  = unit cost × markup% (the sheet's "× 1.4" is 40%)
+//   unit markup  = unit cost × markup% (the sheet's "× 1.4" is 40%): the
+//                  line's own markup, or the job's when it has none
+//                  (AFRI-0413 marks its maintenance up 56% and its spares 62%)
 //   unit price   = unit cost + unit markup: the quotation's Unit Price
 //   total        = unit price × quantity: its Total Price
 //
@@ -35,9 +37,11 @@ type Num = Prisma.Decimal | number | string;
 const D = (v: Num) => new Prisma.Decimal(v);
 const cents = (d: Prisma.Decimal) => d.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 
-/** One equipment line's money. The markup-dependent figures are null until a markup is given. */
+/** One equipment line's money. The markup-dependent figures are null until it has a markup, its own or the job's. */
 export interface LineTotals {
   quantity: number;
+  /** The markup it is priced at: its own, or the job's; null when neither is set. */
+  markupPercent: string | null;
   /** For one unit. */
   labour: string;
   material: string;
@@ -54,7 +58,7 @@ export interface CostingTotals {
   material: string;
   other: string;
   cost: string;
-  /** Null until a markup is given. */
+  /** Null until every line has a markup, its own or the job's. */
   markup: string | null;
   /** All the equipment lines together. */
   equipment: string | null;
@@ -69,6 +73,8 @@ export interface CostingTotals {
 
 export interface CostingLine {
   quantity: number;
+  /** Its own markup; null or left out: the job's. */
+  markupPercent?: Num | null;
   labour: Array<{ hours: Num; hourlyRate: Num }>;
   materials: Num[];
   otherCosts: Array<{ quantity: Num; unitCost: Num }>;
@@ -82,13 +88,18 @@ export function otherCostTotal(cost: { quantity: Num; unitCost: Num }): string {
   return cents(D(cost.quantity).times(D(cost.unitCost))).toFixed(2);
 }
 
-export function lineTotals(line: CostingLine, markupPercent: Num | null): LineTotals {
+/** A line priced at its own markup, or at the job's (`jobMarkupPercent`) when it has none. */
+export function lineTotals(line: CostingLine, jobMarkupPercent: Num | null): LineTotals {
+  const markupPercent = line.markupPercent ?? jobMarkupPercent ?? null;
   const labour = line.labour.reduce((sum, l) => sum.plus(labourLineTotal(l)), D(0));
   const material = line.materials.reduce<Prisma.Decimal>((sum, m) => sum.plus(D(m)), D(0));
   const other = line.otherCosts.reduce((sum, c) => sum.plus(otherCostTotal(c)), D(0));
   const unitCost = labour.plus(material).plus(other);
-  const base = { quantity: line.quantity, labour: labour.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), unitCost: unitCost.toFixed(2) };
-  if (markupPercent === null || markupPercent === undefined) return { ...base, unitMarkup: null, unitPrice: null, total: null };
+  const base = {
+    quantity: line.quantity, markupPercent: markupPercent === null ? null : D(markupPercent).toString(),
+    labour: labour.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), unitCost: unitCost.toFixed(2),
+  };
+  if (markupPercent === null) return { ...base, unitMarkup: null, unitPrice: null, total: null };
   const unitMarkup = cents(unitCost.times(D(markupPercent)).dividedBy(100));
   const unitPrice = unitCost.plus(unitMarkup);
   return { ...base, unitMarkup: unitMarkup.toFixed(2), unitPrice: unitPrice.toFixed(2), total: unitPrice.times(line.quantity).toFixed(2) };
@@ -109,7 +120,8 @@ export function costingTotals(input: {
   const delivery = cents(D(input.deliveryPrice));
   const vatRate = D(input.vatRate);
   const base = { labour: labour.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), cost: cost.toFixed(2), delivery: delivery.toFixed(2), vatRate: vatRate.toString(), lines };
-  if (input.markupPercent === null || input.markupPercent === undefined) {
+  // Priced only once every line has a markup, its own or the job's.
+  if (lines.some((l) => l.markupPercent === null)) {
     return { ...base, markup: null, equipment: null, totalExVat: null, vat: null, totalIncVat: null };
   }
   const markup = sum((l) => l.unitMarkup!);
