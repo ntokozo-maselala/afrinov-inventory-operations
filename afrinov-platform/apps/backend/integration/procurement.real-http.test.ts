@@ -406,6 +406,16 @@ describe('receiving stock over real HTTP', () => {
       expect((await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body.totals).toMatchObject({ subtotal: '5700.00', discount: '0.00' });
     });
 
+    // Hytec's 5/18 off on AFRI-0413_1 needs 4 places; 2 (27.78%) were R1,72 off the quote.
+    it('keeps a discount to 4 decimals, as a supplier gives it', async () => {
+      const lines = [[8, 4433.04], [2, 9213.72], [1, 4420.70], [4, 1832.95], [2, 5734.95]].map(([orderedQty, unitPrice]) => ({ materialId, orderedQty, unitPrice, discountPercent: 27.7778 }));
+      const created = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, vatRate: 15, lines });
+      expect(created.status).toBe(201);
+      const order = (await api<Priced & { lines: Array<{ discountPercent: string }> }>('GET', `/purchase-orders/${created.body.id}`)).body;
+      expect((order.lines as Array<{ discountPercent: string }>).map((l) => Number(l.discountPercent))).toEqual([27.7778, 27.7778, 27.7778, 27.7778, 27.7778]);
+      expect(order.totals).toMatchObject({ subtotal: '55693.54', discount: '21420.62' });
+    });
+
     it('refuses the same line discounted twice in one change', async () => {
       const created = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 1, unitPrice: 10 }] });
       const lineId = (await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body.lines[0]!.id;
@@ -413,8 +423,8 @@ describe('receiving stock over real HTTP', () => {
       expect(res.status).toBe(400);
     });
 
-    it('refuses a discount over 100% or with more than 2 decimals', async () => {
-      for (const discountPercent of [101, -1, 10.005]) {
+    it('refuses a discount over 100% or with more than 4 decimals', async () => {
+      for (const discountPercent of [101, -1, 10.00005]) {
         const res = await api('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 1, unitPrice: 1, discountPercent }] });
         expect(res.status).toBe(400);
       }

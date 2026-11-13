@@ -78,4 +78,12 @@ describe('withTotals', () => {
     const po = withTotals({ id: 'po-1', vatRate: new Prisma.Decimal(15), lines: [{ id: 'l-1', orderedQty: 2, unitPrice: 100 }] });
     expect(po).toMatchObject({ id: 'po-1', lines: [{ id: 'l-1', subtotal: '200.00', vat: '30.00', net: '230.00' }], totals: { net: '230.00' } });
   });
+  // Hytec's 5/18 off on AFRI-0413_1, to 4 places: R55 693,54 against the quote's
+  // R55 693,57, where 2 places (27.78%) were R1,72 off.
+  it('takes a discount to 4 places off each line, as Hytec gave AFRI-0413_1', () => {
+    const lines = [[8, 4433.04], [2, 9213.72], [1, 4420.70], [4, 1832.95], [2, 5734.95]];
+    const at = (off: string) => orderTotals(lines.map(([q, p]) => ({ orderedQty: q!, unitPrice: p!, discountPercent: off })), 15);
+    expect(at('27.7778')).toMatchObject({ subtotal: '55693.54', discount: '21420.62' });
+    expect(at('27.78')).toMatchObject({ subtotal: '55691.85', discount: '21422.31' });
+  });
 });
