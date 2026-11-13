@@ -1,4 +1,4 @@
-// Afrinov IMS — Sign-in page.
+// Afrinov OMS — Sign-in page.
 //
 // Production-quality authentication surface for the demo flow. The page
 // is a thin shell over `useAuth().login`, which delegates to
@@ -50,8 +50,8 @@ export function Login() {
 
   useEffect(() => {
     // Title for accessibility / tab labelling.
-    document.title = 'Sign in · Afrinov IMS';
-    return () => { document.title = 'Afrinov IMS'; };
+    document.title = 'Sign in · Afrinov OMS';
+    return () => { document.title = 'Afrinov OMS'; };
   }, []);
 
   // A rejected token is announced by the auth provider; a guarded navigation
@@ -138,15 +138,14 @@ export function Login() {
               <Logo size={32} tone="white" decorative />
             </span>
             <div className="leading-tight">
-              <div className="text-h2 font-semibold">Afrinov IMS</div>
-              <div className="text-xs text-white/80">Inventory &amp; Operations</div>
+              <div className="text-h2 font-semibold">Afrinov OMS</div>
             </div>
           </div>
 
           <div className="space-y-4 max-w-md">
             <h1 className="text-h1 font-semibold leading-tight">{SIGN_IN_TAGLINE}</h1>
             <p className="text-white/85 text-base leading-relaxed">
-              Afrinov IMS is an enterprise inventory &amp; operations platform built for industrial
+              Afrinov OMS is an operations management platform built for industrial
               workshops, storerooms, and project teams. Sign in to manage materials, locations, stock
               movements, and reporting from a single workspace.
             </p>
@@ -172,8 +171,7 @@ export function Login() {
                 <Logo size={24} decorative />
               </span>
               <div className="leading-tight">
-                <div className="text-h2 font-semibold text-surface-900">Afrinov IMS</div>
-                <div className="text-xs text-surface-500">Inventory &amp; Operations</div>
+                <div className="text-h2 font-semibold text-surface-900">Afrinov OMS</div>
               </div>
             </div>
 
@@ -283,7 +281,7 @@ export function Login() {
               </p>
 
               <p className="text-xs text-surface-500 text-center pt-2">
-                By signing in you agree to Afrinov IMS acceptable-use policies.
+                By signing in you agree to Afrinov OMS acceptable-use policies.
               </p>
             </form>
           </div>

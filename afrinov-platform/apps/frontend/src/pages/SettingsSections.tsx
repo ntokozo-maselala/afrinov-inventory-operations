@@ -849,7 +849,7 @@ export function SettingsSystem() {
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-surface-500">Application</dt>
-          <dd className="font-mono">Afrinov IMS v{version}</dd>
+          <dd className="font-mono">Afrinov OMS v{version}</dd>
         </div>
         <div>
           <dt className="text-surface-500">API status</dt>

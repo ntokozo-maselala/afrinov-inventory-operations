@@ -4,6 +4,7 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-13 | — (screens only) | The system is called Afrinov OMS on screen: the sidebar, mobile menu, sign-in page, footer, browser tab, Not found, Settings > System and the "temporarily unavailable" message; the "Inventory & Operations" subtitle is gone. Report files and the API title still say Afrinov IMS | Engineering |
 | 2026-11-13 | `09-frontend/page-inventory.md` | The project form asks for the user list only for an Admin: Sales, the store controller and Procurement see the manager read-only ("An Admin assigns the project manager") instead of "Couldn't load users" | Engineering |
 | 2026-11-13 | `13-project-management/roadmaps/project-tracking-roadmap.md` | The Procurement step no longer has its own Orders link and list; the project's Orders button lists them | Engineering |
 | 2026-11-13 | `13-project-management/roadmaps/project-tracking-roadmap.md` | A schedule's steps show Plan and Actual side by side, as the workbook's grey and blue columns, with each step's variance (late as negative); dates not final yet are in light italics, and "Expected" is no longer used on the project page, the step form, the board or the chart | Engineering |

@@ -6,7 +6,7 @@ import { EmptyState } from '../components/EmptyState';
 export function NotFound() {
   return (
     <div>
-      <PageHeader title="Not found" breadcrumb={[{ label: 'Afrinov IMS', to: '/' }, { label: 'Not found' }]} />
+      <PageHeader title="Not found" breadcrumb={[{ label: 'Afrinov OMS', to: '/' }, { label: 'Not found' }]} />
       <div className="surface-card">
         <EmptyState
           title="We can't find that page"

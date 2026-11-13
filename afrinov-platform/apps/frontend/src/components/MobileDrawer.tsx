@@ -103,8 +103,7 @@ export function MobileDrawer() {
                 <Icon.Box size={20} className="text-brand-600 dark:text-brand-300" />
               </span>
               <div className="leading-tight truncate">
-                <div className="text-sm font-semibold text-surface-900 dark:text-surface-900">Afrinov IMS</div>
-                <div className="text-xs text-surface-500 dark:text-surface-500">Inventory & Operations</div>
+                <div className="text-sm font-semibold text-surface-900 dark:text-surface-900">Afrinov OMS</div>
               </div>
             </div>
             <button
@@ -118,7 +117,7 @@ export function MobileDrawer() {
           <MobileNav groups={navGroups} onNavigate={closeMobile} />
           <div className="px-4 py-3 border-t border-surface-200 dark:border-surface-200">
             <div className="text-xs text-center text-surface-500 dark:text-surface-500">
-              Afrinov IMS · prototype
+              Afrinov OMS · prototype
             </div>
           </div>
         </aside>
