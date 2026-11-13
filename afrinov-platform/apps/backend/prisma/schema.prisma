@@ -633,9 +633,10 @@ model PurchaseOrderLine {
   // Excluding VAT, in the order's currency. Null on lines raised before prices were kept.
   // The supplier's list price: the line's discount comes off it.
   unitPrice       Decimal?  @map("unit_price") @db.Decimal(18, 4)
-  // Percent off the unit price, as the supplier gives it; 0 for none. What is
-  // paid, and its VAT and approval, are on the discounted price.
-  discountPercent Decimal   @default(0) @map("discount_percent") @db.Decimal(5, 2)
+  // Percent off the unit price, as the supplier gives it, to 4 places (Hytec's
+  // 5/18 off on AFRI-0413_1 is 27.7778%); 0 for none. What is paid, and its VAT
+  // and approval, are on the discounted price.
+  discountPercent Decimal   @default(0) @map("discount_percent") @db.Decimal(7, 4)
   // When this line is due; the order's expected date when not set.
   deliveryDate    DateTime? @map("delivery_date") @db.Date
 

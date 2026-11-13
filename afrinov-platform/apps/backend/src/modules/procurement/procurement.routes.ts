@@ -50,8 +50,8 @@ export const updateSupplierSchema = z.object({
 const vatRate = z.number().min(0).max(100);
 // Kept to 4 decimal places, as the order line keeps it.
 const unitPrice = z.number().nonnegative().max(1e12).refine(fourDecimals, 'At most 4 decimal places');
-/** Percent off a line's unit price, to 2 places (Procurement KPIs count the saving). */
-const discountPercent = z.number().min(0).max(100).refine((n) => Number.isInteger(Math.round(n * 100 * 1e6) / 1e6), 'At most 2 decimal places');
+/** Percent off a line's unit price, to 4 places, as a supplier's discount may need (Procurement KPIs count the saving). */
+const discountPercent = z.number().min(0).max(100).refine(fourDecimals, 'At most 4 decimal places');
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD');
 /** A line named at most once, so each change is compared with what the line had. */
 const oncePerLine = (rows: Array<{ lineId: string }>) => new Set(rows.map((r) => r.lineId)).size === rows.length;
