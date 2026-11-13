@@ -1,7 +1,7 @@
 // Adding or updating one step of a project schedule (Project Tracking Roadmap,
 // Phase 2.3). While the schedule is being planned, a step takes its planned
-// dates; once it is under way, its expected dates, progress and, when it
-// finishes, its actual dates, as the server allows. When a step's expected end
+// dates (the Plan); once it is under way, its Actual dates (where it now stands
+// until it finishes, then what happened), progress, as the server allows. When a step's end
 // moves, the form offers to move the unfinished steps after it by as many
 // working days, the way the workbook's chained dates did, but only when asked.
 import { useMemo, useState } from 'react';
@@ -13,7 +13,7 @@ import { api } from '../api/client';
 import { presentError } from '../lib/errorPresentation';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { today } from '../lib/dates';
-import { expectedEnd, formatDay } from '../lib/projectSchedule';
+import { expectedEnd, formatDay, stepDays } from '../lib/projectSchedule';
 import { workingDaysBetween } from '../lib/workingDays';
 import type { ProjectSchedule, ScheduleStep } from '../api/types';
 
@@ -86,7 +86,7 @@ export function ProjectStepForm({ schedule, step, users, closedDays, finishOn, o
     if (!name.trim()) return 'Give the step a name.';
     const pairs: Array<[string, string, string]> = adding || !started
       ? [[baselineStart, baselineEnd, 'planned']]
-      : [[forecastStart, forecastEnd, 'expected'], [actualStart, actualEnd, 'actual']];
+      : [[forecastStart, forecastEnd, 'actual'], [actualStart, actualEnd, 'actual']];
     for (const [a, b, what] of pairs) if (a && b && b < a) return `The ${what} end can’t be before the ${what} start.`;
     if (adding && started) {
       if (!baselineStart || !baselineEnd) return 'A step added to a schedule under way needs its planned start and end.';
@@ -157,6 +157,7 @@ export function ProjectStepForm({ schedule, step, users, closedDays, finishOn, o
   }
 
   const planning = adding || !started;
+  const planDays = step ? stepDays(step.baselineStart, step.baselineEnd, closedDays) : null;
   return (
     <Modal
       open
@@ -164,7 +165,7 @@ export function ProjectStepForm({ schedule, step, users, closedDays, finishOn, o
       title={adding ? `Add a step to ${schedule.name}` : `${step.position}. ${step.name}`}
       description={planning
         ? (started ? 'The schedule is under way, so a new step needs its planned dates and the reason.' : 'Set the planned dates. They are locked when the schedule starts.')
-        : `Planned ${formatDay(step.baselineStart)} to ${formatDay(step.baselineEnd)}. The plan changes only by a re-plan.`}
+        : `Plan: ${formatDay(step.baselineStart)} to ${formatDay(step.baselineEnd)}${planDays === null ? '' : `, ${planDays} working day${planDays === 1 ? '' : 's'}`}. The plan changes only by a re-plan.`}
       size="lg"
     >
       <form onSubmit={submit} className="space-y-4" noValidate>
@@ -183,44 +184,48 @@ export function ProjectStepForm({ schedule, step, users, closedDays, finishOn, o
         </div>
 
         {planning ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <fieldset className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <legend className="text-sm font-medium text-surface-700 mb-1 sm:col-span-2">Plan</legend>
             <Field label="Planned start" htmlFor="step-bstart" required={started}>
               <Input id="step-bstart" type="date" value={baselineStart} onChange={(e) => setBaselineStart(e.target.value)} />
             </Field>
             <Field label="Planned end" htmlFor="step-bend" required={started}>
               <Input id="step-bend" type="date" value={baselineEnd} onChange={(e) => setBaselineEnd(e.target.value)} />
             </Field>
-          </div>
+          </fieldset>
         ) : (
-          <>
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-medium text-surface-700 mb-1">
+              Actual{!finished && <span className="font-normal text-surface-500"> · not final until the step is finished</span>}
+            </legend>
             <div className="flex items-center gap-2">
               <input id="step-finished" type="checkbox" className="h-4 w-4" checked={finished} onChange={(e) => markFinished(e.target.checked)} />
               <label htmlFor="step-finished" className="text-sm">This step is finished</label>
             </div>
             {finished ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Started on" htmlFor="step-astart" required>
+                <Field label="Actual start" htmlFor="step-astart" required>
                   <Input id="step-astart" type="date" value={actualStart} onChange={(e) => setActualStart(e.target.value)} />
                 </Field>
-                <Field label="Finished on" htmlFor="step-aend" required>
+                <Field label="Actual end" htmlFor="step-aend" required>
                   <Input id="step-aend" type="date" value={actualEnd} onChange={(e) => setActualEnd(e.target.value)} />
                 </Field>
               </div>
             ) : (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <Field label="Expected start" htmlFor="step-fstart">
+                  <Field label="Actual start" htmlFor="step-fstart" help="When work began, or is now due to begin.">
                     <Input id="step-fstart" type="date" value={forecastStart} onChange={(e) => setForecastStart(e.target.value)} />
                   </Field>
-                  <Field label="Expected end" htmlFor="step-fend">
+                  <Field label="Actual end" htmlFor="step-fend" help="When it is now due to finish.">
                     <Input id="step-fend" type="date" value={forecastEnd} onChange={(e) => setForecastEnd(e.target.value)} />
                   </Field>
                   <Field label="Progress (%)" htmlFor="step-progress" help="0 to 99 until it is finished.">
                     <Input id="step-progress" type="number" inputMode="numeric" min={0} max={99} step={5} value={progress} onChange={(e) => setProgress(e.target.value)} />
                   </Field>
                 </div>
-                <Field label="Started on" htmlFor="step-astart2" help="Optional, once work has begun.">
-                  <Input id="step-astart2" type="date" value={actualStart} onChange={(e) => setActualStart(e.target.value)} />
+                <Field label="Work began on" htmlFor="step-astart2" help="Optional, once work has begun: makes the start final.">
+                  <Input id="step-astart2" type="date" value={actualStart} onChange={(e) => { setActualStart(e.target.value); if (e.target.value) setForecastStart(e.target.value); }} />
                 </Field>
               </>
             )}
@@ -232,7 +237,7 @@ export function ProjectStepForm({ schedule, step, users, closedDays, finishOn, o
                 </label>
               </div>
             )}
-          </>
+          </fieldset>
         )}
 
         <Field label="Assigned to" htmlFor="step-assignee">

@@ -142,7 +142,7 @@ const boardColumns: DataTableColumn<BoardRow>[] = [
   { key: 'manager', header: 'Manager', render: (r) => r.manager?.name ?? <span className="text-surface-300">—</span>, width: '10rem' },
   { key: 'progress', header: 'Progress', width: '9rem', render: (r) => <ProgressBar value={r.totals.progress} label={`${r.totals.progress}% done, ${r.stepsDone} of ${r.steps} steps`} /> },
   { key: 'now', header: 'Now on', render: (r) => r.totals.currentStep?.name ?? <span className="text-surface-300">—</span>, width: '10rem' },
-  { key: 'finish', header: 'Expected finish', width: '9rem', render: (r) => formatDay(r.totals.forecastEnd) },
+  { key: 'finish', header: 'Finish', width: '9rem', render: (r) => formatDay(r.totals.forecastEnd) },
   {
     key: 'late', header: 'Against plan', width: '10rem', render: (r) => {
       if (r.status === 'PLANNING') return <span className="text-surface-500">Being planned</span>;
@@ -154,7 +154,7 @@ const boardColumns: DataTableColumn<BoardRow>[] = [
     key: 'due', header: 'Due', width: '11rem', render: (r) => r.dueDate ? (
       <div>
         {formatDay(r.dueDate)}
-        {r.totals.daysPastDue !== null && <div className="text-xs text-danger-600">Expected {r.totals.daysPastDue} working day{r.totals.daysPastDue === 1 ? '' : 's'} after</div>}
+        {r.totals.daysPastDue !== null && <div className="text-xs text-danger-600">Finishing {r.totals.daysPastDue} working day{r.totals.daysPastDue === 1 ? '' : 's'} after</div>}
       </div>
     ) : <span className="text-surface-300">—</span>,
   },
@@ -171,7 +171,7 @@ const myColumns: DataTableColumn<MyStep>[] = [
       </div>
     ),
   },
-  { key: 'when', header: 'Expected', width: '13rem', render: (s) => formatSpan(s.expectedStart, s.expectedEnd) },
+  { key: 'when', header: 'Start – end', width: '13rem', render: (s) => formatSpan(s.expectedStart, s.expectedEnd) },
   { key: 'progress', header: 'Progress', width: '9rem', render: (s) => <ProgressBar value={s.progress} label={`${s.progress}% done`} /> },
   { key: 'due', header: '', width: '9rem', render: (s) => { const d = dueOf(s); return <Badge tone={d.tone} dot>{d.text}</Badge>; } },
 ];
