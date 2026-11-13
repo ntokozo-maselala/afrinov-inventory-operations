@@ -75,14 +75,54 @@ describe('ProjectDetail', () => {
     renderPage();
     const card = await screen.findByRole('region', { name: 'Schedule Main' });
     expect(within(card).getByText('Under way')).toBeInTheDocument();
-    expect(within(card).getByText(/expected to finish 20 Mar 2026/)).toBeInTheDocument();
+    expect(within(card).getByText(/finish 20 Mar 2026/)).toBeInTheDocument();
     expect(within(card).getByText('On plan')).toBeInTheDocument();
-    expect(within(card).getAllByRole('row')).toHaveLength(4);
+    // Two header rows (Plan and Actual over their columns), then a row per step.
+    expect(within(card).getAllByRole('row')).toHaveLength(5);
     // Not the project's manager: nothing to change, and who can.
     expect(within(card).queryByRole('button', { name: 'Re-plan' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Update Engineering/ })).not.toBeInTheDocument();
     expect(screen.getByText(/Only Thandi M, the project's manager, or an administrator/)).toBeInTheDocument();
     expect(mockGet).not.toHaveBeenCalledWith('/projects/AFRI-1086/assignees');
+  });
+
+  // As the workbook: the plan (grey columns) beside the actual (blue ones), and the variance, late as negative.
+  it('shows each step’s plan beside its actual, with what is not final yet in light italics, and the variance', async () => {
+    const s = active();
+    s.steps = [
+      // Finished two working days after its planned end.
+      step('s1', 1, 'Engineering', '2026-03-02', '2026-03-06', { actualStart: '2026-03-02', actualEnd: '2026-03-10', progress: 100, done: true }),
+      // Begun, and now due to finish on the 17th, two working days after the 13th.
+      step('s2', 2, 'Manufacturing', '2026-03-09', '2026-03-13', { actualStart: '2026-03-11', forecastStart: '2026-03-11', forecastEnd: '2026-03-17', progress: 40 }),
+      step('s3', 3, 'FAT', '2026-03-16', '2026-03-20', { forecastStart: '2026-03-16', forecastEnd: '2026-03-20' }),
+    ];
+    scheduleList = [s, planning()];
+    renderPage();
+    const table = within(await screen.findByRole('table', { name: 'Steps of Main' }));
+    expect(table.getByRole('columnheader', { name: 'Plan' })).toBeInTheDocument();
+    expect(table.getByRole('columnheader', { name: 'Actual' })).toBeInTheDocument();
+    expect(table.getByRole('columnheader', { name: 'Variance' })).toBeInTheDocument();
+    const [engineering, manufacturing, fat] = table.getAllByRole('row').slice(2);
+
+    const finished = within(engineering!);
+    expect(finished.getByText('10 Mar 2026')).not.toHaveClass('italic');
+    expect(finished.getByLabelText('Variance -2 working days, late')).toHaveClass('bg-danger-100');
+
+    const begun = within(manufacturing!);
+    expect(begun.getByText('11 Mar 2026')).not.toHaveClass('italic');
+    expect(begun.getByText('17 Mar 2026')).toHaveClass('italic');
+    expect(begun.getByLabelText('Variance -2 working days, late')).toBeInTheDocument();
+
+    const notBegun = within(fat!);
+    expect(notBegun.getAllByText('16 Mar 2026')[1]).toHaveClass('italic');
+    expect(notBegun.getByLabelText('Variance 0 working days')).toHaveClass('bg-success-100');
+    expect(screen.getByText(/are not final: the step hasn’t begun or finished yet/)).toBeInTheDocument();
+
+    // Still being planned: only the plan, with nothing to track against it yet.
+    const planned = within(screen.getByRole('table', { name: 'Steps of Frame modification' }));
+    expect(planned.getByRole('columnheader', { name: 'Plan' })).toBeInTheDocument();
+    expect(planned.queryByRole('columnheader', { name: 'Actual' })).not.toBeInTheDocument();
+    expect(planned.queryByRole('columnheader', { name: 'Variance' })).not.toBeInTheDocument();
   });
 
   it('lets the manager start a schedule only once every step is planned', async () => {
@@ -110,8 +150,8 @@ describe('ProjectDetail', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Update Engineering' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByLabelText('This step is finished'));
-    expect(within(dialog).getByLabelText('Started on')).toHaveValue('2026-03-02');
-    fireEvent.change(within(dialog).getByLabelText('Finished on'), { target: { value: '2026-03-10' } });
+    expect(within(dialog).getByLabelText('Actual start')).toHaveValue('2026-03-02');
+    fireEvent.change(within(dialog).getByLabelText('Actual end'), { target: { value: '2026-03-10' } });
     // Two working days after it was expected to end, with two unfinished steps after it.
     const move = within(dialog).getByLabelText(/Move the 2 unfinished steps after this one 2 working days later/);
     expect(move).not.toBeChecked();
@@ -182,16 +222,15 @@ describe('ProjectDetail', () => {
       : base(path)));
     renderPage();
     expect(await screen.findByText('All delivered, last 11 Mar 2026')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Orders' }));
-    expect(within(await screen.findByRole('dialog')).getByText('AFRI-0101')).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+    // No Orders link on the step: the project's own Orders button lists them.
+    expect(within(screen.getByRole('region', { name: 'Schedule Main' })).queryByRole('button', { name: 'Orders' })).not.toBeInTheDocument();
 
     // Offered, not done: it opens the step finished on the last delivery, to be saved.
     fireEvent.click(screen.getByRole('button', { name: 'Mark this step done' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByLabelText('This step is finished')).toBeChecked();
-    expect(within(dialog).getByLabelText('Finished on')).toHaveValue('2026-03-11');
-    expect(within(dialog).getByLabelText('Started on')).toHaveValue('2026-03-09');
+    expect(within(dialog).getByLabelText('Actual end')).toHaveValue('2026-03-11');
+    expect(within(dialog).getByLabelText('Actual start')).toHaveValue('2026-03-09');
     expect(mockPatch).not.toHaveBeenCalled();
   });
 
@@ -207,8 +246,8 @@ describe('ProjectDetail', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Mark this step done' }));
     const dialog = await screen.findByRole('dialog');
     // Planned to start the 9th, but everything arrived the 5th: it started by then.
-    expect(within(dialog).getByLabelText('Started on')).toHaveValue('2026-03-05');
-    expect(within(dialog).getByLabelText('Finished on')).toHaveValue('2026-03-05');
+    expect(within(dialog).getByLabelText('Actual start')).toHaveValue('2026-03-05');
+    expect(within(dialog).getByLabelText('Actual end')).toHaveValue('2026-03-05');
   });
 
   it("doesn't ask a done schedule's Procurement step for today's orders", async () => {
