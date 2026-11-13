@@ -103,6 +103,11 @@ const INK: [number, number, number] = [20, 20, 20];
 const MUTED: [number, number, number] = [90, 99, 112];
 const SIDE = 18;
 const TOP = 14;
+// Where the quotation template puts its pictures, in mm on A4: the watermark
+// centred in the page's margins (14.1 mm left and right, 8.8 mm top, none at
+// the bottom), and the logo top right, as AFRI-0413 Rev 2 carries them.
+const WATERMARK_CENTRE = { x: 105.0, y: 152.9 } as const;
+const LOGO_BOX = { centre: 178.5, top: 14.0, height: 28.5 } as const;
 const BOTTOM = 14;
 
 export async function buildQuotation(r: SalesRfq, company: QuotationCompany, generatedAt = new Date()): Promise<ArrayBuffer> {
@@ -126,16 +131,17 @@ export async function buildQuotation(r: SalesRfq, company: QuotationCompany, gen
     const page = doc.getCurrentPageInfo().pageNumber;
     if (watermarked.has(page)) return;
     watermarked.add(page);
-    drawLogoWatermark(doc, pageWidth / 2, pageHeight / 2 + 10, 120);
+    drawLogoWatermark(doc, WATERMARK_CENTRE.x, WATERMARK_CENTRE.y);
   };
   watermark();
 
   // The logo top right, the date under it.
-  drawLogo(doc, pageWidth - SIDE - 20, TOP - 4, 26);
+  drawLogo(doc, LOGO_BOX.centre, LOGO_BOX.top, LOGO_BOX.height);
   const date = quotationDate(r.issuedAt ?? generatedAt.toISOString());
-  text(`DATE: ${date}`, pageWidth - SIDE, TOP + 32, { align: 'right' });
+  // Under the logo, where the template has the date (51.5 mm) and references (59.6 mm).
+  text(`DATE: ${date}`, pageWidth - SIDE, TOP + 38, { align: 'right' });
 
-  let y = TOP + 40;
+  let y = TOP + 46;
   text(`Our Reference: ${r.quoteReference ?? r.number}`, SIDE, y, { italic: true, size: 8 });
   text(`Your Reference: ${r.clientReference?.trim() || 'N/A'}`, pageWidth - SIDE, y, { italic: true, size: 8, align: 'right' });
 
@@ -181,6 +187,8 @@ export async function buildQuotation(r: SalesRfq, company: QuotationCompany, gen
     // A table running onto another page gets the watermark there too, under it.
     willDrawPage: watermark,
     styles: { font: 'helvetica', fontSize: 9, cellPadding: 1.4, lineColor: [0, 0, 0], lineWidth: 0.2, textColor: INK, overflow: 'linebreak' },
+    // No cell is filled, so the watermark shows through the table, as on the template.
+    bodyStyles: { fillColor: false },
     headStyles: { fillColor: false, textColor: INK, fontStyle: 'bold', halign: 'center' },
     footStyles: { fillColor: false, textColor: INK },
     // The Item, Qty and prices sit in the middle of a tall row, as the example has them.

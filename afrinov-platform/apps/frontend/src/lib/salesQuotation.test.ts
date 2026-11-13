@@ -104,8 +104,10 @@ describe('the quotation', () => {
       expect(pdf, s).toContain(s);
     }
     expect(pdf).not.toContain('NOT FOR ISSUE');
-    // The faint flame mark in the middle of the page, as on the example.
-    expect(pdf).toMatch(/\/ca 0\.15/);
+    // The template's watermark, the official flame picture washed out (477 x 313),
+    // under the official logo picture (468 x 421).
+    expect(pdf).toMatch(/\/Width 477[\s\S]*\/Height 313/);
+    expect(pdf).toMatch(/\/Width 468[\s\S]*\/Height 421/);
   });
 
   it("prints the quotation's own Notes under the company's", async () => {
