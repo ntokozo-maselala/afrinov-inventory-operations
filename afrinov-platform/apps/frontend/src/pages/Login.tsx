@@ -134,8 +134,8 @@ export function Login() {
           aria-hidden="false"
         >
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center justify-center h-12 w-12 rounded-md bg-white/10 ring-1 ring-white/20">
-              <Logo size={32} tone="white" decorative />
+            <span className="inline-flex items-center justify-center h-12 w-12 rounded-md bg-white ring-1 ring-white/30 shadow-sm">
+              <Logo size={32} decorative />
             </span>
             <div className="leading-tight">
               <div className="text-h2 font-semibold">Afrinov OMS</div>
