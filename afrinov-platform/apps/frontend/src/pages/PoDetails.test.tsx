@@ -109,7 +109,7 @@ describe('New purchase order: the template details', () => {
       // The only line's date is the latest, so it is the order's expected delivery, which the line follows.
       expectedDeliveryDate: '2026-11-02',
       lines: [{ materialId: 'm-1', orderedQty: 4 }],
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 
   it('drops the delivery address when Afrinov collects', async () => {

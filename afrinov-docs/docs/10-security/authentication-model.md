@@ -7,7 +7,7 @@
 | Login | Email/username + password | Email + password (`POST /api/v1/auth/login`) |
 | Hashing | bcrypt/argon2, sufficient work factor | bcrypt, cost 12 |
 | Session | Session or short-lived JWT + refresh token | JWT (HS256) for the idle time, renewed by `POST /auth/refresh` while the person is active; a sign-in ends 12 hours after it began (ADR-035) |
-| Revocation | Logout invalidates the session/token | **Planned.** Logout removes the token from the browser only; deactivating a user blocks them on their next request (database check on every request) |
+| Revocation | Logout invalidates the session/token | **Implemented** (ADR-042). Logout refuses every sign-in of that person begun no later than this one, copies of the token included; a password change ends every other sign-in (ADR-036); deactivating a user blocks them on their next request (database check on every request) |
 | Brute force | Lockout or rate limiting | 5 sign-in requests per minute per address (the proxy named in `TRUST_PROXY`), and 10 wrong passwords per account in 15 minutes (ADR-036) |
 | Password change | Users change their own; administrators reset | Anyone changes their own with the current one; an Admin sets a temporary password that must be changed at the next sign-in. Either ends the account's other sign-ins (ADR-036) |
 | Administrator lockout | — | A change that leaves no active Admin is refused; once two exist, two are kept; nobody deactivates or demotes themselves (ADR-036) |

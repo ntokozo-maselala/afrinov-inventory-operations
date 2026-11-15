@@ -27,7 +27,8 @@ reproduced locally with the same commands.
 - **Stage A (change validation):** `backend-ci.yml` `checks` job and
   `frontend-ci.yml` `checks` job — typecheck, lint, unit tests, build.
 - **Stage B (PR assurance):** the above plus `backend-ci.yml` `integration`,
-  `migration-drift`, and `security-ci.yml` (audit + secret scan).
+  `migration-drift`, `frontend-ci.yml` `e2e` (the Playwright browser tests,
+  system audit H5), and `security-ci.yml` (audit + secret scan).
 - **Stage C (main-branch verification):** the same workflows run on `push` to
   `main`, re-verifying the merged commit.
 - **Weekly:** `security-ci.yml` and `codeql.yml` re-run on a schedule so a newly

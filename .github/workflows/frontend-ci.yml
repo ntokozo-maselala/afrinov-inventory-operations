@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'afrinov-platform/apps/frontend/**'
+      - 'afrinov-platform/apps/backend/**'
       - 'afrinov-platform/package.json'
       - 'afrinov-platform/package-lock.json'
       - '.github/workflows/frontend-ci.yml'
@@ -11,6 +12,7 @@ on:
     branches: [main]
     paths:
       - 'afrinov-platform/apps/frontend/**'
+      - 'afrinov-platform/apps/backend/**'
       - 'afrinov-platform/package.json'
       - 'afrinov-platform/package-lock.json'
       - '.github/workflows/frontend-ci.yml'
@@ -53,3 +55,72 @@ jobs:
       # A production build: it also fails if VITE_FRONTEND_ONLY or
       # VITE_DEMO_AUTH_ENABLED is set (src/config/buildGuard.ts).
       - run: npm run build
+
+  # System audit H5: the browser tests (apps/frontend/e2e) gate a change. They
+  # sign in, sign out and meet failures in a real browser against the real
+  # backend and a throwaway database, as apps/backend/README.md describes.
+  e2e:
+    name: Browser tests (Playwright, real backend)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: afrinov
+          POSTGRES_PASSWORD: afrinov
+          POSTGRES_DB: afrinov_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U afrinov -d afrinov_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway database that only exists for the length of this job.
+      DATABASE_URL: postgresql://afrinov:afrinov@localhost:5432/afrinov_test?schema=public
+      LOG_LEVEL: silent
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: afrinov-platform/package-lock.json
+
+      - name: Install dependencies
+        working-directory: afrinov-platform
+        run: npm ci
+
+      # Fresh random value per run, so no credential is stored in this file.
+      # The suite's backend makes its own JWT secret.
+      - name: Generate throwaway admin password
+        run: |
+          admin=$(node -e "console.log(require('node:crypto').randomBytes(24).toString('base64url'))")
+          echo "::add-mask::$admin"
+          echo "SEED_ADMIN_PASSWORD=$admin" >> "$GITHUB_ENV"
+
+      - name: Generate Prisma client
+        working-directory: afrinov-platform/apps/backend
+        run: npx prisma generate
+
+      - name: Apply migrations
+        working-directory: afrinov-platform/apps/backend
+        run: npx prisma migrate deploy
+
+      - name: Seed database
+        working-directory: afrinov-platform/apps/backend
+        run: npm run db:seed
+        env:
+          NODE_ENV: test
+          SEED_DEMO_DATA: 'true'
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # e2e/global-setup.ts starts the backend on 4000 and Vite on 5173.
+      - name: Run browser tests
+        run: npx playwright test
+        env:
+          CI: 'true'

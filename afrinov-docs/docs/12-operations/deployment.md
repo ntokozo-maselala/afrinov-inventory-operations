@@ -307,6 +307,12 @@ account is a starting one: the person signs in with it once and must choose
 their own, so nobody else knows it. Tell them the starting password in
 person.
 
+Give the **store controller role to a second person** too, whoever covers the
+store (ADR-042). A write-off over the limit needs someone other than the
+person who asked; with one store controller that is always Admin, who would
+then also be the store's only cover. The second person approves the store
+controller's write-offs and runs the store when they are away.
+
 **7.4 Recipients and PINs** (Recipients): the workers, contractors, machines
 and sites stock is issued to; set each worker's and contractor's counter PIN.
 Once every PIN is set and the counter is ready, change receipt confirmation
@@ -318,6 +324,7 @@ import in Part 10; anything created here first is kept, not duplicated.
 - [ ] Admin password changed
 - [ ] Settings filled in, first order number past the workbook's
 - [ ] Accounts created, second Admin given the role
+- [ ] A second person given the store controller role
 - [ ] Recipients and PINs (or noted for Part 10)
 
 ---

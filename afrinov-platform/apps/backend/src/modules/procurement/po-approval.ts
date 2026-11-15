@@ -92,6 +92,22 @@ export function exchangeRateOf(po: Pick<OrderForApproval, 'currency' | 'exchange
   return today ? new Prisma.Decimal(today) : null;
 }
 
+/** A typed-in exchange rate older than this is called out before an order is submitted at it (system audit D8). */
+export const RATE_STALE_DAYS = 30;
+
+/**
+ * When today's rate for a currency was last changed, and whether that is more
+ * than RATE_STALE_DAYS ago. Null for rand, or while no rate is set. A rate
+ * decides who signs a foreign order, and is locked on it when it is submitted.
+ */
+export async function rateAge(currency: string | null | undefined, now = new Date()): Promise<{ setAt: string; days: number; stale: boolean } | null> {
+  if (!currency || currency === 'ZAR') return null;
+  const row = await prisma.setting.findUnique({ where: { key: rateKey(currency) }, select: { value: true, updatedAt: true } });
+  if (!row || !(Number(row.value) > 0)) return null;
+  const days = Math.max(0, Math.floor((now.getTime() - row.updatedAt.getTime()) / 86_400_000));
+  return { setAt: row.updatedAt.toISOString(), days, stale: days > RATE_STALE_DAYS };
+}
+
 export function noRateMessage(currency: string): string {
   return `This order is in ${currency}, and there is no exchange rate for ${currency} yet. An admin can add one under Settings → Purchase orders.`;
 }

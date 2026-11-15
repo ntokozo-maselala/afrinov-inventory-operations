@@ -38,7 +38,6 @@ export const PermissionCode = {
   ExtendToolLoan: 'extend:tool_loan',
   ManageUsers: 'manage:users',
   ViewUsers: 'view:users',
-  ManageRoles: 'manage:roles',
   ViewReports: 'view:reports',
   ViewAuditLog: 'view:audit_log',
   ManageProjects: 'manage:projects',

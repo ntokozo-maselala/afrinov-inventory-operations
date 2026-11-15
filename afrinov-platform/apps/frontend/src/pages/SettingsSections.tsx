@@ -25,7 +25,7 @@ import { backupNotice, formatSize, restoreTestNotice, type BackupHealth } from '
 import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/client';
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
-import { formatDateTime } from '../lib/format';
+import { formatDate, formatDateTime } from '../lib/format';
 import { errorToast } from '../lib/errorPresentation';
 import { PROCUREMENT_ENABLED } from '../config/features';
 
@@ -343,13 +343,15 @@ export function SettingsPurchaseOrders() {
         </div>
       )}
       {exchangeRates.map((def) => def && (
-        <NumberField
-          key={def.key}
-          def={def}
-          value={Number(draft[def.key] ?? 0)}
-          onChange={(v) => setDraft(def.key, v)}
-          error={errors[def.key] ?? null}
-        />
+        <div key={def.key}>
+          <NumberField
+            def={def}
+            value={Number(draft[def.key] ?? 0)}
+            onChange={(v) => setDraft(def.key, v)}
+            error={errors[def.key] ?? null}
+          />
+          <RateChanged value={def.value} updatedAt={def.updatedAt} />
+        </div>
       ))}
       <NumberField
         def={firstNumber}
@@ -1096,6 +1098,21 @@ function formatValue(v: unknown): string {
 }
 
 // ── Shared bits ───────────────────────────────────────────────────────
+/** Days a typed-in exchange rate is trusted before it is called out (system audit D8; the server's RATE_STALE_DAYS). */
+export const RATE_STALE_DAYS = 30;
+
+/** When a saved exchange rate was last changed; in warning colour after RATE_STALE_DAYS. */
+export function RateChanged({ value, updatedAt, now = new Date() }: { value: unknown; updatedAt: string; now?: Date }) {
+  if (!(Number(value) > 0)) return null;
+  const days = Math.max(0, Math.floor((now.getTime() - Date.parse(updatedAt)) / 86_400_000));
+  const stale = days > RATE_STALE_DAYS;
+  return (
+    <p className={`text-xs mt-1 ${stale ? 'font-medium text-warning-700' : 'text-surface-500'}`}>
+      Last changed {formatDate(updatedAt)}{stale ? `, ${days} days ago: check it is still right, as it decides who signs an order in this currency.` : '.'}
+    </p>
+  );
+}
+
 function SaveBar({ items, onSave, saving }: { items: { updatedAt: string; updatedById: string | null }[]; onSave: () => Promise<void> | void; saving: boolean }) {
   const last = items
     .slice()

@@ -8,7 +8,7 @@ existing platform (GitHub Actions) is reused; no new CI system was introduced.
 | Workflow | File | Trigger | Jobs |
 |---|---|---|---|
 | Backend CI | `.github/workflows/backend-ci.yml` | PR and push to `main`, on backend/root paths | `checks` (typecheck, lint, unit tests, build), `migration-drift`, `integration` (real PostgreSQL) |
-| Frontend CI | `.github/workflows/frontend-ci.yml` | PR and push to `main`, on frontend/root paths | `checks` (typecheck, lint, unit tests, build) |
+| Frontend CI | `.github/workflows/frontend-ci.yml` | PR and push to `main`, on frontend, backend and root paths | `checks` (typecheck, lint, unit tests, build), `e2e` (Playwright in Chromium against the real backend and a throwaway PostgreSQL; system audit H5) |
 | Security CI | `.github/workflows/security-ci.yml` | Every PR and push to `main`; weekly schedule | `dependency-audit`, `secret-scan` |
 | CodeQL | `.github/workflows/codeql.yml` | PR and push to `main`; weekly schedule | `analyze` (`javascript-typescript`, `actions`) |
 
@@ -20,8 +20,8 @@ The workstream maps onto the staged pipeline model as follows.
   typecheck, lint, unit tests, and build. These are fast, deterministic, and
   run first.
 - **Stage B — pull request assurance.** Before merge: the Stage A checks plus
-  integration tests against a real PostgreSQL service, migration apply and drift
-  detection, the production dependency audit, the secret scan, and CodeQL. All
+  integration tests against a real PostgreSQL service, the browser tests
+  (`frontend-ci.yml` `e2e`), migration apply and drift detection, the production dependency audit, the secret scan, and CodeQL. All
   are required checks (see "Branch protection" below).
 - **Stage C — main-branch verification.** The same workflows re-run on `push`
   to `main`, so the merged commit is verified, not just the PR head.
@@ -56,7 +56,7 @@ them. This is a repository setting, not something a commit can guarantee, so it
 is recorded as an action item rather than assumed. The required checks should be:
 
 - Backend CI: `checks`, `migration-drift`, `integration`
-- Frontend CI: `checks`
+- Frontend CI: `checks`, `e2e`
 - Security CI: `dependency-audit`, `secret-scan`
 - CodeQL: `analyze (javascript-typescript)`, `analyze (actions)`
 

@@ -115,7 +115,7 @@ describe('the supplier details on a new order', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
       supplierContactName: 'Andre', supplierContactPhone: null, supplierContactEmail: 'nicole@welding.co.za', supplierAddress: '23 Grader Road\nSpartan Ext 3',
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 
   it('refuses an email that is not one', async () => {

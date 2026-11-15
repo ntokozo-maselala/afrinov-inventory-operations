@@ -1,3 +1,4 @@
+import { idempotentMutation } from '../../shared/idempotency.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
@@ -116,7 +117,8 @@ export async function rfqRoutes(app: FastifyInstance): Promise<void> {
     await requirePermission(req, PermissionCode.CreatePurchaseOrder);
     const parsed = createRfqSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send(invalid('request for quotation', parsed.error.flatten()));
-    return reply.code(201).send(await RfqService.create(parsed.data, actorId(req)));
+    // Retry-safe with an Idempotency-Key (system audit D5).
+    return idempotentMutation(req, reply, 'POST /rfqs', async (tx) => ({ statusCode: 201, body: await RfqService.create(parsed.data, actorId(req), tx) }));
   });
 
   app.patch('/rfqs/:id', { preHandler: [app.authenticate] }, async (req, reply) => {

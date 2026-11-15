@@ -31,6 +31,7 @@ import type { Rfq } from '../lib/rfq';
 import { QuantityInput } from '../components/QuantityInput';
 import { useUnits } from '../hooks/useUnits';
 import { firstLineQuantityError, readQuantity } from '../lib/quantity';
+import { useIdempotencyKey } from '../lib/idempotency';
 
 const RFQS = { label: 'Requests for quotation', to: '/rfqs' };
 
@@ -118,6 +119,8 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
     : [blankLine()]));
   const [supplierIds, setSupplierIds] = useState<string[]>(() => rfq?.suppliers.map((s) => s.supplierId) ?? []);
   const [busy, setBusy] = useState(false);
+  // A retry after a dropped connection opens the first draft, not a second (system audit D5).
+  const idem = useIdempotencyKey('create-rfq');
   const [validation, setValidation] = useState<string | null>(null);
 
   // The RFQ's project is the buyer's choice; no line fixes it.
@@ -190,11 +193,13 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
     };
     setBusy(true);
     try {
-      const saved = rfq ? await api.patch<Rfq>(`/rfqs/${rfq.id}`, body) : await api.post<Rfq>('/rfqs', body);
+      const saved = rfq ? await api.patch<Rfq>(`/rfqs/${rfq.id}`, body) : await api.post<Rfq>('/rfqs', body, { idempotencyKey: idem.keyFor(body) });
+      if (!rfq) idem.confirm();
       toast.success(rfq ? `${saved.number} saved` : `${saved.number} saved as a draft`);
       navigate(`/rfqs/${saved.id}`);
     } catch (err) {
       const e = err as ApiError;
+      if (!rfq) idem.resolve(err);
       setValidation(e.message);
       toast.error('Could not save the request for quotation', e.message);
     } finally { setBusy(false); }

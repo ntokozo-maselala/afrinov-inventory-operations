@@ -93,7 +93,7 @@ describe('New purchase order', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
       supplierId: 's-za', vatRate: 15, lines: [{ materialId: 'm-1', orderedQty: 3, unitPrice: 12.5 }],
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 
   it('starts a euro order at 0% VAT, and leaves out a price the buyer left blank', async () => {
@@ -108,7 +108,7 @@ describe('New purchase order', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
       vatRate: 0, lines: [{ materialId: 'm-2', orderedQty: 10 }],
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 
   it('refuses a VAT rate over 100', async () => {
@@ -166,7 +166,7 @@ describe('line discounts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
       lines: [{ materialId: 'm-1', orderedQty: 8, unitPrice: 12.5, discountPercent: 10 }],
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 
   it('takes a two-place discount that floating point gets wrong, such as 4.35%', async () => {
@@ -180,7 +180,7 @@ describe('line discounts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
       lines: [expect.objectContaining({ discountPercent: 4.35 })],
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 
   it('takes a discount typed without a leading 0, and refuses one with 5 places', async () => {
@@ -202,7 +202,7 @@ describe('line discounts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
       lines: [expect.objectContaining({ discountPercent: 0.5 })],
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 
   it('refuses on Edit a discount just off two places, as the server does', async () => {

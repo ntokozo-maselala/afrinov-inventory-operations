@@ -79,7 +79,7 @@ describe('New purchase order page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await screen.findByRole('heading', { name: 'AFRI-0101' });
     expect(mockPost).toHaveBeenCalledTimes(1);
-    expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({ supplierId: 's-1' }));
+    expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({ supplierId: 's-1' }), expect.objectContaining({ idempotencyKey: expect.any(String) }));
     expect(await screen.findByText('AFRI-0101 saved as a draft')).toBeInTheDocument();
   });
 
@@ -173,5 +173,29 @@ describe('Finding drafts in the list', () => {
     appAt('/purchase-orders?status=DRAFT');
     expect(await screen.findByText('AFRI-0101')).toBeInTheDocument();
     expect(screen.queryByText('AFRI-0102')).not.toBeInTheDocument();
+  });
+});
+
+// System audit D5: a retry after a dropped connection sends the same key, so
+// the server answers with the first draft instead of saving a second.
+describe('retrying a new order', () => {
+  it('sends the same Idempotency-Key again after a dropped connection', async () => {
+    const keys: string[] = [];
+    let calls = 0;
+    mockPost.mockImplementation(async (path: string, _body: unknown, opts?: { idempotencyKey?: string }) => {
+      if (path !== '/purchase-orders') return {};
+      keys.push(opts?.idempotencyKey ?? '');
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error('The connection dropped'), { code: 'OUTCOME_UNKNOWN', status: 0 });
+      return { id: 'po-d', number: 'AFRI-0101' };
+    });
+    await fillOrder();
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(keys).toHaveLength(1));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save draft' }));
+    await screen.findByRole('heading', { name: 'AFRI-0101' });
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
   });
 });

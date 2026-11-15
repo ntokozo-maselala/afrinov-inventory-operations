@@ -11,7 +11,7 @@ replaces the tests themselves; it explains how to use them.
 | Backend unit | `apps/backend/src/**/*.test.ts` | 60 files / 852 tests | Business rules, validators, services in isolation (Prisma mocked at the module boundary) |
 | Frontend unit / component | `apps/frontend/src/**/*.test.{ts,tsx}` | 82 files / 856 tests | Component rendering, interaction, form validation, states |
 | Backend integration | `apps/backend/integration/*.real-http.test.ts` | 17 files / 124 tests | Real HTTP → Fastify → Prisma → PostgreSQL, including authorization and concurrency |
-| End-to-end | `apps/frontend/e2e/*.spec.ts` | 1 spec (login) | The browser path through frontend + backend + database |
+| End-to-end | `apps/frontend/e2e/*.spec.ts` | 3 specs, 8 tests (sign-in, sign-out, failure handling) | The browser path through frontend + backend + database; run in CI by `frontend-ci.yml` `e2e` (system audit H5) |
 
 ## Running them
 
@@ -35,6 +35,19 @@ DATABASE_URL=postgresql://…/afrinov_test npx prisma migrate deploy
 DATABASE_URL=… npx tsx src/db/seed.ts
 npm run test:integration
 ```
+
+Browser tests use the same kind of database, migrated and seeded with demo
+data, and start the backend on 4000 and Vite on 5173 themselves, so nothing
+else may be listening there:
+
+```sh
+cd apps/frontend
+npx playwright install chromium   # once, or after a Playwright upgrade
+npx playwright test
+```
+
+On Windows the servers can outlive the run; stop anything left on 4000 or
+5173 before the next one.
 
 The harness refuses any non-loopback or non-`_test` database
 (`requireIsolatedTestDatabaseUrl`), so a misconfiguration cannot point the suite
