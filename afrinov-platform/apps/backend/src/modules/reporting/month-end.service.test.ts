@@ -14,6 +14,8 @@ vi.mock('../../shared/inventory/tool-loans.js', async () => {
 vi.mock('../../shared/db.js', () => ({ prisma: {
   inventoryTransaction: { groupBy: mocks.balances },
   material: { findMany: mocks.materials }, location: { findMany: mocks.locations }, project: { findMany: mocks.projects },
+  // No month is closed here (system audit G1).
+  monthClose: { findUnique: async () => null },
 } }));
 vi.mock('../settings/settings.service.js', () => ({ SettingsService: { getValue: mocks.setting } }));
 vi.mock('./consumption.service.js', async (importOriginal) => ({
@@ -48,13 +50,15 @@ describe('MonthEndService.report', () => {
   it('requests all ledger history strictly before next month and usage within the chosen month', async () => {
     const report = await MonthEndService.report({ month: '2026-09' });
     expect(mocks.balances).toHaveBeenCalledExactlyOnceWith({
-      by: ['materialId', 'locationId', 'heldForProject'], where: { postedAt: { lt: new Date('2026-10-01T00:00:00Z') } }, _sum: { quantity: true },
+      by: ['materialId', 'locationId', 'heldForProject'], where: { postedAt: { lt: new Date('2026-10-01T00:00:00+02:00') } }, _sum: { quantity: true },
     });
     expect(mocks.consumption).toHaveBeenCalledExactlyOnceWith({ from: '2026-09-01', to: '2026-09-30' });
     expect(report).toEqual({
       month: '2026-09', from: '2026-09-01', to: '2026-09-30', generatedAt: '2026-10-09T10:00:00.000Z',
       currency: 'USD', bands: { urgentBelowPercent: 20, warningBelowPercent: 40 }, categories: [], projects: [],
       total: { items: 0, itemsInStock: 0, value: 0, urgent: 0, warning: 0, usedValue: 0 },
+      // An open month, worked out now at today's prices (system audit G1).
+      valuedAt: 'TODAY', closed: null,
     });
   });
 
@@ -69,7 +73,7 @@ describe('MonthEndService.report', () => {
   it('reports a range of days: stock as at midnight after the last day, usage within it', async () => {
     const report = await MonthEndService.report({ from: '2026-09-07', to: '2026-09-13', month: '2026-01' });
     expect(mocks.balances).toHaveBeenCalledExactlyOnceWith({
-      by: ['materialId', 'locationId', 'heldForProject'], where: { postedAt: { lt: new Date('2026-09-14T00:00:00Z') } }, _sum: { quantity: true },
+      by: ['materialId', 'locationId', 'heldForProject'], where: { postedAt: { lt: new Date('2026-09-14T00:00:00+02:00') } }, _sum: { quantity: true },
     });
     expect(mocks.consumption).toHaveBeenCalledExactlyOnceWith({ from: '2026-09-07', to: '2026-09-13' });
     expect(report).toMatchObject({ month: null, from: '2026-09-07', to: '2026-09-13' });

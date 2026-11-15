@@ -200,11 +200,14 @@ export const ProcurementSavingsService = {
    * MAX_SAVINGS_LINES.
    */
   async report(q: { from?: string; to?: string; projectNumber?: string }): Promise<SavingsReport> {
-    const { from, to, start, end } = parseRange(q.from, q.to);
+    const { from, to } = parseRange(q.from, q.to);
     const counted = { status: { in: ['SENT', 'AWARDED'] } } satisfies Prisma.RfqWhereInput;
     const chosen = {
       ...counted,
-      issuedAt: { gte: start, lt: end },
+      // issued_at is a date column holding the South African day it was sent, so
+      // it is compared with the days themselves, not their South African start
+      // times, which a date column would cut to the day before (system audit G2).
+      issuedAt: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) },
       ...(q.projectNumber ? { projectNumber: q.projectNumber } : {}),
     } satisfies Prisma.RfqWhereInput;
     const lines = await prisma.rfqLine.count({ where: { rfq: chosen } });

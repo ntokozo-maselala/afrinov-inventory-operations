@@ -52,6 +52,10 @@ Notes on the table, against the original proposal:
   `adjust:inventory`; goods go back to the supplier with `receive:inventory`
   and the right to receive that order's kind; a count sheet needs
   `adjust:inventory` (ADR-040).
+- Closing a month, and opening one again, needs `manage:settings` (Admin);
+  the list of closed months, `view:reports`. The waiting write-offs summary
+  needs what the list does: `approve:write_off` or `adjust:inventory`
+  (ADR-041).
 - Approvers cannot reject an order (no reject transition; they lack
   `cancel:purchase_order`) — see ADR-007.
 

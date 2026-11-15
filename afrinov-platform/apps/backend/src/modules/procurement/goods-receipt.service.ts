@@ -5,6 +5,7 @@ import { mostReceivable, overDeliveryShare } from './over-delivery.js';
 import { RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 import { checkWholeUnits } from '../../shared/units.js';
+import { saYear } from '../../shared/dates.js';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 /** Slack for a client clock a little ahead of the server's. */
@@ -207,7 +208,8 @@ export const GoodsReceiptService = {
  * with a later one. Callers hold the gr-number advisory lock.
  */
 export async function generateGRNumber(tx: Prisma.TransactionClient): Promise<string> {
-  const prefix = `GR-${new Date().getFullYear()}-`;
+  // The South African year, not the server's (system audit G2).
+  const prefix = `GR-${saYear()}-`;
   // Numbers past 9999 are longer, so the highest is found as a number, not as text.
   const ours = `^${prefix}[0-9]+$`;
   const [row] = await tx.$queryRaw<Array<{ last: number | null }>>`

@@ -1,7 +1,7 @@
 // The order's Activity reads as plain words: statuses by their labels, who did
 // each step by name, and each delivery by the receipt it was booked on.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
@@ -32,10 +32,13 @@ const HISTORY = [
   entry('a5', '2026-10-03T08:00:00Z', 'PO_GOODS_RECEIVED', null, { status: 'PARTIALLY_RECEIVED' }, { status: 'PARTIALLY_RECEIVED', goodsReceiptNumber: 'GR-2026-0008' }),
 ];
 
+let history = HISTORY;
+
 beforeEach(() => {
+  history = HISTORY;
   mockGet.mockReset().mockImplementation(async (path: string) => {
     if (path === '/purchase-orders/po-1') return ORDER;
-    if (path === '/purchase-orders/po-1/history') return HISTORY;
+    if (path === '/purchase-orders/po-1/history') return history;
     if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, randValue: null, exchangeRate: null, noRate: false, steps: [], next: null, approvers: [] };
     return [];
   });
@@ -63,5 +66,21 @@ describe('the order Activity', () => {
     // An account that no longer exists is not shown as its id.
     expect(items[0]).toHaveTextContent('A removed user');
     expect(screen.queryByText(/u-1/)).not.toBeInTheDocument();
+  });
+
+  // System audit D7: a long order's first entries are never lost, only paged.
+  it('shows the newest 50 entries, then older ones on request, down to who raised it', async () => {
+    const edits = Array.from({ length: 60 }, (_, i) => entry('e' + i, new Date(Date.UTC(2026, 9, 5, 8, i)).toISOString(), 'UPDATE', 'Buyer One', null, null));
+    history = [...HISTORY, ...edits];
+    render(
+      <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
+        <ToastProvider><Routes><Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} /></Routes></ToastProvider>
+      </MemoryRouter>,
+    );
+    const more = await screen.findByRole('button', { name: 'Show older (15 more)' });
+    expect(screen.queryByText('Purchase order created')).not.toBeInTheDocument();
+    fireEvent.click(more);
+    expect(screen.getByText('Purchase order created')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Show older/ })).not.toBeInTheDocument();
   });
 });

@@ -4,7 +4,9 @@
 
 ## Reports replacing the AS-IS Dashboard / *Stock Summary / *Stock Report sheets
 All need `view:reports` (every role has it) and are computed on request from
-the ledger, balances and material master — nothing is stored.
+the ledger, balances and material master — except a closed month, whose
+report is kept (ADR-041). Days and months are South African (UTC+2, no
+daylight saving): a movement at 00:30 on the 1st belongs to the new month.
 
 - **Current stock** — by category, location or material
   (`GET /reports/current-stock`; Stock page). Replaces `*Stock Report`
@@ -44,15 +46,27 @@ the ledger, balances and material master — nothing is stored.
   Report (stock used), as at the end of a chosen month
   (`GET /reports/month-end?month=YYYY-MM` and `/export`; Month-end report
   page). Stock is rebuilt from ledger rows posted before the first day of
-  the next month (UTC), so a past month does not change later; prices are
-  current unit prices. Future months are refused.
+  the next month (South African time), so a past month's quantities do not
+  change later. Until the month is closed it is valued at current unit
+  prices and says so (`valuedAt: TODAY`). Future months are refused.
+- **Closing a month** (ADR-041) — an Admin (`manage:settings`) closes a month
+  that is over (`POST /month-closes`; the Close button on the stock report).
+  Its report is kept as it stands with every item's unit cost then; the
+  month's report then returns what was kept (`valuedAt: CLOSED`) and stock
+  used in it is valued at those prices. Opening it again needs a reason
+  (`POST /month-closes/:month/reopen`); both are in Activity. `GET
+  /month-closes` lists closed months.
 - **Inventory report** — filterable line-per-location report with KPIs,
   paging, and Excel/PDF export (`GET /reports/inventory`, `/export`).
 - **Bottom-N stock quantity** (the Dashboard's "Bottom 10 Stock
   Quantity") — **Planned**; no such view exists.
 
 ## Controls
-- Reports are read-only; the reporting module writes nothing (verified).
+- Reports are read-only; the reporting module writes only a month's close
+  and its reopening (ADR-041).
+- Waiting write-offs show on the Dashboard with the oldest's days waited
+  (`GET /adjustment-requests/summary`), and each says how long it has waited
+  (ADR-041).
 - Figures are derived from the ledger or the balance table recomputed from
   it — no parallel summary numbers are stored.
 - Known inconsistency: the inventory report's currency comes from the

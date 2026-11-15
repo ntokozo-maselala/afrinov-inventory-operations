@@ -27,6 +27,7 @@ import { OWN_ORDER, STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSi
 import { currentPrintedTerms } from './po-terms.js';
 import { refuseProjectMaterialOnStoresOrder, refuseStoresOnProjectOrder } from '../inventory/material-section.js';
 import { inactiveMessage } from '../inventory/material-status.js';
+import { pageCursor, parseCursor } from '../../shared/dates.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -1021,19 +1022,29 @@ export const PurchaseOrderService = {
 
   // Returns the audit log entries relevant to a PO so the UI can render
   // an activity feed. Ordered most-recent first.
-  /** The order's Activity, newest first, each entry with the name of who did it. */
-  async history(id: string) {
+  /**
+   * The order's Activity, newest first, each entry with the name of who did it.
+   * All of it unless a page is asked for (`limit`, and `before` a cursor from
+   * the last entry): the first entries, who raised and signed it, are the ones
+   * most looked for (system audit D7).
+   */
+  async history(id: string, page: { before?: string; limit?: number } = {}) {
+    const where: Prisma.AuditLogEntryWhereInput = { entityType: 'PurchaseOrder', entityId: id };
+    if (page.before) {
+      const { at, id: lastId } = parseCursor(page.before);
+      where.OR = [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: lastId } }];
+    }
     const entries = await prisma.auditLogEntry.findMany({
-      where: { entityType: 'PurchaseOrder', entityId: id },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(page.limit ? { take: Math.min(Math.max(page.limit, 1), 500) } : {}),
     });
     const actorIds = [...new Set(entries.map((e) => e.actorId).filter((a): a is string => a !== null))];
     const actors = actorIds.length
       ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
       : [];
     const names = new Map(actors.map((a) => [a.id, a.name]));
-    return entries.map((e) => ({ ...e, actorName: e.actorId ? names.get(e.actorId) ?? null : null }));
+    return entries.map((e) => ({ ...e, cursor: pageCursor(e.createdAt, e.id), actorName: e.actorId ? names.get(e.actorId) ?? null : null }));
   },
 };
 

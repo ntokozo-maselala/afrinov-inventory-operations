@@ -97,6 +97,9 @@ interface State {
 
 let state: State = freshState();
 
+/** Closed months: the report kept when each was closed (system audit G1, as month-close.service.ts). */
+const MOCK_MONTH_CLOSES = new Map<string, { report: Record<string, unknown>; closed: { month: string; closedAt: string; closedBy: string } }>();
+
 /**
  * Builds initial mock state from the seeds. Seed orders inherit supplier
  * contact details and address unless the order already carries those fields.
@@ -144,6 +147,7 @@ export function mockOrderRaisedBy(orderId: string, userId: string): void {
 // Reset (useful if we ever want a "reset mocks" button).
 export function resetMockState(): void {
   state = freshState();
+  MOCK_MONTH_CLOSES.clear();
   mockUsers = JSON.parse(JSON.stringify(SEED_USERS));
   MOCK_AUDIT.length = 0;
   MOCK_COUNT_LINES.length = 0;
@@ -1435,7 +1439,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       .map((l) => ({
         ...l,
         parent: mockLocationParent(l),
-        inventoryCount: balances.filter((b) => b.locationId === l.id).length,
+        ...mockStockedItems(balances, l.id),
       }));
   }
   // System audit A1: stock on it keeps a location open (tools out are kept on the server's list only).
@@ -1451,8 +1455,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const l = findLocation(id);
     if (!l) throw err('NOT_FOUND', 'Location not found');
     const counts = mockLocationDependencyCounts(id);
-    const balances = computeBalances().filter((b) => b.locationId === id);
-    return { ...l, parent: mockLocationParent(l), inventoryCount: balances.length, dependencyCounts: counts };
+    return { ...l, parent: mockLocationParent(l), ...mockStockedItems(computeBalances(), id), dependencyCounts: counts };
   }
   if (method === 'POST' && p === '/locations') {
     const b = body as Partial<MockLocation> & { name?: string; type?: MockLocation['type']; code?: string };
@@ -2111,6 +2114,11 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
   if (method === 'GET' && p === '/tools') return listTools();
   // Adjustments waiting for approval (switched off in the demo by default; see the settings below).
+  if (method === 'GET' && p === '/adjustment-requests/summary') {
+    // As the server (system audit C8): how many wait, and the oldest.
+    const waiting = state.adjustmentRequests.filter((r) => r.status === 'PENDING').sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
+    return { waiting: waiting.length, oldestRequestedAt: waiting[0]?.requestedAt ?? null, oldestDays: waiting[0] ? mockDaysBetween(waiting[0].requestedAt, new Date().toISOString()) : null };
+  }
   if (method === 'GET' && p === '/adjustment-requests') return listAdjustmentRequests(qs);
   const requestDecision = /^\/adjustment-requests\/([^/]+)\/(approve|reject)$/.exec(p);
   if (method === 'POST' && requestDecision) return decideAdjustmentRequest(decodeURIComponent(requestDecision[1]!), requestDecision[2] as 'approve' | 'reject', (body as { reason?: string }) ?? {});
@@ -2396,10 +2404,39 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
   if (method === 'GET' && p === '/reports/month-end') {
     const currency = String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR');
-    return computeMonthEnd({ month: qs.month || undefined, from: qs.from || undefined, to: qs.to || undefined }, {
+    const live = computeMonthEnd({ month: qs.month || undefined, from: qs.from || undefined, to: qs.to || undefined }, {
       transactions: state.transactions, materials: state.materials, locations: state.locations, bands: mockBands(), currency, projects: state.projects,
       consumption: (from, to) => computeConsumption({ from, to }, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency }),
     });
+    // A closed month returns what was kept when it was closed (system audit G1).
+    const kept = live.month ? MOCK_MONTH_CLOSES.get(live.month) : undefined;
+    return kept ? { ...kept.report, valuedAt: 'CLOSED', closed: kept.closed } : { ...live, valuedAt: 'TODAY', closed: null };
+  }
+  if (method === 'GET' && p === '/month-closes') {
+    return [...MOCK_MONTH_CLOSES.values()].map((c) => c.closed).sort((a, b) => b.month.localeCompare(a.month));
+  }
+  if (method === 'POST' && p === '/month-closes') {
+    const month = String((body as { month?: unknown } | undefined)?.month ?? '');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw err('VALIDATION_ERROR', 'Choose a month, as YYYY-MM.');
+    const thisMonth = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 7);
+    if (month >= thisMonth) throw err('VALIDATION_ERROR', 'Only a month that is over can be closed.');
+    if (MOCK_MONTH_CLOSES.has(month)) throw err('CONFLICT', `${month} is closed already.`);
+    const currency = String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR');
+    const report = computeMonthEnd({ month }, {
+      transactions: state.transactions, materials: state.materials, locations: state.locations, bands: mockBands(), currency, projects: state.projects,
+      consumption: (from, to) => computeConsumption({ from, to }, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency }),
+    });
+    const closed = { month, closedAt: new Date().toISOString(), closedBy: MOCK_ACTOR_NAMES['u-admin'] ?? 'Admin' };
+    MOCK_MONTH_CLOSES.set(month, { report: report as unknown as Record<string, unknown>, closed });
+    return closed;
+  }
+  const reopen = /^\/month-closes\/([^/]+)\/reopen$/.exec(p);
+  if (method === 'POST' && reopen) {
+    const month = decodeURIComponent(reopen[1]!);
+    const reason = String((body as { reason?: unknown } | undefined)?.reason ?? '').trim();
+    if (!reason) throw err('VALIDATION_ERROR', 'Say why the month is opened again.', { fieldErrors: { reason: ['Say why the month is opened again.'] } });
+    if (!MOCK_MONTH_CLOSES.delete(month)) throw err('NOT_FOUND', `${month} is not closed.`);
+    return { month };
   }
   if (method === 'GET' && p === '/reports/stock-value') {
     return computeStockValue();
@@ -3642,12 +3679,21 @@ function requestMockAdjustment(r: Omit<MockAdjustmentRequest, 'id' | 'status' | 
   return id;
 }
 
+/** Whole South African days from one moment to another, as the server counts them. */
+function mockDaysBetween(from: string, to: string): number {
+  const day = (iso: string) => Date.parse(new Date(Date.parse(iso) + 7_200_000).toISOString().slice(0, 10));
+  return Math.max(0, Math.round((day(to) - day(from)) / 86_400_000));
+}
+
 function listAdjustmentRequests(qs: Record<string, string>) {
   const status = qs.status ?? 'PENDING';
   const userName = (id: string | null) => (id ? mockUsers.find((u) => u.id === id)?.name ?? 'Unknown user' : null);
-  return state.adjustmentRequests
+  // As the server (system audit C8): a page at a time, each with the days it waited.
+  const limit = Math.min(Number(qs.limit) || 100, 200);
+  const sorted = state.adjustmentRequests
     .filter((r) => r.status === status)
-    .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+    .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id));
+  return olderThan(sorted, qs.before, (r) => r.requestedAt).slice(0, limit)
     .map((r) => {
       const m = findMaterial(r.materialId);
       const recipient = r.recipientId ? state.recipients.find((x) => x.id === r.recipientId) : undefined;
@@ -3658,6 +3704,8 @@ function listAdjustmentRequests(qs: Record<string, string>) {
         recipient: recipient ? { id: recipient.id, name: recipient.name } : null,
         requestedBy: { id: r.requestedById, name: userName(r.requestedById)! },
         decidedBy: r.decidedById ? { id: r.decidedById, name: userName(r.decidedById)! } : null,
+        cursor: `${r.requestedAt}_${r.id}`,
+        daysWaiting: mockDaysBetween(r.requestedAt, r.decidedAt ?? new Date().toISOString()),
       };
     });
 }
@@ -3947,6 +3995,12 @@ function getBalance(materialId: string, locationId: string, heldForProject: stri
 }
 
 // The room a location stands in, as GET /locations returns it.
+/** As the server (system audit A4): items with stock above zero here, and how many have some held for a project. */
+function mockStockedItems(balances: ReturnType<typeof computeBalances>, locationId: string): { inventoryCount: number; heldForProjectCount: number } {
+  const here = balances.filter((b) => b.locationId === locationId && Number(b.quantity) > 0);
+  return { inventoryCount: new Set(here.map((b) => b.materialId)).size, heldForProjectCount: new Set(here.filter((b) => b.heldForProject).map((b) => b.materialId)).size };
+}
+
 function mockLocationParent(l: MockLocation): { id: string; name: string; code: string | null; type: MockLocation['type'] } | null {
   const p = l.parentId ? findLocation(l.parentId) : undefined;
   return p ? { id: p.id, name: p.name, code: p.code ?? null, type: p.type } : null;

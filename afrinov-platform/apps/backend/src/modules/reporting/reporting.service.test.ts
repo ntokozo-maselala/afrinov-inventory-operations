@@ -556,7 +556,8 @@ describe('ReportingService', () => {
     it('includes the whole of the last day, and ignores a limit that is not a number', async () => {
       seedMaterials();
       const at = (id: string, postedAt: string) => ({ id, postedAt: new Date(postedAt), type: 'ISSUE', materialId: 'm-1', locationId: 'l-1', quantity: DEC(-1), actorId: 'u-1', recipientId: null, reasonCode: null, reasonNote: null, projectNumber: null, referenceType: null, referenceId: null });
-      db.transactions = [at('before', '2026-08-31T23:59:59Z'), at('first', '2026-09-01T00:00:00Z'), at('late', '2026-09-05T15:30:00Z'), at('after', '2026-09-06T00:00:00Z')];
+      // Whole South African days (system audit G2).
+      db.transactions = [at('before', '2026-08-31T23:59:59+02:00'), at('first', '2026-09-01T00:00:00+02:00'), at('late', '2026-09-05T15:30:00+02:00'), at('after', '2026-09-06T00:00:00+02:00')];
       const { ReportingService } = await import('./reporting.service.js');
       const result = await ReportingService.movementHistory({ from: '2026-09-01', to: '2026-09-05', limit: Number('abc') });
       expect(result.map((r) => r.id)).toEqual(['late', 'first']);

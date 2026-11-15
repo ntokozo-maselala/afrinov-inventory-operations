@@ -1423,3 +1423,61 @@ reported before this ADR read as Spot counts of Stores stock. Tests:
 `opening-balances.real-http.test.ts`, `StockCount.test.tsx`, `Tools.test.tsx`,
 `TransactionDrawer.test.tsx`, `OrderReceiptLines.test.ts`,
 `mockApi.mutation.test.ts`, `mockDelivery.test.ts`.
+
+### ADR-041 — Reports say what their figures mean: South African days, closed months, stocked locations, waiting write-offs, long order histories and Stores items on project issues
+**Date:** 2026-11-15 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P5, reports and what figures
+mean) found figures that read one way and meant another. Days and months were
+UTC, so a movement posted between midnight and 02:00 in South Africa landed on
+the day or month before (G2). A past month's stock was rebuilt from the ledger
+but valued at today's unit costs, so its report changed whenever a price did
+(G1). A location's "items" counted every balance row it had ever held, so an
+emptied rack still showed them (A4). Waiting write-offs didn't say how long
+they had waited, the list stopped at 200, and nothing on the Dashboard said
+they were there (C8). An order's Activity was cut at its newest entries, losing
+how it started (D7). The Issue screen refused Stores items on a project's
+issue that the server accepted (E4). The owner approved the phase and answered
+none of the questions, so each finding takes its recommended option.
+
+**Decision:**
+- **Days and months are South African** (UTC+2 all year, no daylight saving):
+  `saDayStart`, `saDayOf`, `saToday`, `saMonth`, `saYear` and
+  `saMonthRange` (`src/shared/dates.ts`) are the one definition, used by every
+  date filter, the reports' default periods, goods receipt numbers and tool
+  due days. The frontend's `today()` and `saDay()` (`src/lib/dates.ts`) match.
+- **A month is closed by an Admin** (`manage:settings`) once it is over
+  (`POST /month-closes`): its stock report is kept as it stands
+  (`month_closes.report`) with every item's unit cost then
+  (`month_close_prices`). The month's report returns what was kept
+  (`valuedAt: CLOSED`, `closed`), and stock used in a closed month is valued
+  at its kept prices. Any other period says it is valued at today's prices
+  (`valuedAt: TODAY`). It is opened again only with a reason
+  (`POST /month-closes/:month/reopen`), which drops what was kept; both are in
+  Activity (`MONTH_CLOSE`, `MONTH_REOPEN`). Quantities need no closing: the
+  ledger posts corrections at the time they are made, so a past month's
+  quantities never change.
+- **A location counts the items it holds now** (`inventoryCount`: items with
+  stock above 0) and how many of them are held for a project
+  (`heldForProjectCount`). What guards deleting it is unchanged.
+- **Waiting write-offs say how long they have waited** (`daysWaiting`, in
+  South African days, or how long one waited before it was decided), page 50 at
+  a time with a cursor, and the Dashboard shows how many wait and the oldest
+  (`GET /adjustment-requests/summary`), from 7 days in a warning colour.
+- **An order's Activity returns every entry** unless a page is asked for
+  (`?limit`, `?before`); the screen shows the newest 50 and "Show older".
+- **A Stores item goes on a project's issue**, as the server already allowed:
+  the Issue screen offers Stores items alongside the project's material.
+
+Migration `20260101000061_reports` adds `month_closes` and
+`month_close_prices`.
+
+**Consequences:** A report means the same thing wherever it is read, and a
+closed month's figures are the ones management saw. Reports of periods
+before this ADR move by up to two hours at each end. Closing is a deliberate
+step: until a month is closed, its report is valued at today's prices and says
+so. Tests: `sa-dates.test.ts`, `month-close.service.test.ts`,
+`month-end.service.test.ts`, `consumption.test.ts`, `report.service.test.ts`,
+`reports.real-http.test.ts`, `datesSouthAfrica.test.ts`, `MonthEnd.test.tsx`,
+`LocationStock.test.ts`, `WriteOffApprovals.test.tsx`, `DashboardControls.test.tsx`,
+`PoActivity.test.tsx`, `IssueStock.test.tsx`, `mockStoresToProject.test.ts`.

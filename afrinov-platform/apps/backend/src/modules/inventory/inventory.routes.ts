@@ -104,6 +104,9 @@ export const adjustmentSchema = z.object({
 
 export const adjustmentRequestQuerySchema = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  // A page at a time, newest first (system audit C8).
+  before: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
 export const adjustmentRejectionSchema = z.object({
@@ -303,6 +306,12 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
 
   // Adjustments waiting for approval, and those decided. Seen by whoever may
   // ask for one or approve one.
+  // How many wait, and the oldest, for the Dashboard (system audit C8).
+  app.get('/adjustment-requests/summary', { preHandler: [app.authenticate] }, async (req) => {
+    if (!(await userHasPermission(req, PermissionCode.ApproveWriteOff))) await requirePermission(req, PermissionCode.AdjustInventory);
+    return WriteOffApprovalService.summary();
+  });
+
   app.get('/adjustment-requests', { preHandler: [app.authenticate] }, async (req, reply) => {
     if (!(await userHasPermission(req, PermissionCode.ApproveWriteOff))) await requirePermission(req, PermissionCode.AdjustInventory);
     const parsed = adjustmentRequestQuerySchema.safeParse(req.query);

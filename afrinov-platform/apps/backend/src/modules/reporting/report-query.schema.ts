@@ -9,6 +9,7 @@
 // The two endpoints therefore produce data that is consistent by construction:
 // same query string → same dataset → same export content.
 import { z } from 'zod';
+import { saDayStart, saMonth, saMonthRange, saToday } from '../../shared/dates.js';
 
 export const MaterialCategoryValues = [
   'FASTENERS_SLUGS_INSULATION',
@@ -117,8 +118,13 @@ export function parseReportQuery(raw: unknown): ReportQuery {
   return reportQuerySchema.parse(normalised);
 }
 
-// Resolves the preset into a concrete [from, to] date window in UTC.
+// Resolves the preset into a concrete [from, to] window of South African days
+// (system audit G2): today, this week (from Sunday), month, quarter, year.
 // `ALL` returns nulls. `CUSTOM` returns the user-supplied bounds.
+const DAY_MS = 86_400_000;
+/** The first day of a month (0-based; 12 rolls into the next year), YYYY-MM-DD. */
+const monthStart = (y: number, m0: number) => new Date(Date.UTC(y, m0, 1)).toISOString().slice(0, 10);
+
 export function resolveDateWindow(
   q: ReportQuery,
   now: Date = new Date(),
@@ -127,34 +133,27 @@ export function resolveDateWindow(
     case 'ALL':
       return { from: null, to: null };
     case 'TODAY': {
-      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-      const end = new Date(start);
-      end.setUTCDate(end.getUTCDate() + 1);
-      return { from: start, to: end };
+      const start = saDayStart(saToday(now));
+      return { from: start, to: new Date(start.getTime() + DAY_MS) };
     }
     case 'WEEK': {
-      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-      const day = start.getUTCDay(); // 0 (Sun) .. 6 (Sat)
-      start.setUTCDate(start.getUTCDate() - day); // Sunday-anchored week
-      const end = new Date(start);
-      end.setUTCDate(end.getUTCDate() + 7);
-      return { from: start, to: end };
+      const today = saToday(now);
+      const day = new Date(`${today}T00:00:00Z`).getUTCDay(); // 0 (Sun) .. 6 (Sat)
+      const start = new Date(saDayStart(today).getTime() - day * DAY_MS); // Sunday-anchored week
+      return { from: start, to: new Date(start.getTime() + 7 * DAY_MS) };
     }
     case 'MONTH': {
-      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-      const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      const { start, end } = saMonthRange(saMonth(now));
       return { from: start, to: end };
     }
     case 'QUARTER': {
-      const q0 = Math.floor(now.getUTCMonth() / 3) * 3;
-      const start = new Date(Date.UTC(now.getUTCFullYear(), q0, 1));
-      const end = new Date(Date.UTC(now.getUTCFullYear(), q0 + 3, 1));
-      return { from: start, to: end };
+      const [y, m] = saMonth(now).split('-').map(Number) as [number, number];
+      const q0 = Math.floor((m - 1) / 3) * 3;
+      return { from: saDayStart(monthStart(y, q0)), to: saDayStart(monthStart(y, q0 + 3)) };
     }
     case 'YEAR': {
-      const start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-      const end = new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1));
-      return { from: start, to: end };
+      const y = Number(saMonth(now).slice(0, 4));
+      return { from: saDayStart(monthStart(y, 0)), to: saDayStart(monthStart(y + 1, 0)) };
     }
     case 'CUSTOM': {
       return {

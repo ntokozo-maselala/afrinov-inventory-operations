@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1350, frontend 1570)
+npm test               # both workspaces (backend 1357, frontend 1577)
 npm run build          # both workspaces
 ```
 
@@ -246,6 +246,16 @@ Use these forms; the older spellings still work but are deprecated or removed.
   transfer moves the hold (`moveHeld`). Counts are of one stock (Stores or a
   project's), FULL or SPOT, from a sheet with an `openedAt`; a moved line is
   held back, not the whole count.
+- **Days are South African (ADR-041).** A day or month a person picks, or a
+  report's default period, is UTC+2 all year: use `saDayStart`, `saDayOf`,
+  `saToday`, `saMonth` and `saMonthRange` (`src/shared/dates.ts`), never
+  `toISOString().slice(0, 10)` of a time or `T00:00:00Z`; on the frontend,
+  `today()` and `saDay()` (`src/lib/dates.ts`).
+- **A closed month keeps its figures (ADR-041).** An Admin closes a month
+  that is over (`MonthCloseService`): its stock report is kept with every
+  unit cost then, and the month's report and stock used in it read those.
+  Reopening needs a reason. A new report that values a past period at unit
+  cost reads `MonthCloseService.pricesFor` for closed months.
 - **The seed loads demo data only with `SEED_DEMO_DATA=true`, never in
   production** (`src/db/seed-plan.ts`). Reference data (permissions, roles,
   settings, the admin) goes before the `if (!plan.demo)` return in

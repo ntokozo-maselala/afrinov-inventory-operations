@@ -56,7 +56,7 @@ describe('InventoryService.returnable', () => {
     issues = [issue('a', 1)];
     await InventoryService.returnable({ recipientId: 'r-1', from: '2026-09-16', to: '2026-10-16' });
     expect(calls[0]!.where).toMatchObject({ type: 'ISSUE', recipientId: 'r-1', reversesId: null, reversedBy: null });
-    expect(calls[0]!.where['postedAt']).toEqual({ gte: new Date('2026-09-16T00:00:00.000Z'), lt: new Date('2026-10-17T00:00:00.000Z') });
+    expect(calls[0]!.where['postedAt']).toEqual({ gte: new Date('2026-09-16T00:00:00.000+02:00'), lt: new Date('2026-10-17T00:00:00.000+02:00') });
     expect(calls[1]!.where).toMatchObject({ type: 'RETURN', referenceType: 'Return', referenceId: { in: ['a'] } });
   });
 

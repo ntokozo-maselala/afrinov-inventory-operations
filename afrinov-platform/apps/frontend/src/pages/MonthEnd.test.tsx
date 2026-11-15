@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockDownload, mockPdf } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn() }));
+const { mockGet, mockPost, mockDownload, mockPdf, signedIn } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn(), signedIn: { roles: ['STORE_CONTROLLER'] } }));
 vi.mock('../api/client', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../api/client')>(), api: { get: mockGet },
+  ...await importOriginal<typeof import('../api/client')>(), api: { get: mockGet, post: mockPost },
 }));
+// Signed in as a store controller: no month closing (an Admin's, system audit G1).
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { id: 'u-1', roles: signedIn.roles } }) }));
 vi.mock('../api/exportMonthEnd', () => ({ downloadMonthEnd: mockDownload, downloadMonthEndPdf: mockPdf }));
 
 const { MonthEnd, lastMonth } = await import('./MonthEnd');
@@ -30,9 +32,9 @@ const downloadAs = (format: 'Excel (.xlsx)' | 'PDF (.pdf)') => {
 
 describe('lastMonth', () => {
   it('gives the month just ended, across a year end and a leap February', () => {
-    expect(lastMonth(new Date(2026, 9, 9))).toEqual({ from: '2026-09-01', to: '2026-09-30' });
-    expect(lastMonth(new Date(2027, 0, 5))).toEqual({ from: '2026-12-01', to: '2026-12-31' });
-    expect(lastMonth(new Date(2024, 2, 10))).toEqual({ from: '2024-02-01', to: '2024-02-29' });
+    expect(lastMonth('2026-10-09')).toEqual({ from: '2026-09-01', to: '2026-09-30' });
+    expect(lastMonth('2027-01-05')).toEqual({ from: '2026-12-01', to: '2026-12-31' });
+    expect(lastMonth('2024-03-10')).toEqual({ from: '2024-02-01', to: '2024-02-29' });
   });
 });
 
@@ -177,5 +179,27 @@ describe('Stock report loading and failures', () => {
     downloadAs('Excel (.xlsx)');
     await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(button).toBeEnabled());
+  });
+});
+
+// System audit G1: a closed month keeps its figures; an Admin closes one that is over.
+describe('closing a month', () => {
+  beforeEach(() => { signedIn.roles = ['STORE_CONTROLLER']; mockPost.mockReset().mockResolvedValue({ month: '2026-09' }); });
+
+  it('says a closed month shows the figures kept when it was closed', async () => {
+    mockGet.mockReset().mockResolvedValue({ ...REPORT, valuedAt: 'CLOSED', closed: { month: '2026-09', closedAt: '2026-10-02T08:00:00.000Z', closedBy: 'Thandi' } });
+    renderPage(`/reports/stock-report?from=2026-09-01&to=2026-09-30`);
+    expect(await screen.findByText('September 2026 is closed')).toBeInTheDocument();
+    expect(screen.getByText(/kept when it was closed on .* by Thandi/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open it again' })).not.toBeInTheDocument();
+  });
+
+  it('lets an Admin close a month that is over, and says an open one is valued at today\'s prices', async () => {
+    signedIn.roles = ['ADMIN'];
+    mockGet.mockReset().mockResolvedValue({ ...REPORT, valuedAt: 'TODAY', closed: null });
+    renderPage(`/reports/stock-report?from=2026-09-01&to=2026-09-30`);
+    expect(await screen.findByText(/Valued at today's unit prices: closing the month keeps these figures/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close September 2026' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/month-closes', { month: '2026-09' }));
   });
 });

@@ -19,6 +19,10 @@ import { requestAdjustment } from './write-off-requests.js';
 import { lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { ToolLoanService, TOOL_LOAN_REFERENCE } from './tool-loan.service.js';
 import { resolveRepair, TOOL_REPAIR_REFERENCE } from '../../shared/inventory/tool-repairs.js';
+import { pageCursor, parseCursor, saDayOf } from '../../shared/dates.js';
+
+/** Whole South African days from one moment to another: 0 on the same day. */
+const daysBetweenDays = (from: Date, to: Date) => Math.max(0, Math.round((Date.parse(`${saDayOf(to)}T00:00:00Z`) - Date.parse(`${saDayOf(from)}T00:00:00Z`)) / 86_400_000));
 
 export type AdjustOutcome =
   | { status: 'POSTED'; transactionId: string }
@@ -78,21 +82,41 @@ export const WriteOffApprovalService = {
     });
   },
 
-  /** Requests, newest first: those waiting by default. */
-  async list(filter: { status?: AdjustmentRequestStatus } = {}) {
+  /**
+   * Requests, newest first, a page at a time (`before`, a cursor from the last
+   * row): those waiting by default. Each says how many days it has waited, or
+   * waited before it was decided (system audit C8).
+   */
+  async list(filter: { status?: AdjustmentRequestStatus; before?: string; limit?: number } = {}, now = new Date()) {
+    const where: Prisma.AdjustmentRequestWhereInput = { status: filter.status ?? AdjustmentRequestStatus.PENDING };
+    if (filter.before) {
+      const { at, id } = parseCursor(filter.before);
+      where.OR = [{ requestedAt: { lt: at } }, { requestedAt: at, id: { lt: id } }];
+    }
     const rows = await prisma.adjustmentRequest.findMany({
-      where: { status: filter.status ?? AdjustmentRequestStatus.PENDING },
+      where,
       include: listed,
       orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
-      take: 200,
+      take: Math.min(Math.max(filter.limit ?? 100, 1), 200),
     });
     return rows.map((r) => ({
       ...r,
+      cursor: pageCursor(r.requestedAt, r.id),
+      daysWaiting: daysBetweenDays(r.requestedAt, r.decidedAt ?? now),
       quantity: r.quantity.toString(),
       value: r.value?.toFixed(2) ?? null,
       requestedAt: r.requestedAt.toISOString(),
       decidedAt: r.decidedAt?.toISOString() ?? null,
     }));
+  },
+
+  /** How many wait for approval, and since when the oldest has (system audit C8), for the Dashboard. */
+  async summary(now = new Date()): Promise<{ waiting: number; oldestRequestedAt: string | null; oldestDays: number | null }> {
+    const [waiting, oldest] = await Promise.all([
+      prisma.adjustmentRequest.count({ where: { status: AdjustmentRequestStatus.PENDING } }),
+      prisma.adjustmentRequest.findFirst({ where: { status: AdjustmentRequestStatus.PENDING }, orderBy: [{ requestedAt: 'asc' }, { id: 'asc' }], select: { requestedAt: true } }),
+    ]);
+    return { waiting, oldestRequestedAt: oldest?.requestedAt.toISOString() ?? null, oldestDays: oldest ? daysBetweenDays(oldest.requestedAt, now) : null };
   },
 
   /** Posts the adjustment someone else asked for, if it still can be. */

@@ -37,7 +37,7 @@ describe('activityWhere', () => {
     expect(activityWhere({ from: '2026-10-12', to: '2026-10-12', entityType: 'User', actorId: 'u-1' })).toEqual({
       entityType: 'User',
       actorId: 'u-1',
-      createdAt: { gte: new Date('2026-10-12T00:00:00.000Z'), lt: new Date('2026-10-13T00:00:00.000Z') },
+      createdAt: { gte: new Date('2026-10-12T00:00:00.000+02:00'), lt: new Date('2026-10-13T00:00:00.000+02:00') },
     });
   });
 });

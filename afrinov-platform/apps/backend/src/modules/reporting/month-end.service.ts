@@ -15,6 +15,8 @@ import { classifyItem, getStatusBands, type StatusBands, type StockStatus } from
 import { SettingsService } from '../settings/settings.service.js';
 import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
 import { ConsumptionService, parseRange } from './consumption.service.js';
+import { saDayOf, saMonth, saMonthRange, saToday } from '../../shared/dates.js';
+import { MonthCloseService, type ClosedMonth } from './month-close.service.js';
 
 export interface MonthEndItem {
   sku: string;
@@ -71,6 +73,13 @@ export interface MonthEndReport {
   /** Projects material per project, completed and cancelled projects included. */
   projects: MonthEndProject[];
   total: { items: number; itemsInStock: number; value: number; urgent: number; warning: number; usedValue: number };
+  /**
+   * How it is valued (system audit G1): CLOSED, the figures kept when the month
+   * was closed; TODAY, quantities from the ledger at today's unit costs.
+   */
+  valuedAt?: 'CLOSED' | 'TODAY';
+  /** When a closed month was closed, and by whom. */
+  closed?: ClosedMonth | null;
 }
 
 const CATEGORY_ORDER: MaterialCategory[] = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'TOOLS'];
@@ -108,10 +117,11 @@ export function monthRange(month: string, now = new Date()): { from: string; to:
   const y = Number(m[1]);
   const mo = Number(m[2]);
   if (mo < 1 || mo > 12) throw Errors.validation('Month must be YYYY-MM');
-  if (y * 12 + mo > now.getUTCFullYear() * 12 + now.getUTCMonth() + 1) throw Errors.validation('That month has not started yet');
-  const first = new Date(Date.UTC(y, mo - 1, 1));
-  const last = new Date(Date.UTC(y, mo, 0));
-  return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10), end: new Date(Date.UTC(y, mo, 1)) };
+  // The latest is this South African month (system audit G2).
+  const [sy, sm] = saMonth(now).split('-').map(Number) as [number, number];
+  if (y * 12 + mo > sy * 12 + sm) throw Errors.validation('That month has not started yet');
+  const { first, last, end } = saMonthRange(`${m[1]}-${m[2]}`);
+  return { from: first, to: last, end };
 }
 
 export interface StockReportQuery { month?: string; from?: string; to?: string }
@@ -132,16 +142,16 @@ export function wholeMonth(from: string, to: string): string | null {
  */
 export function reportRange(q: StockReportQuery, now = new Date()): { month: string | null; from: string; to: string; end: Date } {
   if (!q.from && !q.to) {
-    const month = q.month || now.toISOString().slice(0, 7);
+    const month = q.month || saMonth(now);
     return { month, ...monthRange(month, now) };
   }
   if (!q.from || !q.to) throw Errors.validation('Give both a start and an end date');
   const { from, to, start, end } = parseRange(q.from, q.to);
   // Date rolls 2026-02-30 over to 2 March; refuse days that do not exist.
-  if (start.toISOString().slice(0, 10) !== from || new Date(end.getTime() - 86_400_000).toISOString().slice(0, 10) !== to) {
+  if (saDayOf(start) !== from || saDayOf(new Date(end.getTime() - 86_400_000)) !== to) {
     throw Errors.validation('Invalid date');
   }
-  if (from > now.toISOString().slice(0, 10)) throw Errors.validation('That period has not started yet');
+  if (from > saToday(now)) throw Errors.validation('That period has not started yet');
   return { month: wholeMonth(from, to), from, to, end };
 }
 
@@ -162,6 +172,17 @@ export const MonthEndService = {
    */
   async report(q: StockReportQuery): Promise<MonthEndReport> {
     const { month, from, to, end } = reportRange(q);
+    // A closed month reads what was kept when it was closed (system audit G1).
+    if (month) {
+      const kept = await MonthCloseService.kept(month);
+      if (kept) return { ...kept.report, valuedAt: 'CLOSED', closed: kept.closed };
+    }
+    return { ...(await liveReport(month, from, to, end)), valuedAt: 'TODAY', closed: null };
+  },
+};
+
+/** The report worked out from the ledger now, at today's unit costs. */
+async function liveReport(month: string | null, from: string, to: string, end: Date): Promise<MonthEndReport> {
     const [balances, materials, bands, currency, consumption] = await Promise.all([
       prisma.inventoryTransaction.groupBy({ by: ['materialId', 'locationId', 'heldForProject'], where: { postedAt: { lt: end } }, _sum: { quantity: true } }),
       prisma.material.findMany({ select: { id: true, sku: true, name: true, category: true, requiredStock: true, unitCost: true, active: true, projectNumber: true, project: { select: { name: true, status: true } } } }),
@@ -311,5 +332,4 @@ export const MonthEndService = {
         usedValue: round2(categories.reduce((a, c) => a + c.usedValue, 0)),
       },
     };
-  },
-};
+}

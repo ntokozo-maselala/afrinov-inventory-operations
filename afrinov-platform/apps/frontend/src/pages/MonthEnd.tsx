@@ -2,7 +2,7 @@
 // (Summary and Stock Report sheets per category), with stock as it stood at the
 // end of the chosen period: a month, a week or any range of days
 // (GET /reports/month-end?from=&to=).
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
@@ -11,7 +11,13 @@ import { FilterBar, DATE_WIDTH } from '../components/FilterBar';
 import { ErrorState } from '../components/EmptyState';
 import { DownloadMenu } from '../components/DownloadMenu';
 import { formatNumber } from '../lib/format';
-import { notAfter } from '../lib/dates';
+import { notAfter, today as todayInSA } from '../lib/dates';
+import { api, type ApiError } from '../api/client';
+import { useIsAdmin } from '../hooks/usePermissions';
+import { Alert } from '../components/Alert';
+import { Button } from '../components/Button';
+import { useToast } from '../components/Toast';
+import { formatDate } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { downloadMonthEnd, downloadMonthEndPdf } from '../api/exportMonthEnd';
 import { heldProjects as projectsHeld } from '../api/reportTypes';
@@ -19,11 +25,74 @@ import type { MonthEndReport } from '../api/reportTypes';
 import { categoryLabel } from '../lib/categories';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** The month just ended in South Africa (system audit G2): the usual report and the page's default period. */
+export function lastMonth(today = todayInSA()): { from: string; to: string } {
+  const [y, m] = today.split('-').map(Number) as [number, number];
+  const first = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10);
+  const last = new Date(Date.UTC(y, m - 1, 0)).toISOString().slice(0, 10);
+  return { from: first, to: last };
+}
 
-/** The month just ended, in the user's own calendar: the usual report and the page's default period. */
-export function lastMonth(today = new Date()): { from: string; to: string } {
-  return { from: iso(new Date(today.getFullYear(), today.getMonth() - 1, 1)), to: iso(new Date(today.getFullYear(), today.getMonth(), 0)) };
+/** "September 2026" for 2026-09. */
+const monthName = (month: string) => new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+/**
+ * How the figures are valued, and, for an Admin, closing a month that is over
+ * or opening a closed one again (system audit G1).
+ */
+function Valuation({ report, onChanged }: { report: MonthEndReport; onChanged: () => void }) {
+  const isAdmin = useIsAdmin();
+  const toast = useToast();
+  const [reopening, setReopening] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const month = report.month;
+  const over = !!month && month < todayInSA().slice(0, 7);
+  async function run(call: () => Promise<unknown>, done: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await call();
+      toast.success(done);
+      setReopening(false);
+      setReason('');
+      onChanged();
+    } catch (err) {
+      setError((err as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (report.closed && month) {
+    return (
+      <Alert tone="info" title={`${monthName(month)} is closed`} className="mb-4">
+        <p>These are the figures kept when it was closed on {formatDate(report.closed.closedAt)} by {report.closed.closedBy}: later price changes don&apos;t move them.</p>
+        {isAdmin && !reopening && <Button size="sm" variant="ghost" className="mt-2" onClick={() => setReopening(true)}>Open it again</Button>}
+        {isAdmin && reopening && (
+          <div className="mt-2 space-y-2">
+            <Field label="Why it is opened again" htmlFor="me-reopen" required>
+              <Input id="me-reopen" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder="e.g. Invoice prices corrected" />
+            </Field>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={() => { setReopening(false); setError(null); }} disabled={busy}>Cancel</Button>
+              <Button size="sm" variant="danger" loading={busy} onClick={() => (reason.trim() ? run(() => api.post(`/month-closes/${month}/reopen`, { reason: reason.trim() }), `${monthName(month)} opened again`) : setError('Say why it is opened again.'))}>Open it again</Button>
+            </div>
+          </div>
+        )}
+        {error && <p className="text-sm text-danger-700 mt-1">{error}</p>}
+      </Alert>
+    );
+  }
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-surface-600">
+      <span>Valued at today&apos;s unit prices{over ? ': closing the month keeps these figures as they stand.' : '.'}</span>
+      {isAdmin && over && month && (
+        <Button size="sm" variant="secondary" loading={busy} onClick={() => run(() => api.post('/month-closes', { month }), `${monthName(month)} closed: its figures are kept`)}>Close {monthName(month)}</Button>
+      )}
+      {error && <span className="text-danger-700">{error}</span>}
+    </div>
+  );
 }
 
 /** Show the chosen period's category overview and export action; the dates live in the address, as on Movements. */
@@ -44,7 +113,7 @@ const PROJECT_STATUS: Record<string, string> = {
 
 export function MonthEnd() {
   const [params, setParams] = useSearchParams();
-  const today = useMemo(() => iso(new Date()), []);
+  const today = useMemo(() => todayInSA(), []);
   const fallback = useMemo(() => lastMonth(), []);
   // Neither end goes past today, in an older link too: nothing has happened after it.
   const range = { from: notAfter(params.get('from') ?? fallback.from, today), to: notAfter(params.get('to') ?? fallback.to, today) };
@@ -97,6 +166,7 @@ export function MonthEnd() {
       {report.error && !report.stale && <ErrorState error={report.error} onRetry={report.reload} />}
       {report.stale && <StaleDataNotice error={report.error} onRetry={report.reload} />}
 
+      {r && <Valuation report={r} onChanged={report.reload} />}
       {r && (
         <section aria-label="Stock report overview" className="surface-card overflow-x-auto">
           <table className="table">

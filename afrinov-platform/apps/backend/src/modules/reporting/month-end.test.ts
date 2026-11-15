@@ -9,7 +9,8 @@ describe('month range', () => {
   const now = new Date('2026-10-09T10:00:00Z');
   it('covers the whole month, ending at midnight on the 1st of the next', () => {
     expect(monthRange('2026-02', now)).toMatchObject({ from: '2026-02-01', to: '2026-02-28' });
-    expect(monthRange('2026-09', now).end.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    // Midnight in South Africa (system audit G2).
+    expect(monthRange('2026-09', now).end.toISOString()).toBe('2026-09-30T22:00:00.000Z');
     expect(monthRange('2026-10', now).to).toBe('2026-10-31');
   });
 
@@ -20,19 +21,19 @@ describe('month range', () => {
 
 describe('report range', () => {
   const now = new Date('2026-10-09T10:00:00Z');
-  it('defaults to this UTC month and accepts a month', () => {
-    expect(reportRange({}, now)).toEqual({ month: '2026-10', from: '2026-10-01', to: '2026-10-31', end: new Date('2026-11-01T00:00:00Z') });
+  it('defaults to this South African month and accepts a month', () => {
+    expect(reportRange({}, now)).toEqual({ month: '2026-10', from: '2026-10-01', to: '2026-10-31', end: new Date('2026-11-01T00:00:00+02:00') });
     expect(reportRange({ month: '2026-09' }, now)).toMatchObject({ month: '2026-09', from: '2026-09-01', to: '2026-09-30' });
   });
 
   it('prefers from/to over month and ends at midnight after the last day', () => {
     expect(reportRange({ from: '2026-09-07', to: '2026-09-13', month: '2026-01' }, now))
-      .toEqual({ month: null, from: '2026-09-07', to: '2026-09-13', end: new Date('2026-09-14T00:00:00Z') });
+      .toEqual({ month: null, from: '2026-09-07', to: '2026-09-13', end: new Date('2026-09-14T00:00:00+02:00') });
   });
 
   it('allows a last day after today, and a single day', () => {
     expect(reportRange({ from: '2026-10-05', to: '2026-10-11', }, now).to).toBe('2026-10-11');
-    expect(reportRange({ from: '2026-10-09', to: '2026-10-09' }, now).end.toISOString()).toBe('2026-10-10T00:00:00.000Z');
+    expect(reportRange({ from: '2026-10-09', to: '2026-10-09' }, now).end.toISOString()).toBe('2026-10-09T22:00:00.000Z');
   });
 
   it('names the month when the range is exactly one', () => {
@@ -151,7 +152,7 @@ describe('month-end calendar boundaries', () => {
     ['2026-04', '2026-04-30', '2026-05-01'],
   ])('handles the last day of %s', (month, to, end) => {
     expect(monthRange(month, new Date('2100-12-01T00:00:00Z'))).toEqual({
-      from: `${month}-01`, to, end: new Date(`${end}T00:00:00Z`),
+      from: `${month}-01`, to, end: new Date(`${end}T00:00:00+02:00`),
     });
   });
 
@@ -159,10 +160,10 @@ describe('month-end calendar boundaries', () => {
     expect(() => monthRange(month)).toThrow('Month must be YYYY-MM');
   });
 
-  it('uses the UTC month at a timezone boundary', () => {
-    const now = new Date('2026-10-01T00:30:00+02:00');
-    expect(monthRange('2026-09', now).to).toBe('2026-09-30');
-    expect(() => monthRange('2026-10', now)).toThrow('That month has not started yet');
+  // System audit G2: half past midnight on the 1st in South Africa is the new month.
+  it('uses the South African month at a timezone boundary', () => {
+    expect(monthRange('2026-10', new Date('2026-10-01T00:30:00+02:00')).to).toBe('2026-10-31');
+    expect(() => monthRange('2026-10', new Date('2026-09-30T23:30:00+02:00'))).toThrow('That month has not started yet');
   });
 });
 

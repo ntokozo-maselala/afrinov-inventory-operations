@@ -17,7 +17,7 @@ const { ToastProvider } = await import('../components/Toast');
 
 const request = (id: string, by: { id: string; name: string }, extra: Record<string, unknown> = {}) => ({
   id, status: 'PENDING', quantity: '-8', reasonCode: 'LOSS', reasonNote: 'Missing after the weekend', value: '2000.00', heldForProject: null,
-  requestedAt: '2026-11-03T08:00:00.000Z', decidedAt: null, decisionNote: null,
+  requestedAt: '2026-11-03T08:00:00.000Z', decidedAt: null, decisionNote: null, cursor: `2026-11-03T08:00:00.000Z_${id}`, daysWaiting: 9,
   material: { id: 'm-1', sku: 'CBL-1', name: 'Cable 4mm', unitOfMeasure: 'm' }, location: { id: 'l-1', name: 'Main store' },
   recipient: null, requestedBy: by, decidedBy: null, ...extra,
 });
@@ -39,7 +39,9 @@ describe('Write-offs to approve', () => {
   it('lists what is waiting, with its value, and offers approval only on someone else\'s', async () => {
     renderPage();
     const sipho = (await screen.findByText('by Sipho Dlamini')).closest('tr')!;
-    expect(mockGet.mock.calls[0]![0]).toBe('/adjustment-requests?status=PENDING');
+    // A page at a time, each saying how long it has waited (system audit C8).
+    expect(mockGet.mock.calls[0]![0]).toBe('/adjustment-requests?status=PENDING&limit=50');
+    expect(within(sipho).getByText('Waiting 9 days')).toBeInTheDocument();
     expect(within(sipho).getByText('−8 m')).toBeInTheDocument();
     expect(within(sipho).getByText(/R\s2\s000,00/)).toBeInTheDocument();
     expect(within(sipho).getByRole('button', { name: 'Approve' })).toBeInTheDocument();

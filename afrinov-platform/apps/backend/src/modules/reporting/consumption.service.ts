@@ -16,6 +16,8 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { closedOffAgainst } from '../inventory/consumable-outcomes.js';
+import { saDayOf, saDayStart, saMonth, saMonthRange } from '../../shared/dates.js';
+import { MonthCloseService } from './month-close.service.js';
 
 export interface ConsumptionQuery {
   /** First day, YYYY-MM-DD. */
@@ -86,23 +88,25 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
-/** This month, as the default range. */
+/** This South African month, as the default range (system audit G2). */
 export function defaultRange(now = new Date()): { from: string; to: string } {
-  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
-  return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10) };
+  const { first, last } = saMonthRange(saMonth(now));
+  return { from: first, to: last };
 }
+
+/** Whether YYYY-MM-DD is a day that exists (Date rolls 2026-02-30 over to 2 March). */
+const realDay = (day: string) => new Date(`${day}T00:00:00.000Z`).toISOString().slice(0, 10) === day;
 
 export function parseRange(from: string | undefined, to: string | undefined): { from: string; to: string; start: Date; end: Date } {
   const d = defaultRange();
   const f = from || d.from;
   const t = to || d.to;
   if (!DAY.test(f) || !DAY.test(t)) throw Errors.validation('Dates must be YYYY-MM-DD');
-  const start = new Date(`${f}T00:00:00.000Z`);
-  const end = new Date(`${t}T00:00:00.000Z`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw Errors.validation('Invalid date');
-  if (start > end) throw Errors.validation('The start date is after the end date');
-  end.setUTCDate(end.getUTCDate() + 1); // the last day is included
+  if (Number.isNaN(Date.parse(`${f}T00:00:00Z`)) || Number.isNaN(Date.parse(`${t}T00:00:00Z`)) || !realDay(f) || !realDay(t)) throw Errors.validation('Invalid date');
+  // Whole South African days, the last one included.
+  const start = saDayStart(f);
+  const end = new Date(saDayStart(t).getTime() + 86_400_000);
+  if (start >= end) throw Errors.validation('The start date is after the end date');
   return { from: f, to: t, start, end };
 }
 
@@ -152,6 +156,16 @@ export const ConsumptionService = {
       return [t.id, { usedUp, broken, stillOut: round4(-t.quantity.toNumber() - (returnedByIssue.get(t.id) ?? 0) - usedUp - broken) }];
     }));
 
+    // Stock used in a closed month is valued at that month's kept unit costs (system audit G1).
+    const months = [...new Set(rows.map((t) => saDayOf(t.postedAt).slice(0, 7)))];
+    const keptPrices = await MonthCloseService.pricesFor(months);
+    const costOf = (t: (typeof rows)[number]): number | null => {
+      const kept = keptPrices.get(saDayOf(t.postedAt).slice(0, 7));
+      if (kept && kept.has(t.materialId)) return kept.get(t.materialId)!;
+      return t.material.unitCost === null ? null : t.material.unitCost.toNumber();
+    };
+    const valueOf = new Map<string, { value: number; priced: boolean }>();
+
     const items = new Map<string, ConsumptionItem>();
     const projects = new Map<string | null, { value: number; materials: Set<string> }>();
     const recipients = new Map<string | null, {
@@ -174,16 +188,21 @@ export const ConsumptionService = {
       if (t.type === 'ISSUE') item.issued -= qty; // issues are negative in the ledger
       else item.returned += qty;
       items.set(t.materialId, item);
+      const cost = costOf(t);
+      const v = valueOf.get(t.materialId) ?? { value: 0, priced: false };
+      v.value += -qty * (cost ?? 0);
+      v.priced ||= cost !== null;
+      valueOf.set(t.materialId, v);
 
       const p = projects.get(t.projectNumber) ?? { value: 0, materials: new Set<string>() };
-      p.value += -qty * (item.unitCost ?? 0); // an issue adds value used, a return takes it off
+      p.value += -qty * (cost ?? 0); // an issue adds value used, a return takes it off
       p.materials.add(t.materialId);
       projects.set(t.projectNumber, p);
 
       const r = recipients.get(t.recipientId) ?? {
         name: t.recipient?.name ?? null, type: t.recipient?.type ?? null, value: 0, materials: new Set<string>(), issues: 0, usedUp: 0, broken: 0, stillOut: 0,
       };
-      r.value += -qty * (item.unitCost ?? 0);
+      r.value += -qty * (cost ?? 0);
       r.materials.add(t.materialId);
       if (t.type === 'ISSUE') r.issues++;
       const u = use.get(t.id);
@@ -198,7 +217,9 @@ export const ConsumptionService = {
     const list = [...items.values()]
       .map((i) => {
         const used = round4(i.issued - i.returned);
-        return { ...i, issued: round4(i.issued), returned: round4(i.returned), used, value: i.unitCost === null ? null : round2(used * i.unitCost) };
+        // Each movement at its own month's cost: a closed month's kept cost, else today's.
+        const v = valueOf.get(i.materialId);
+        return { ...i, issued: round4(i.issued), returned: round4(i.returned), used, value: v?.priced ? round2(v.value) : null };
       })
       .filter((i) => i.issued !== 0 || i.returned !== 0)
       .sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || a.name.localeCompare(b.name));

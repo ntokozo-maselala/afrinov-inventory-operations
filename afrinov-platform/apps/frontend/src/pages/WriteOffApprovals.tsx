@@ -3,7 +3,7 @@
 // (segregation of duties). Nothing moves until one is approved: approving
 // posts it, rejecting posts nothing, and whoever asked may withdraw their own.
 import { useState } from 'react';
-import { useApi } from '../hooks/useApi';
+import { usePagedList } from '../hooks/usePagedList';
 import { usePermissions } from '../hooks/usePermissions';
 import { useAuth } from '../auth';
 import { PageHeader } from '../components/PageHeader';
@@ -32,6 +32,9 @@ export interface AdjustmentRequest {
   value: string | null;
   heldForProject: string | null;
   requestedAt: string;
+  /** A page at a time (system audit C8): the row's cursor, and the days it has waited, or waited before it was decided. */
+  cursor: string;
+  daysWaiting?: number;
   decidedAt: string | null;
   decisionNote: string | null;
   material: { id: string; sku: string; name: string; unitOfMeasure: string };
@@ -50,9 +53,16 @@ function signed(r: AdjustmentRequest): string {
   return `${n > 0 ? '+' : '−'}${formatNumber(Math.abs(n))} ${r.material.unitOfMeasure}`;
 }
 
+/** "Waiting since today", "Waiting 3 days", or how long it waited before it was decided. */
+export function waitedText(days: number, waiting: boolean): string {
+  if (waiting) return days === 0 ? 'Waiting since today' : `Waiting ${days} day${days === 1 ? '' : 's'}`;
+  return days === 0 ? 'Decided the same day' : `Decided after ${days} day${days === 1 ? '' : 's'}`;
+}
+
 export function WriteOffApprovals() {
   const [status, setStatus] = useState<Status>('PENDING');
-  const requests = useApi<AdjustmentRequest[]>(`/adjustment-requests?status=${status}`);
+  // A page at a time, so none is out of sight however many wait (system audit C8).
+  const requests = usePagedList<AdjustmentRequest>(`/adjustment-requests?status=${status}`, 50);
   const { hasPermission } = usePermissions();
   const canApprove = hasPermission('writeoffs:approve');
   const me = useAuth().user?.id;
@@ -109,7 +119,13 @@ export function WriteOffApprovals() {
   const columns: DataTableColumn<AdjustmentRequest>[] = [
     {
       key: 'asked', header: 'Asked for',
-      render: (r) => <><div>{formatDateTime(r.requestedAt)}</div><div className="text-meta text-xs">by {r.requestedBy.name}</div></>,
+      render: (r) => (
+        <>
+          <div>{formatDateTime(r.requestedAt)}</div>
+          <div className="text-meta text-xs">by {r.requestedBy.name}</div>
+          {r.daysWaiting !== undefined && <div className={`text-xs ${status === 'PENDING' && r.daysWaiting >= 7 ? 'text-warning-700 font-medium' : 'text-meta'}`}>{waitedText(r.daysWaiting, status === 'PENDING')}</div>}
+        </>
+      ),
     },
     {
       key: 'item', header: 'Item',
@@ -191,12 +207,17 @@ export function WriteOffApprovals() {
           <DataTable
             ariaLabel="Write-offs to approve"
             columns={columns}
-            rows={requests.data ?? []}
+            rows={requests.rows}
             rowKey={(r) => r.id}
-            isLoading={requests.loading && !requests.data}
+            isLoading={requests.loading && !requests.loaded}
             emptyState={<EmptyState title={status === 'PENDING' ? 'Nothing is waiting' : `Nothing ${STATUS_LABELS[status].toLowerCase()} yet`} description={status === 'PENDING' ? 'Adjustments within the limit post at once.' : undefined} />}
           />
         )}
+      {requests.hasMore && (
+        <div className="flex justify-center py-3">
+          <Button variant="secondary" onClick={requests.loadMore} loading={requests.loadingMore}>Load more</Button>
+        </div>
+      )}
 
       <ConfirmDialog
         open={!!approving}

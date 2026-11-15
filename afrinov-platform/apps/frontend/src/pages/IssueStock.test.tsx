@@ -345,7 +345,7 @@ describe('IssueStock with project material', () => {
     expect(screen.queryByRole('option', { name: /HELD-DONE/ })).not.toBeInTheDocument();
   });
 
-  it('sets the project from its material, locks it, and offers nothing else', async () => {
+  it('sets the project from its material, locks it, and offers Stores items but no other project\'s material', async () => {
     renderPage();
     await ready();
     fireEvent.change(screen.getByLabelText(/Issued to/), { target: { value: 'r-1' } });
@@ -359,7 +359,8 @@ describe('IssueStock with project material', () => {
     fireEvent.click(screen.getByRole('button', { name: /Add another item/ }));
     fireEvent.focus(screen.getByLabelText('Item 2'));
     expect(screen.queryByRole('option', { name: /PIPE-42/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /DISC-115/ })).not.toBeInTheDocument();
+    // Stores items go to the job too, marked so (system audit E4).
+    expect(screen.getByRole('option', { name: /DISC-115.*· Stores/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Remove item 2' }));
     fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
 
@@ -382,10 +383,9 @@ describe('IssueStock with project material', () => {
     await ready();
     fireEvent.change(screen.getByLabelText(/Project/), { target: { value: 'AFRI-1325' } });
     fireEvent.focus(screen.getByLabelText('Item 1'));
-    expect(screen.getAllByRole('option', { name: /on hand/ }).map((o) => o.textContent)).toEqual([
-      expect.stringContaining('PIPE-1325'),
-      expect.stringContaining('HELD-4'),
-    ]);
+    const offered = screen.getAllByRole('option', { name: /on hand/ }).map((o) => o.textContent ?? '');
+    expect(offered.filter((o) => !o.includes('· Stores'))).toEqual([expect.stringContaining('PIPE-1325'), expect.stringContaining('HELD-4')]);
+    expect(offered.some((o) => o.includes('DISC-115'))).toBe(true);
     expect(screen.queryByRole('option', { name: /HELD-5/ })).not.toBeInTheDocument();
     // More than is held for the project is flagged before sending.
     choose('Item 1', 'HELD-4');
@@ -403,29 +403,33 @@ describe('IssueStock with project material', () => {
     expect(screen.getByLabelText(/Project/)).toHaveValue('');
   });
 
-  it('offers only the chosen project\'s material once a project is picked, and no Stores items', async () => {
+  // System audit E4: a job's cost includes the Stores items issued to it.
+  it('offers the chosen project\'s material and Stores items once a project is picked, never another project\'s', async () => {
     renderPage();
     await ready();
     fireEvent.change(screen.getByLabelText(/Project/), { target: { value: 'P-42' } });
-    expect(screen.getByText(/Only P-42's material is listed/)).toBeInTheDocument();
+    expect(screen.getByText(/P-42's material and Stores items are listed. Stores items issued here are charged to P-42/)).toBeInTheDocument();
     fireEvent.focus(screen.getByLabelText('Item 1'));
-    expect(screen.getAllByRole('option', { name: /on hand/ }).map((o) => o.textContent)).toEqual([expect.stringContaining('PIPE-42')]);
+    const offered = screen.getAllByRole('option', { name: /on hand/ }).map((o) => o.textContent ?? '');
+    expect(offered.filter((o) => !o.includes('· Stores'))).toEqual([expect.stringContaining('PIPE-42')]);
+    expect(offered.some((o) => o.includes('PIPE-1325'))).toBe(false);
     fireEvent.change(screen.getByLabelText('Item 1'), { target: { value: 'disc' } });
-    expect(screen.getByText('No P-42 material in stock matches')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /DISC-115.*· Stores/ })).toBeInTheDocument();
   });
 
-  it('drops Stores lines already chosen when a project is picked, and offers them again without one', async () => {
+  it('keeps Stores lines already chosen when a project is picked, and drops another project\'s material', async () => {
     renderPage();
     await ready();
     choose('Item 1', 'DISC');
     fireEvent.click(screen.getByRole('button', { name: /Add another item/ }));
     choose('Item 2', 'GLOVE');
     fireEvent.change(screen.getByLabelText(/Project/), { target: { value: 'AFRI-1325' } });
-    expect(screen.queryByLabelText('Item 2')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Item 1')).toHaveValue('');
+    expect(screen.getByLabelText('Item 2')).not.toHaveValue('');
+    expect(screen.getByLabelText('Item 1')).not.toHaveValue('');
 
     fireEvent.change(screen.getByLabelText(/Project/), { target: { value: '' } });
-    fireEvent.focus(screen.getByLabelText('Item 1'));
-    expect(screen.getByRole('option', { name: /DISC-115/ })).toBeInTheDocument();
+    choose('Item 2', 'PIPE-42');
+    fireEvent.change(screen.getByLabelText(/Project/), { target: { value: 'AFRI-1325' } });
+    expect(screen.queryByLabelText('Item 2')).not.toBeInTheDocument();
   });
 });
