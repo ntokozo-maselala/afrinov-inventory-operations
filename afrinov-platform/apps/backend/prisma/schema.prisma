@@ -93,6 +93,7 @@ model User {
   supplierReturns         SupplierReturn[]
   // The recipient this person is at the counter, when they are one (system audit F5).
   recipient               Recipient?
+  monthCloses             MonthClose[]             @relation("MonthClosedBy")
 
   @@map("users")
 }
@@ -209,6 +210,7 @@ model Material {
   costChanges           MaterialCostChange[]
   project               Project?               @relation(fields: [projectNumber], references: [projectNumber])
   unit                  UnitOfMeasure          @relation(fields: [unitOfMeasure], references: [code])
+  monthClosePrices      MonthClosePrice[]
 
   @@index([category])
   @@index([active])
@@ -1577,4 +1579,35 @@ model SupplierReturn {
 
   @@index([goodsReceiptLineId])
   @@map("supplier_returns")
+}
+
+// A month closed with its figures kept (system audit G1, ADR-041). The ledger
+// never changes a past month, but values are quantity x unit cost, so a later
+// price change moved every past month. Closing keeps the month-end report as
+// it stood, and every item's unit cost then, to value that month's stock used.
+model MonthClose {
+  // YYYY-MM, a South African month.
+  month      String   @id
+  closedAt   DateTime @default(now()) @map("closed_at")
+  closedById String   @map("closed_by_id")
+  // The month-end report as it stood at closing.
+  report     Json
+
+  closedBy User              @relation("MonthClosedBy", fields: [closedById], references: [id])
+  prices   MonthClosePrice[]
+
+  @@map("month_closes")
+}
+
+// An item's unit cost when its month was closed; null when it had none.
+model MonthClosePrice {
+  month      String
+  materialId String   @map("material_id")
+  unitCost   Decimal? @map("unit_cost") @db.Decimal(18, 4)
+
+  close    MonthClose @relation(fields: [month], references: [month], onDelete: Cascade)
+  material Material   @relation(fields: [materialId], references: [id])
+
+  @@id([month, materialId])
+  @@map("month_close_prices")
 }

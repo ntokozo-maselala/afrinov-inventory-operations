@@ -379,7 +379,11 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.get('/purchase-orders/:id/history', { preHandler: [app.authenticate] }, async (req) => {
     const id = (req.params as { id: string }).id;
     await requireViewOrder(req, id);
-    return PurchaseOrderService.history(id);
+    // All of it by default; ?limit and ?before page it (system audit D7).
+    const q = req.query as { before?: string; limit?: string };
+    const limit = q.limit ? Number(q.limit) : undefined;
+    if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) throw Errors.validation('limit must be a whole number above 0');
+    return PurchaseOrderService.history(id, { before: q.before, limit });
   });
 
   app.post('/purchase-orders/:id/submit', { preHandler: [app.authenticate] }, async (req) => {

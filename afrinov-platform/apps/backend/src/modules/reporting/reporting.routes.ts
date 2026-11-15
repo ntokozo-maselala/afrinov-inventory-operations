@@ -7,6 +7,8 @@ import { buildReorderXlsx, reorderFilename } from './reorder-export.js';
 import { ConsumptionService, NO_PROJECT, NO_RECIPIENT, type ConsumptionQuery } from './consumption.service.js';
 import { buildConsumptionXlsx, consumptionFilename } from './consumption-export.js';
 import { MonthEndService, type StockReportQuery } from './month-end.service.js';
+import { MonthCloseService } from './month-close.service.js';
+import { z } from 'zod';
 import { buildMonthEndXlsx, monthEndFilename } from './month-end-export.js';
 import { ProcurementSavingsService } from './procurement-savings.service.js';
 import { buildSavingsXlsx, savingsFilename } from './procurement-savings-export.js';
@@ -38,6 +40,10 @@ async function forViewer(req: FastifyRequest, rows: StockStatusRow[]): Promise<S
 }
 
 /** `procurementEnabled`: what is on approved Stores orders is counted only then (Qodo, PR #134). */
+/** A month to close, and why one is opened again (system audit G1). */
+export const monthCloseSchema = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) });
+export const monthReopenSchema = z.object({ reason: z.string().trim().min(1).max(500) });
+
 export async function reportingRoutes(app: FastifyInstance, opts: { procurementEnabled?: boolean } = {}): Promise<void> {
   const orders = !!opts.procurementEnabled;
   // ── Existing per-resource reads (kept for the dashboard / low-stock page)
@@ -90,6 +96,25 @@ export async function reportingRoutes(app: FastifyInstance, opts: { procurementE
   app.get('/reports/month-end', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
     return MonthEndService.report(stockReportQuery(req.query as Record<string, string | undefined>));
+  });
+  // Closing a month keeps its figures (system audit G1): an Admin closes one that is over.
+  app.get('/month-closes', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return MonthCloseService.list();
+  });
+  app.post('/month-closes', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ManageSettings);
+    const parsed = monthCloseSchema.safeParse(req.body);
+    if (!parsed.success) throw Errors.validation('Name the month to close, as YYYY-MM', parsed.error.flatten());
+    const actor = (req as unknown as { user: { id: string } }).user.id;
+    return reply.code(201).send(await MonthCloseService.close(parsed.data.month, actor, (month) => MonthEndService.report({ month })));
+  });
+  app.post('/month-closes/:month/reopen', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ManageSettings);
+    const parsed = monthReopenSchema.safeParse(req.body);
+    if (!parsed.success) throw Errors.validation('Say why the month is opened again', parsed.error.flatten());
+    const actor = (req as unknown as { user: { id: string } }).user.id;
+    return MonthCloseService.reopen((req.params as { month: string }).month, parsed.data.reason, actor);
   });
   app.get('/reports/month-end/export', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ViewReports);

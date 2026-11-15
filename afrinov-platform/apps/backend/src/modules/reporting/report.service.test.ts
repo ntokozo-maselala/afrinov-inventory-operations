@@ -271,8 +271,17 @@ describe('resolveDateWindow', () => {
     const { resolveDateWindow, parseReportQuery } = await import('./report-query.schema.js');
     const q = parseReportQuery({ range: 'MONTH' });
     const w = resolveDateWindow(q, new Date('2026-09-02T12:00:00Z'));
-    expect(w.from?.toISOString().slice(0, 10)).toBe('2026-09-01');
-    expect(w.to?.toISOString().slice(0, 10)).toBe('2026-10-01');
+    // South African midnights (system audit G2).
+    expect(w.from?.toISOString()).toBe('2026-08-31T22:00:00.000Z');
+    expect(w.to?.toISOString()).toBe('2026-09-30T22:00:00.000Z');
+  });
+
+  it('takes today and this month in South Africa, not UTC', async () => {
+    const { resolveDateWindow, parseReportQuery } = await import('./report-query.schema.js');
+    // 00:30 on 1 October in South Africa is still 30 September in UTC.
+    const now = new Date('2026-09-30T22:30:00Z');
+    expect(resolveDateWindow(parseReportQuery({ range: 'TODAY' }), now).from?.toISOString()).toBe('2026-09-30T22:00:00.000Z');
+    expect(resolveDateWindow(parseReportQuery({ range: 'MONTH' }), now).to?.toISOString()).toBe('2026-10-31T22:00:00.000Z');
   });
 });
 

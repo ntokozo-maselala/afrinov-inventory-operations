@@ -194,6 +194,26 @@ async function dependencyCounts(db: Db, id: string): Promise<DependencyCounts> {
   return { locations, goodsReceiptLines, inventoryTransactions, inventoryBalances };
 }
 
+/**
+ * The items with stock above zero at each location, and how many of them have
+ * some held for a project (system audit A4). An emptied row, or an item in
+ * Stores and project stock both, counts once, and not at all when empty.
+ */
+async function stockedItems(db: Db, locationIds: string[]): Promise<Map<string, { items: number; heldForProjects: number }>> {
+  const rows = locationIds.length === 0 ? [] : await db.inventoryBalance.findMany({
+    where: { locationId: { in: locationIds }, quantity: { gt: 0 } },
+    select: { locationId: true, materialId: true, heldForProject: true },
+  });
+  const byLocation = new Map<string, { all: Set<string>; held: Set<string> }>();
+  for (const r of rows) {
+    const at = byLocation.get(r.locationId) ?? { all: new Set<string>(), held: new Set<string>() };
+    at.all.add(r.materialId);
+    if (r.heldForProject) at.held.add(r.materialId);
+    byLocation.set(r.locationId, at);
+  }
+  return new Map([...byLocation].map(([id, at]) => [id, { items: at.all.size, heldForProjects: at.held.size }]));
+}
+
 function hasAnyDependency(c: DependencyCounts): boolean {
   return c.locations + c.goodsReceiptLines + c.inventoryTransactions + c.inventoryBalances > 0;
 }
@@ -227,22 +247,15 @@ export const LocationService = {
       include: { parent: PARENT },
       orderBy: [{ active: 'desc' }, { name: 'asc' }],
     });
-    const locationIds = rows.map((l) => l.id);
-    const allBalances = locationIds.length
-      ? await prisma.inventoryBalance.findMany({ where: { locationId: { in: locationIds } } })
-      : [];
-    const countMap = new Map<string, number>();
-    for (const b of allBalances) {
-      countMap.set(b.locationId, (countMap.get(b.locationId) ?? 0) + 1);
-    }
-    return rows.map((l) => ({ ...l, inventoryCount: countMap.get(l.id) ?? 0 }));
+    const stocked = await stockedItems(prisma, rows.map((l) => l.id));
+    return rows.map((l) => ({ ...l, inventoryCount: stocked.get(l.id)?.items ?? 0, heldForProjectCount: stocked.get(l.id)?.heldForProjects ?? 0 }));
   },
 
   async getById(id: string) {
     const loc = await prisma.location.findUnique({ where: { id }, include: { parent: PARENT } });
     if (!loc) throw Errors.notFound('Location');
-    const counts = await dependencyCounts(prisma, id);
-    return { ...loc, inventoryCount: counts.inventoryBalances, dependencyCounts: counts };
+    const [counts, stocked] = await Promise.all([dependencyCounts(prisma, id), stockedItems(prisma, [id])]);
+    return { ...loc, inventoryCount: stocked.get(id)?.items ?? 0, heldForProjectCount: stocked.get(id)?.heldForProjects ?? 0, dependencyCounts: counts };
   },
 
   async create(input: CreateLocationInput, actorId: string) {

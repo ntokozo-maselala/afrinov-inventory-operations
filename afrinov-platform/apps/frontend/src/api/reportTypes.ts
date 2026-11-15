@@ -171,6 +171,9 @@ export interface MonthEndReport {
   /** Projects material per project, completed and cancelled projects included. */
   projects?: MonthEndProject[];
   total: { items: number; itemsInStock: number; value: number; urgent: number; warning: number; usedValue: number };
+  /** CLOSED: the figures kept when the month was closed; TODAY: at today's unit costs (system audit G1). */
+  valuedAt?: 'CLOSED' | 'TODAY';
+  closed?: { month: string; closedAt: string; closedBy: string } | null;
 }
 
 // ── Stock used (consumption) ─────────────────────────────────────────────

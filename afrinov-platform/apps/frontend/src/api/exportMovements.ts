@@ -9,6 +9,7 @@ import { downloadPdf, type PdfAbout, type PdfColumn } from '../lib/pdf';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { movementReason, figureColumns } from '../lib/movementReason';
 import { STATUS_TYPES } from '../lib/itemStatus';
+import { today } from '../lib/dates';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const LIMIT = 10_000;
@@ -45,7 +46,7 @@ export async function downloadMovements(query: string): Promise<void> {
   const params = new URLSearchParams(query);
   const from = params.get('from');
   const to = params.get('to');
-  const fallback = `afrinov-movements-${from || to ? `${from ?? 'start'}-to-${to ?? 'today'}` : new Date().toISOString().slice(0, 10)}.xlsx`;
+  const fallback = `afrinov-movements-${from || to ? `${from ?? 'start'}-to-${to ?? 'today'}` : today()}.xlsx`;
   if (FRONTEND_ONLY) {
     triggerDownload(new Blob([await buildInBrowser(query)], { type: XLSX }), fallback);
     return;

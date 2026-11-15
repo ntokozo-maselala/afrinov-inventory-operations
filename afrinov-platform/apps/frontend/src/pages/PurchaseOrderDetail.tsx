@@ -21,6 +21,7 @@ import { approvedWithoutSigning, PO_DOCUMENT_SETTINGS, companyFromSettings, docu
 import type { OrderDetails } from '../components/PurchaseOrderDetailsFields';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath, receivePath } from '../lib/orderKind';
+import { today as todayInSA } from '../lib/dates';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -667,15 +668,22 @@ function markOf(i: number, currentIndex: number): Mark {
 }
 
 // ── History ───────────────────────────────────────────────────────────────
+/** How many Activity entries show at first, and each time older ones are asked for (system audit D7). */
+export const HISTORY_PAGE = 50;
+
 function History({ entries, loading }: { entries: HistoryEntry[]; loading: boolean }) {
+  // Every entry is loaded, so the first ones (who raised and signed it) are never lost; the list shows them a page at a time.
+  const [shown, setShown] = useState(HISTORY_PAGE);
   if (loading) return <div className="surface-card p-4"><Skeleton h={120} /></div>;
   if (entries.length === 0) {
     return <EmptyState title="No activity recorded" description="Lifecycle events will appear here as the PO progresses." />;
   }
   const sorted = [...entries].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const older = sorted.length - shown;
   return (
+    <>
     <ol className="surface-card divide-y divide-surface-200">
-      {sorted.map((e) => (
+      {sorted.slice(0, shown).map((e) => (
         <li key={e.id} className="px-4 py-3 flex items-start gap-3">
           <span className="mt-0.5 text-brand-500" aria-hidden="true"><Icon.Activity /></span>
           <div className="flex-1 min-w-0">
@@ -687,14 +695,23 @@ function History({ entries, loading }: { entries: HistoryEntry[]; loading: boole
         </li>
       ))}
     </ol>
+    {older > 0 && (
+      <div className="flex justify-center py-3">
+        <Button size="sm" variant="secondary" onClick={() => setShown((n) => n + HISTORY_PAGE)}>Show older ({older} more)</Button>
+      </div>
+    )}
+    </>
   );
 }
 
 function describeEntry(e: HistoryEntry): string {
-  const after = (e.after ?? {}) as { status?: string; goodsReceiptNumber?: string; rfqNumber?: string; step?: string; standIn?: boolean; signaturesCleared?: boolean };
+  const after = (e.after ?? {}) as { status?: string; goodsReceiptNumber?: string; rfqNumber?: string; step?: string; standIn?: boolean; signaturesCleared?: boolean; quantity?: string; reason?: string };
   const before = (e.before ?? {}) as { status?: string };
   // An order awarded from a request for quotation says which.
   if (e.action === 'CREATE' && after.rfqNumber) return `Purchase order raised from ${after.rfqNumber}`;
+  // A receipt line put right (system audit A6, A7): owed again.
+  if (e.action === 'PO_RECEIPT_REVERSED') return `Receipt line on ${after.goodsReceiptNumber ?? 'a receipt'} reversed (${after.quantity ?? '?'}): ${after.reason ?? ''}`.replace(/: $/, '');
+  if (e.action === 'PO_RETURNED_TO_SUPPLIER') return `${after.quantity ?? '?'} sent back to the supplier from ${after.goodsReceiptNumber ?? 'a receipt'}: ${after.reason ?? ''}`.replace(/: $/, '');
   // Each signature says for whom, and whether someone stood in.
   if (e.action === 'PO_SIGN') return `Signed as ${after.step === 'DIRECTOR' ? 'Director' : 'Procurement Manager'}${after.standIn ? ' (standing in)' : ''}`;
   if (e.action === 'PO_APPROVE' && after.standIn) return `Approved (standing in for the ${after.step === 'DIRECTOR' ? 'Director' : 'Procurement Manager'}): ${statusLabel(before.status as POStatus)} → ${statusLabel(after.status as POStatus)}`;
@@ -825,7 +842,7 @@ function kindLabel(kind: ActionDraft['kind']): string {
 }
 
 /** A line still owed after its delivery date, on an order that can be received. */
-export function isLate(line: POLine, po: Pick<PO, 'status' | 'expectedDeliveryDate'>, today = new Date().toISOString().slice(0, 10)): boolean {
+export function isLate(line: POLine, po: Pick<PO, 'status' | 'expectedDeliveryDate'>, today = todayInSA()): boolean {
   const due = (line.deliveryDate ?? po.expectedDeliveryDate)?.slice(0, 10);
   if (!due || !isReceivable(po.status)) return false;
   return due < today && Number(line.receivedQty) < Number(line.orderedQty);

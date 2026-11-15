@@ -11,10 +11,12 @@ describe('date range', () => {
     expect(defaultRange(new Date('2028-02-14T10:00:00Z'))).toEqual({ from: '2028-02-01', to: '2028-02-29' });
   });
 
+  // Whole South African days (system audit G2).
   it('includes the whole last day', () => {
     const r = parseRange('2026-10-01', '2026-10-31');
-    expect(r.start.toISOString()).toBe('2026-10-01T00:00:00.000Z');
-    expect(r.end.toISOString()).toBe('2026-11-01T00:00:00.000Z');
+    expect(r.start.toISOString()).toBe('2026-09-30T22:00:00.000Z');
+    expect(r.end.toISOString()).toBe('2026-10-31T22:00:00.000Z');
+    expect(() => parseRange('2026-02-30', '2026-03-01')).toThrow(/Invalid date/);
   });
 
   it.each([

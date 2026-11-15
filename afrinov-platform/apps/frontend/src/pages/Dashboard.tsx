@@ -168,6 +168,17 @@ export function checksOffCard(values: Record<string, unknown> | null | undefined
   };
 }
 
+/** Write-offs waiting for approval, and how long the oldest has (system audit C8). */
+export function writeOffsWaitingCard(s: { waiting: number; oldestDays: number | null } | null | undefined) {
+  if (!s || !(s.waiting > 0)) return null;
+  const old = s.oldestDays ?? 0;
+  return {
+    label: 'Write-offs waiting', value: formatNumber(s.waiting), tone: old >= 7 ? 'warning' as const : 'neutral' as const,
+    note: old === 0 ? 'oldest asked for today' : `oldest waiting ${old} day${old === 1 ? '' : 's'}`,
+    to: '/stock/write-offs',
+  };
+}
+
 /** Slips someone issued or lent to themselves in the last 30 days (system audit F5). */
 export interface SelfIssued { days: number; slips: Array<{ issueId: string; kind: 'ISSUE' | 'LOAN'; postedAt: string; by: { id: string; name: string } }> }
 
@@ -231,6 +242,9 @@ export function Dashboard() {
   // Slips issued to oneself, for those who read Activity (system audit F5).
   const { data: selfIssued } = useApi<SelfIssued>(hasPermission('activity:view') ? '/reports/self-issued' : null);
   const selfIssuedWarning = selfIssuedCard(selfIssued);
+  // Write-offs waiting, for those who decide or ask for them (system audit C8).
+  const { data: writeOffSummary } = useApi<{ waiting: number; oldestDays: number | null }>(hasPermission('writeoffs:view') ? '/adjustment-requests/summary' : null);
+  const writeOffsWaiting = writeOffsWaitingCard(writeOffSummary);
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -259,6 +273,7 @@ export function Dashboard() {
       ...(backupWarning ? [backupWarning] : []),
       ...(checksOff ? [checksOff] : []),
       ...(selfIssuedWarning ? [selfIssuedWarning] : []),
+      ...(writeOffsWaiting ? [writeOffsWaiting] : []),
       ...(!canApprove ? [] : mineError
         ? [{ label: 'Pending Approvals', value: 'Unavailable', tone: 'neutral' as const, note: 'Orders could not be loaded', to: undefined }]
         : mine
@@ -266,7 +281,7 @@ export function Dashboard() {
           ? [approvalCard(Array.isArray(mine) ? mine : [], Array.isArray(pending) ? pending : null, { projects: approvesProjects, stores: approvesStores })]
           : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning, checksOff, selfIssuedWarning]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning, checksOff, selfIssuedWarning, writeOffsWaiting]);
 
   const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [

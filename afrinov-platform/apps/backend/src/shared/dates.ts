@@ -1,12 +1,46 @@
-// Date-range filters shared by the movement history and the activity list:
-// a day (YYYY-MM-DD) is a whole UTC day and the `to` day is included, as on the
-// stock-used report; an ISO time is taken exactly, with `to` inclusive.
+// Days as the store works them (system audit G2, ADR-041): South African time,
+// UTC+2 all year (no daylight saving). A day (YYYY-MM-DD) in a filter is that
+// whole South African day and the `to` day is included; an ISO time is taken
+// exactly, with `to` inclusive. A month is a South African month.
 import { Errors } from './errors.js';
+
+/** The store's time zone, for formatting. */
+export const BUSINESS_TIME_ZONE = 'Africa/Johannesburg';
+/** South African time is UTC+2 all year. */
+const OFFSET_MS = 2 * 60 * 60 * 1000;
+
+/** When a South African day (YYYY-MM-DD) starts, as an instant. */
+export function saDayStart(day: string): Date {
+  return new Date(`${day}T00:00:00.000+02:00`);
+}
+
+/** The South African day an instant falls on, YYYY-MM-DD. */
+export function saDayOf(at: Date): string {
+  return new Date(at.getTime() + OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/** Today in South Africa, YYYY-MM-DD. */
+export const saToday = (now: Date = new Date()): string => saDayOf(now);
+
+/** This month in South Africa, YYYY-MM. */
+export const saMonth = (now: Date = new Date()): string => saDayOf(now).slice(0, 7);
+
+/** This year in South Africa. */
+export const saYear = (now: Date = new Date()): number => Number(saDayOf(now).slice(0, 4));
+
+/** When a South African month (YYYY-MM) starts, and when the next one starts. */
+export function saMonthRange(month: string): { start: Date; end: Date; first: string; last: string } {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const first = `${month}-01`;
+  const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  return { start: saDayStart(first), end: saDayStart(next), first, last };
+}
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseTime(value: string, name: string): Date {
-  const d = new Date(DAY.test(value) ? `${value}T00:00:00.000Z` : value);
+  const d = DAY.test(value) ? saDayStart(value) : new Date(value);
   if (Number.isNaN(d.getTime())) throw Errors.validation(`Invalid ${name} date`);
   return d;
 }
@@ -20,8 +54,7 @@ export function dayRange(from: string | undefined, to: string | undefined): { gt
   const range: { gte?: Date; lt?: Date; lte?: Date } = {};
   if (start) range.gte = start;
   if (end && DAY.test(to!)) {
-    end.setUTCDate(end.getUTCDate() + 1); // the last day is included
-    range.lt = end;
+    range.lt = new Date(end.getTime() + 86_400_000); // the last day is included
   } else if (end) {
     range.lte = end;
   }

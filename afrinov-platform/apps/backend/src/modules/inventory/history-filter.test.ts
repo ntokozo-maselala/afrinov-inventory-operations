@@ -25,12 +25,12 @@ const {
 describe('historyWhere', () => {
   it('treats days as whole UTC days and includes the last one', () => {
     const where = historyWhere({ from: '2026-10-01', to: '2026-10-31' });
-    expect(where.postedAt).toEqual({ gte: new Date('2026-10-01T00:00:00.000Z'), lt: new Date('2026-11-01T00:00:00.000Z') });
+    expect(where.postedAt).toEqual({ gte: new Date('2026-10-01T00:00:00.000+02:00'), lt: new Date('2026-11-01T00:00:00.000+02:00') });
   });
 
   it('accepts a single day as both ends', () => {
     expect(historyWhere({ from: '2026-10-12', to: '2026-10-12' }).postedAt)
-      .toEqual({ gte: new Date('2026-10-12T00:00:00.000Z'), lt: new Date('2026-10-13T00:00:00.000Z') });
+      .toEqual({ gte: new Date('2026-10-12T00:00:00.000+02:00'), lt: new Date('2026-10-13T00:00:00.000+02:00') });
   });
 
   it('keeps an exact time as an inclusive end, for callers that pass one', () => {
@@ -120,7 +120,7 @@ describe('item status changes among the movements', () => {
   it('are chosen by when, who, the item, its project and the search', () => {
     const where = statusChangeWhere({ from: '2026-10-01', to: '2026-10-01', materialId: 'm-1', actorId: 'u-1', projectNumber: '1369', q: 'glove' });
     expect(where).toMatchObject({ materialId: 'm-1', actorId: 'u-1' });
-    expect(where.createdAt).toEqual({ gte: new Date('2026-10-01T00:00:00.000Z'), lt: new Date('2026-10-02T00:00:00.000Z') });
+    expect(where.createdAt).toEqual({ gte: new Date('2026-10-01T00:00:00.000+02:00'), lt: new Date('2026-10-02T00:00:00.000+02:00') });
     expect(where.material).toMatchObject({ projectNumber: '1369' });
     expect(where.material?.OR).toHaveLength(3);
     expect(statusChangeWhere({}).material).toBeUndefined();
@@ -225,7 +225,7 @@ describe('due date changes among the movements', () => {
 
   it('are chosen by when and by whom they were made, and by their loan for everything else', () => {
     const where = dueDateChangeWhere({ from: '2026-10-01', to: '2026-10-31', actorId: 'u-1', materialId: 'm-1', recipientId: 'r-1', report: 'loans' });
-    expect(where.createdAt).toEqual({ gte: new Date('2026-10-01T00:00:00.000Z'), lt: new Date('2026-11-01T00:00:00.000Z') });
+    expect(where.createdAt).toEqual({ gte: new Date('2026-10-01T00:00:00.000+02:00'), lt: new Date('2026-11-01T00:00:00.000+02:00') });
     expect(where.actorId).toBe('u-1');
     // The loan is matched on its item and person, not on when it went out or who lent it.
     expect(where.loan).toEqual({ materialId: 'm-1', recipientId: 'r-1' });
@@ -291,7 +291,7 @@ describe('used up and broken among the movements', () => {
   it('are the marks with no return and every withdrawal, chosen by when and by whom, and by their issue for everything else', () => {
     const where = outcomeEventWhere({ from: '2026-11-03', to: '2026-11-03', actorId: 'u-1', materialId: 'm-1', recipientId: 'r-1' });
     expect(where.OR).toEqual([{ withdrawsId: { not: null } }, { returnTransactionId: null }]);
-    expect(where.createdAt).toEqual({ gte: new Date('2026-11-03T00:00:00.000Z'), lt: new Date('2026-11-04T00:00:00.000Z') });
+    expect(where.createdAt).toEqual({ gte: new Date('2026-11-03T00:00:00.000+02:00'), lt: new Date('2026-11-04T00:00:00.000+02:00') });
     expect(where.actorId).toBe('u-1');
     expect(where.issue).toEqual({ materialId: 'm-1', recipientId: 'r-1' });
   });

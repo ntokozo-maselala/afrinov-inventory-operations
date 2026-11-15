@@ -51,7 +51,7 @@ describe('StockReceiptService.list', () => {
     const args = grFindMany.mock.calls[0]![0];
     expect(args.where.AND).toEqual(expect.arrayContaining([
       { status: 'POSTED' },
-      { postedAt: { gte: new Date('2026-09-25T00:00:00.000Z') } },
+      { postedAt: { gte: new Date('2026-09-25T00:00:00.000+02:00') } },
       { supplierId: 's-1' },
       { lines: { some: { locationId: 'l-1' } } },
       { OR: [{ postedAt: { lt: new Date('2026-09-26T08:00:00.000Z') } }, { postedAt: new Date('2026-09-26T08:00:00.000Z'), id: { lt: 'gr-9' } }] },

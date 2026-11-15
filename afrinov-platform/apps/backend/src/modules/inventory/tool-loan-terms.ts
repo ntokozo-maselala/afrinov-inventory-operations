@@ -2,6 +2,7 @@
 //
 // A loan has no stored state: it is worked out each time from its due date and
 // today. The due date is agreed at check-out (dueOn on the LOAN row); a change
+import { saDayOf } from '../../shared/dates.js';
 // (tool_loan_extensions) gives a later or earlier one, and the most recent
 // change wins; a loan from before due dates falls due the default loan period
 // after it went out. Dates are calendar days (YYYY-MM-DD),
@@ -55,8 +56,8 @@ export type LoanState = 'ON_LOAN' | 'DUE_SOON' | 'OVERDUE' | 'NEEDS_DECISION';
 const DAY_MS = 86_400_000;
 const toTime = (day: string) => Date.parse(`${day}T00:00:00.000Z`);
 
-/** The calendar day of a moment, as YYYY-MM-DD. */
-export const dayOf = (d: Date): string => d.toISOString().slice(0, 10);
+/** The South African calendar day of a moment, as YYYY-MM-DD (system audit G2); a day value stays that day. */
+export const dayOf = (d: Date): string => saDayOf(d);
 export const addDays = (day: string, n: number): string => dayOf(new Date(toTime(day) + n * DAY_MS));
 /** Whole days from `from` to `to`, negative when `to` is earlier. */
 export const daysBetween = (from: string, to: string): number => Math.round((toTime(to) - toTime(from)) / DAY_MS);

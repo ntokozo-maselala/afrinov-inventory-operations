@@ -49,6 +49,12 @@ const projectOf = (r: CurrentStockRow): string | null =>
 
 const isProjectMaterial = (r: CurrentStockRow, projectNumber: string) => projectOf(r) === projectNumber;
 
+/**
+ * What an issue to a project may take: that project's material, and Stores
+ * stock anyone may take, which is then charged to the job (system audit E4).
+ */
+const fitsProject = (r: CurrentStockRow, projectNumber: string) => isProjectMaterial(r, projectNumber) || projectOf(r) === null;
+
 let nextKey = 1;
 const emptyLine = (): Line => ({ key: nextKey++, stockKey: '', quantity: '' });
 
@@ -93,15 +99,16 @@ export function IssueStock() {
 
   // Project material goes only to its own project: a line holding some (held
   // for the project, or a leftover) sets the issue's project, which can't change
-  // while it is there. Once the issue has a project, only that project's
-  // material is offered: no Stores items, and no other project's material.
+  // while it is there. Once the issue has a project, that project's material and
+  // Stores items are offered, the Stores items charged to the job (system audit
+  // E4); never another project's material.
   const lockedBy = lines.map((l) => byKey.get(l.stockKey)).find((r) => r && projectOf(r));
   const issueProject = (lockedBy && projectOf(lockedBy)) || projectNumber;
   const itemOptions = useMemo<SearchOption[]>(() => available
-    .filter((r) => !issueProject || isProjectMaterial(r, issueProject))
+    .filter((r) => !issueProject || fitsProject(r, issueProject))
     .map((r) => ({
       value: stockKey(r),
-      label: `${r.materialName} (${r.materialSku}) · ${locationName(r.locationId, r.locationName)}${r.heldForProject ? ` · held for ${r.heldForProject}` : ''}`,
+      label: `${r.materialName} (${r.materialSku}) · ${locationName(r.locationId, r.locationName)}${r.heldForProject ? ` · held for ${r.heldForProject}` : issueProject && !projectOf(r) ? ' · Stores' : ''}`,
       detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
     })), [available, issueProject, locationName]);
   const projectOptions = useMemo(() => {
@@ -165,7 +172,7 @@ export function IssueStock() {
     setProjectNumber(next);
     if (!next) return;
     setLines((ls) => {
-      const kept = ls.filter((l) => { const r = byKey.get(l.stockKey); return !l.stockKey || (r && isProjectMaterial(r, next)); });
+      const kept = ls.filter((l) => { const r = byKey.get(l.stockKey); return !l.stockKey || (r && fitsProject(r, next)); });
       return kept.length > 0 ? kept : [emptyLine()];
     });
   }
@@ -282,7 +289,7 @@ export function IssueStock() {
               disabled={loading || !!lockedBy}
               help={lockedBy
                 ? `Set by ${lockedBy.materialSku}: project material is issued only to its own project.`
-                : issueProject ? `Only ${issueProject}'s material is listed. Choose No project to issue Stores items.` : undefined}
+                : issueProject ? `${issueProject}'s material and Stores items are listed. Stores items issued here are charged to ${issueProject}.` : undefined}
             />
           </div>
           {optionsError && (

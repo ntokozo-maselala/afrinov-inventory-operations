@@ -42,7 +42,9 @@ interface Location {
   notes?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  /** Items with stock above zero here (system audit A4), and how many of them have some held for a project. */
   inventoryCount?: number;
+  heldForProjectCount?: number;
 }
 
 interface LocationDetails extends Location {
@@ -251,7 +253,7 @@ function LocationDetailsView({ location, onClose }: { location: LocationDetails;
         </div>
         <div>
           <dt className="text-eyebrow text-surface-500">Inventory</dt>
-          <dd className="text-surface-900">{location.inventoryCount ?? 0} item(s)</dd>
+          <dd className="text-surface-900">{stockedText(location)}</dd>
         </div>
         <div className="sm:col-span-2">
           <dt className="text-eyebrow text-surface-500">Description</dt>
@@ -286,6 +288,14 @@ function LocationDetailsView({ location, onClose }: { location: LocationDetails;
   );
 }
 
+
+/** "3 items in stock, 1 of them held for a project", or "Empty" (system audit A4). */
+export function stockedText(l: { inventoryCount?: number; heldForProjectCount?: number }): string {
+  const n = l.inventoryCount ?? 0;
+  if (n === 0) return 'Empty';
+  const held = l.heldForProjectCount ?? 0;
+  return `${n} item${n === 1 ? '' : 's'} in stock${held > 0 ? `, ${held} of them held for ${held === 1 ? 'a project' : 'projects'}` : ''}`;
+}
 export function Locations() {
   const locations = useApi<Location[]>('/locations');
   // Stock value per location, from the inventory report's by-location totals
@@ -566,7 +576,7 @@ function columns({
     { key: 'code', header: 'Code', render: (l) => l.code ? <span className="font-mono">{l.code}</span> : <span className="text-surface-300">—</span>, width: '8rem' },
     { key: 'type', header: 'Type', render: (l) => TYPE_LABEL[l.type] ?? l.type, width: '11rem' },
     { key: 'status', header: 'Status', render: (l) => <Badge tone={l.active ? 'success' : 'neutral'} dot>{l.active ? 'Active' : 'Inactive'}</Badge>, width: '9rem' },
-    { key: 'inventory', header: 'Inventory', align: 'right', render: (l) => <span className="font-mono">{l.inventoryCount ?? 0}</span>, width: '7rem' },
+    { key: 'inventory', header: 'Inventory', align: 'right', render: (l) => <span className="font-mono" title={stockedText(l)}>{l.inventoryCount ?? 0}</span>, width: '7rem' },
     { key: 'value', header: 'Value', align: 'right', render: (l) => value ? <span className="font-mono">{value(l.id)}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     { key: 'updated', header: 'Updated', render: (l) => l.updatedAt ? <span className="text-meta">{formatDate(l.updatedAt)}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     {

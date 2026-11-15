@@ -11,12 +11,13 @@ import { CATEGORIES, categoryLabel } from '../lib/categories';
 import { downloadPdf, type PdfTable } from '../lib/pdf';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
+import { today } from '../lib/dates';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const QTY = '#,##0.####';
 const MONEY = '#,##0.00';
 const fallbackName = (category?: string, extension: 'xlsx' | 'pdf' = 'xlsx') =>
-  `afrinov-reorder-list${category ? `-${category.toLowerCase().replace(/_/g, '-')}` : ''}-${new Date().toISOString().slice(0, 10)}.${extension}`;
+  `afrinov-reorder-list${category ? `-${category.toLowerCase().replace(/_/g, '-')}` : ''}-${today()}.${extension}`;
 const categoryQuery = (category?: string) => (category ? `&category=${encodeURIComponent(category)}` : '');
 
 /** `category` limits the list to that category; leave it out for all of them. */

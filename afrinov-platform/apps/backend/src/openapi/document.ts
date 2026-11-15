@@ -63,6 +63,7 @@ import {
   movementTypeSchema,
   stockStatusSchema,
 } from '../modules/reporting/report-query.schema.js';
+import { monthCloseSchema, monthReopenSchema } from '../modules/reporting/reporting.routes.js';
 
 extendZodWithOpenApi(z);
 
@@ -511,9 +512,14 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/adjustment-requests', tag: 'Stock movements', summary: 'Adjustments waiting for approval, or decided',
-    description: 'Newest first, at most 200: PENDING unless another status is asked for, each with its item, location, '
-      + 'who asked and who decided. Needs approve:write_off or adjust:inventory.',
+    description: 'Newest first, a page at a time (?limit up to 200, ?before the last row\'s cursor): PENDING unless another status is asked for, each with its item, location, '
+      + 'who asked and who decided, and daysWaiting: South African days waited, or waited before it was decided (system audit C8). Needs approve:write_off or adjust:inventory.',
     query: adjustmentRequestQuerySchema, errors: [403],
+  },
+  {
+    method: 'get', path: '/adjustment-requests/summary', tag: 'Stock movements', summary: 'How many adjustments wait, and the oldest',
+    description: '{ waiting, oldestRequestedAt, oldestDays }, for the Dashboard (system audit C8). Needs approve:write_off or adjust:inventory.',
+    errors: [403],
   },
   {
     method: 'post', path: '/adjustment-requests/:id/approve', tag: 'Stock movements', summary: 'Approve an adjustment someone else asked for',
@@ -854,8 +860,9 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/purchase-orders/:id/history', tag: 'Purchase orders', summary: 'Status change history',
-    description: 'As the order: a Stores order needs `order:stores_stock`, a project order `view:purchase_order`, and to anyone else it is not found (404).',
-    procurement: true, errors: [403, 404],
+    description: 'Newest first, every entry unless a page is asked for (?limit, ?before the last entry\'s cursor): the first entries are kept in view (system audit D7). '
+      + 'As the order: a Stores order needs `order:stores_stock`, a project order `view:purchase_order`, and to anyone else it is not found (404).',
+    procurement: true, errors: [400, 403, 404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/submit', tag: 'Purchase orders', summary: 'Submit a draft',
@@ -1091,9 +1098,25 @@ export const OPERATIONS: Operation[] = [
     description: 'Stock as at the end of ?from..?to (YYYY-MM-DD, both included) or of ?month=YYYY-MM (default this month), '
       + "rebuilt from the ledger, per category in the stock workbook's Summary columns (required, current, value, "
       + '% of required, re-order quantity, URGENCY), with the stock used in the period (Stock Report sheets). '
-      + 'The response month is set only when the period is exactly one calendar month. Refused with 400 for a '
-      + 'period that has not started, a reversed range, or only one of from/to.',
+      + 'The response month is set only when the period is exactly one calendar month. Days and months are South African (system audit G2). '
+      + 'A closed month returns the report kept when it was closed (valuedAt CLOSED, closed); any other period is valued at today\'s unit costs (valuedAt TODAY; G1). '
+      + 'Refused with 400 for a period that has not started, a reversed range, or only one of from/to.',
     permissions: [P.ViewReports], errors: [400],
+  },
+  {
+    method: 'get', path: '/month-closes', tag: 'Reports', summary: 'Closed months',
+    description: 'Newest first: each month whose figures are kept, when and by whom it was closed (system audit G1).',
+    permissions: [P.ViewReports],
+  },
+  {
+    method: 'post', path: '/month-closes', tag: 'Reports', summary: 'Close a month, keeping its figures',
+    description: 'A month that is over: keeps its stock report as it stands and every item\'s unit cost, which then value its stock used. 409 when closed already (system audit G1).',
+    permissions: [P.ManageSettings], body: monthCloseSchema, success: 201, errors: [400, 409],
+  },
+  {
+    method: 'post', path: '/month-closes/:month/reopen', tag: 'Reports', summary: 'Open a closed month again',
+    description: 'With a reason, kept in Activity: its reports go back to today\'s prices (system audit G1).',
+    permissions: [P.ManageSettings], body: monthReopenSchema, errors: [400, 404],
   },
   {
     method: 'get', path: '/reports/month-end/export', tag: 'Reports', summary: 'Download the stock report',

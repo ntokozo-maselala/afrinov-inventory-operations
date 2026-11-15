@@ -60,7 +60,8 @@ export async function buildMonthEndXlsx(r: MonthEndReport): Promise<Buffer> {
   ov.getCell('A1').value = `Stock report, ${periodLabel(r)}`;
   ov.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFE3001B' } };
   ov.getCell('A2').value = `Stock as at the end of ${asAt}; stock used from ${r.from} to ${r.to}. `
-    + `Values excl. VAT, ${r.currency}, at unit prices now. URGENT below ${r.bands.urgentBelowPercent}% of Required Stock, `
+    // A closed month says its figures were kept; any other period, that it is valued at today's prices (system audit G1).
+    + `Values excl. VAT, ${r.currency}, ${r.closed ? `as kept when the month was closed on ${r.closed.closedAt.slice(0, 10)}` : 'at unit prices now'}. URGENT below ${r.bands.urgentBelowPercent}% of Required Stock, `
     + `WARNING below ${r.bands.warningBelowPercent}%.`;
   ov.getCell('A2').font = { italic: true, color: { argb: 'FF555555' } };
   const oh = ov.getRow(4);

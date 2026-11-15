@@ -90,6 +90,8 @@ Tools are not issued: they are checked out and back in on the Tools page
   (the earlier proposal of an authorised override with a reason was not
   adopted).
 - Every issue names an active recipient (ADR-008).
+- An issue for a project can carry Stores items as well as the project's
+  material; Stores items are charged to the project as used (ADR-041).
 - An issue with returns against it cannot be reversed until the returns are
   reversed; one marked used up or broken, until those are withdrawn.
 - A return booked together with used up or broken cannot be reversed until

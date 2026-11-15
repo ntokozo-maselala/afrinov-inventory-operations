@@ -93,6 +93,13 @@ the issue, the return, the actor and the withdrawn outcome; indexes on
 issue_transaction_id, return_transaction_id and created_at. Added to only; it
 holds no stock.
 
+`month_closes` (MonthClose, ADR-041): month (YYYY-MM, primary key, CHECK on
+the format), closed_at, closed_by_id, report (the stock report as it stood,
+JSON). `month_close_prices` (MonthClosePrice): month, material_id, unit_cost
+(null when the item had none); primary key on both; cascade on its close's
+delete. A closed month's report and the value of stock used in it come from
+these; reopening deletes the row.
+
 `tool_repairs` (ToolRepair, ADR-040): id, material_id, location_id, quantity,
 return_id (the damaged LOAN_RETURN), note, reported_by_id, reported_at,
 resolution (REPAIRED, WRITTEN_OFF), resolution_note, resolved_by_id,
