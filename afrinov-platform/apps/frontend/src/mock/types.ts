@@ -351,10 +351,14 @@ export interface MockSalesEquipmentLine {
   equipment: string | null;
   details: string | null;
   quantity: number;
+  /** Its own markup; null: the job's. */
+  markupPercent: string | null;
   labour: Array<{ id: string; lineNo: number; labourRateId: string; role: string; hours: string; hourlyRate: string }>;
   /** One supplier's quote per Procurement RFQ, valued as it was when last saved or submitted. */
   materials: Array<{ rfqId: string; supplierId: string; quoteTotal: string; currency: string; amount: string }>;
   otherCosts: Array<{ id: string; lineNo: number; description: string; quantity: string; unitCost: string }>;
+  /** Material estimated before any supplier quoted: counted as material. */
+  allowances: Array<{ id: string; lineNo: number; description: string; amount: string }>;
 }
 
 /** A Sales RFQ, as sales-rfq.service.ts keeps it: its equipment lines and what each costs. */
@@ -366,6 +370,7 @@ export interface MockSalesRfq {
   projectNumber: string;
   description: string | null;
   notes: string | null;
+  quoteNotes: string | null;
   penaltiesApply: boolean;
   markupPercent: string | null;
   deliveryPrice: string;

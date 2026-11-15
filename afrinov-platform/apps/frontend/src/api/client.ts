@@ -143,7 +143,7 @@ const SAFE_MESSAGES: Record<string, string> = {
   FORBIDDEN: 'Your account does not have permission to do that.',
   NOT_FOUND: 'We could not find what you asked for.',
   TOO_MANY_REQUESTS: 'Too many requests. Please wait a moment and try again.',
-  SERVICE_UNAVAILABLE: 'Afrinov Inventory is temporarily unavailable. Please try again shortly.',
+  SERVICE_UNAVAILABLE: 'Afrinov OMS is temporarily unavailable. Please try again shortly.',
   BAD_REQUEST: 'Something about this request was not accepted. Please check your input and try again.',
   METHOD_NOT_ALLOWED: 'Something about this request was not accepted. Please check your input and try again.',
   PAYLOAD_TOO_LARGE: 'Something about this request was not accepted. Please check your input and try again.',
@@ -197,7 +197,7 @@ function fallbackErrorForStatus(status: number): ApiError {
     return { code: 'TOO_MANY_REQUESTS', message: 'Too many requests. Please wait a moment and try again.', status };
   }
   if (status === 503 || status === 502 || status === 504) {
-    return { code: 'SERVICE_UNAVAILABLE', message: 'Afrinov Inventory is temporarily unavailable. Please try again shortly.', status };
+    return { code: 'SERVICE_UNAVAILABLE', message: 'Afrinov OMS is temporarily unavailable. Please try again shortly.', status };
   }
   return { code: 'INTERNAL_ERROR', message: 'Something went wrong. Please try again.', status };
 }

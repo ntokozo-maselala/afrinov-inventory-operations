@@ -1410,7 +1410,7 @@ option.
   every counted item holding part of a unit (`PART_UNIT`) and every unit not on
   the list (`UNLISTED_UNIT`) as blocking. The real import names them all at once.
 
-Migration `20260101000060_stock_accuracy` adds `tool_repairs`,
+Migration `20260101000064_stock_accuracy` adds `tool_repairs`,
 `supplier_returns`, the movement type, the two receipt line columns and the two
 settings.
 
@@ -1469,7 +1469,7 @@ none of the questions, so each finding takes its recommended option.
 - **A Stores item goes on a project's issue**, as the server already allowed:
   the Issue screen offers Stores items alongside the project's material.
 
-Migration `20260101000061_reports` adds `month_closes` and
+Migration `20260101000065_reports` adds `month_closes` and
 `month_close_prices`.
 
 **Consequences:** A report means the same thing wherever it is read, and a

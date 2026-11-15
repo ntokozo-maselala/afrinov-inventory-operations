@@ -67,5 +67,6 @@ export function formatUnitPrice(value: string | null | undefined, currency = 'ZA
 /** "15%" or "0%"; up to two decimals. */
 export function formatRate(rate: string | number | null | undefined): string {
   const n = Number(rate ?? 0);
-  return `${Number.isInteger(n) ? n : n.toFixed(2).replace(/0$/, '')}%`;
+  // Up to 4 places, trailing zeros dropped: 15%, 12.5%, 27.7778%.
+  return `${Number(n.toFixed(4))}%`;
 }

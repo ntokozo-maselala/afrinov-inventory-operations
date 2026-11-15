@@ -1,6 +1,6 @@
 // A schedule's chart (Project Tracking Roadmap, Phase 3.1), as the workbook's
 // day columns drew it, built in CSS: a line per step with the plan as a thin
-// bar, the expected or actual dates as a thicker one with its progress filled
+// bar, the Actual dates (final once finished) as a thicker one with its progress filled
 // in, weekends and closed days shaded, a line for today and one for the date
 // promised to the client.
 import type { ProjectSchedule, ScheduleStep } from '../api/types';
@@ -53,13 +53,13 @@ export function ProjectGantt({ schedule, closedDays, today }: Props) {
   const showToday = today >= span.start && today <= span.end;
   const showDue = !!schedule.dueDate && schedule.dueDate >= span.start && schedule.dueDate <= span.end;
 
-  /** The step's expected or actual dates, and how they read. */
+  /** The step's Actual dates, and how they read: final once finished, where it now stands until then. */
   const second = (s: ScheduleStep) => {
     if (s.done && s.actualStart && s.actualEnd) return { start: s.actualStart, end: s.actualEnd, what: `finished ${formatSpan(s.actualStart, s.actualEnd)}`, tone: 'bg-success-500' };
     const start = s.forecastStart ?? s.actualStart; const end = s.forecastEnd;
     if (schedule.status === 'PLANNING' || !start || !end) return null;
     const late = (!!s.baselineEnd && end > s.baselineEnd) || end < today;
-    return { start, end, what: `expected ${formatSpan(start, end)}, ${s.progress}% done`, tone: late ? 'bg-warning-500' : 'bg-info-500' };
+    return { start, end, what: `actual ${formatSpan(start, end)}, not final, ${s.progress}% done`, tone: late ? 'bg-warning-500' : 'bg-info-500' };
   };
 
   return (
@@ -105,7 +105,7 @@ export function ProjectGantt({ schedule, closedDays, today }: Props) {
       </div>
       <figcaption className="flex flex-wrap gap-4 mt-2 text-surface-500">
         <span className="flex items-center gap-1"><span className="inline-block w-4 h-1.5 rounded-sm bg-surface-400" />Planned</span>
-        {schedule.status !== 'PLANNING' && <span className="flex items-center gap-1"><span className="inline-block w-4 h-3 rounded-sm bg-info-500" />Expected (filled: done)</span>}
+        {schedule.status !== 'PLANNING' && <span className="flex items-center gap-1"><span className="inline-block w-4 h-3 rounded-sm bg-info-500" />Actual, not final (filled: done)</span>}
         {schedule.status !== 'PLANNING' && <span className="flex items-center gap-1"><span className="inline-block w-4 h-3 rounded-sm bg-warning-500" />Behind plan</span>}
         <span className="flex items-center gap-1"><span className="inline-block w-4 h-3 rounded-sm bg-success-500" />Finished</span>
         {showToday && <span className="flex items-center gap-1"><span className="inline-block w-px h-3 bg-surface-700" />Today</span>}

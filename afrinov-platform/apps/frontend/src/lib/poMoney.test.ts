@@ -42,4 +42,17 @@ describe('formatRate', () => {
     expect(formatRate(0)).toBe('0%');
     expect(formatRate('15.5')).toBe('15.5%');
   });
+
+  // A supplier's discount to 4 places: Hytec's 5/18 off on AFRI-0413_1.
+  it('shows a rate to 4 places, without trailing zeros', () => {
+    expect(formatRate('27.7778')).toBe('27.7778%');
+    expect(formatRate('12.50')).toBe('12.5%');
+    expect(formatRate('27.7800')).toBe('27.78%');
+  });
+
+  it("prices Hytec's AFRI-0413_1 lines at 27.7778% off, as the server does", () => {
+    const lines: Array<[number, string]> = [[8, '4433.04'], [2, '9213.72'], [1, '4420.70'], [4, '1832.95'], [2, '5734.95']];
+    const { totals } = priceLines(lines.map(([q, p]) => ({ orderedQty: q, unitPrice: p, discountPercent: '27.7778' })), 15);
+    expect(totals).toMatchObject({ subtotal: '55693.54', discount: '21420.62' });
+  });
 });

@@ -627,7 +627,7 @@ function mockQuoteValue(rfq: MockRfq, supplierId: string): { total: string; curr
 /** As the server's withCosting: each line priced for one unit, times its quantity; a draft's quotes valued today, a submitted one's as they were then. */
 function salesRfqView(r: MockSalesRfq) {
   const draft = r.status === 'DRAFT';
-  const markupPercent = r.markupPercent === null ? null : Number(r.markupPercent);
+  const jobMarkup = r.markupPercent === null ? null : Number(r.markupPercent);
   const fixed = (n: number | null) => (n === null ? null : n.toFixed(2));
   const lines = r.equipmentLines.map((line) => {
     const materials = line.materials.map((m) => {
@@ -648,22 +648,28 @@ function salesRfqView(r: MockSalesRfq) {
     const labour = line.labour.map((l) => ({ ...l, total: cents(Number(l.hours) * Number(l.hourlyRate)).toFixed(2) }));
     const otherCosts = line.otherCosts.map((c) => ({ ...c, total: cents(Number(c.quantity) * Number(c.unitCost)).toFixed(2) }));
     const labourTotal = cents(labour.reduce((sum, l) => sum + Number(l.total), 0));
-    const material = cents(materials.reduce((sum, m) => sum + Number(m.amount), 0));
+    const allowances = line.allowances ?? [];
+    // Quotes and allowances alike are material.
+    const material = cents(materials.reduce((sum, m) => sum + Number(m.amount), 0) + allowances.reduce((sum, a) => sum + Number(a.amount), 0));
     const other = cents(otherCosts.reduce((sum, c) => sum + Number(c.total), 0));
     const unitCost = cents(labourTotal + material + other);
+    // Its own markup, or the job's.
+    const markupPercent = line.markupPercent !== null && line.markupPercent !== undefined ? Number(line.markupPercent) : jobMarkup;
     const unitMarkup = markupPercent === null ? null : cents((unitCost * markupPercent) / 100);
     const unitPrice = unitMarkup === null ? null : cents(unitCost + unitMarkup);
     const total = unitPrice === null ? null : cents(unitPrice * line.quantity);
     return {
-      id: line.id, lineNo: line.lineNo, equipment: line.equipment, details: line.details, quantity: line.quantity, labour, materials, otherCosts,
+      id: line.id, lineNo: line.lineNo, equipment: line.equipment, details: line.details, quantity: line.quantity, markupPercent: line.markupPercent ?? null, labour, materials, otherCosts, allowances,
       sums: { labourTotal, material, other, unitCost, unitMarkup, total },
-      totals: { quantity: line.quantity, labour: labourTotal.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), unitCost: unitCost.toFixed(2), unitMarkup: fixed(unitMarkup), unitPrice: fixed(unitPrice), total: fixed(total) },
+      totals: { quantity: line.quantity, markupPercent: markupPercent === null ? null : String(markupPercent), labour: labourTotal.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), unitCost: unitCost.toFixed(2), unitMarkup: fixed(unitMarkup), unitPrice: fixed(unitPrice), total: fixed(total) },
     };
   });
   const vatRate = Number(r.vatRate ?? MOCK_SETTINGS['purchaseOrders.vatRate']?.value ?? 15);
   const sum = (pick: (s: (typeof lines)[number]['sums']) => number) => cents(lines.reduce((s, l) => s + pick(l.sums) * l.quantity, 0));
-  const markup = markupPercent === null ? null : sum((s) => s.unitMarkup!);
-  const equipment = markupPercent === null ? null : cents(lines.reduce((s, l) => s + l.sums.total!, 0));
+  // Priced once every line has a markup, its own or the job's.
+  const priced = lines.every((l) => l.sums.unitMarkup !== null);
+  const markup = priced ? sum((s) => s.unitMarkup!) : null;
+  const equipment = priced ? cents(lines.reduce((s, l) => s + l.sums.total!, 0)) : null;
   const delivery = Number(r.deliveryPrice);
   const totalExVat = equipment === null ? null : cents(equipment + delivery);
   const vat = totalExVat === null ? null : cents((totalExVat * vatRate) / 100);
@@ -695,21 +701,22 @@ function salesRfqView(r: MockSalesRfq) {
  */
 function routeSalesRfq(method: string, p: string, qs: Record<string, string>, body: unknown): unknown {
   type LineBody = {
-    equipment?: string | null; details?: string | null; quantity?: number;
+    equipment?: string | null; details?: string | null; quantity?: number; markupPercent?: number | null;
     labour?: Array<{ labourRateId: string; hours: number }>; materials?: Array<{ rfqId: string; supplierId: string }>;
     otherCosts?: Array<{ description: string; quantity: number; unitCost: number }>;
+    allowances?: Array<{ description: string; amount: number }>;
   };
-  type Body = Partial<Record<'description' | 'notes' | 'clientName' | 'clientAddress' | 'contactName' | 'clientReference' | 'paymentTerms' | 'validity' | 'deliveryDuration' | 'deliveryTerms' | 'signerPhone' | 'signerEmail', string | null>> & {
+  type Body = Partial<Record<'description' | 'notes' | 'quoteNotes' | 'clientName' | 'clientAddress' | 'contactName' | 'clientReference' | 'paymentTerms' | 'validity' | 'deliveryDuration' | 'deliveryTerms' | 'signerPhone' | 'signerEmail', string | null>> & {
     projectNumber?: string; penaltiesApply?: boolean; markupPercent?: number | null; deliveryPrice?: number; closingDate?: string | null;
     equipmentLines?: LineBody[]; reason?: string;
   };
-  const TEXT = ['description', 'notes', 'clientName', 'clientAddress', 'contactName', 'clientReference', 'paymentTerms', 'validity', 'deliveryDuration', 'deliveryTerms', 'signerPhone', 'signerEmail'] as const;
+  const TEXT = ['description', 'notes', 'quoteNotes', 'clientName', 'clientAddress', 'contactName', 'clientReference', 'paymentTerms', 'validity', 'deliveryDuration', 'deliveryTerms', 'signerPhone', 'signerEmail'] as const;
   /** The address, remarks and details keep their lines, as the server keeps them. */
   const lines = (v: string | null | undefined) => {
     const kept = (v ?? '').split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
     return kept.length ? kept.join('\n') : null;
   };
-  const cleanField = (k: (typeof TEXT)[number], v: string | null | undefined) => (k === 'clientAddress' || k === 'notes' ? lines(v) : rfqText(v));
+  const cleanField = (k: (typeof TEXT)[number], v: string | null | undefined) => (k === 'clientAddress' || k === 'notes' || k === 'quoteNotes' ? lines(v) : rfqText(v));
   const b = (body ?? {}) as Body;
   const now = new Date().toISOString();
   const entry = (action: string, after: Record<string, unknown>) => ({ id: nextId('audit'), action, actorId: 'u-admin', before: null, after, createdAt: now });
@@ -742,12 +749,14 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     if (new Set(allPicks.map((m) => m.rfqId)).size !== allPicks.length) throw err('VALIDATION_ERROR', 'Pick one quote on each request for quotation, on one equipment line');
     let labourNo = 0;
     let otherNo = 0;
+    let allowanceNo = 0;
     return input.map((l, i) => {
       const on = input.length > 1 ? `Equipment line ${i + 1}: ` : '';
       const quantity = l.quantity ?? 1;
-      if (!Number.isInteger(quantity) || quantity < 1) throw err('VALIDATION_ERROR', `${on}the quantity is a whole number, 1 or more`);
+      if (!Number.isInteger(quantity) || quantity < 0) throw err('VALIDATION_ERROR', `${on}the quantity is a whole number, 0 or more (0 prices it without charging it)`);
       return {
         id: nextId('srfqe'), lineNo: i + 1, equipment: rfqText(l.equipment), details: lines(l.details), quantity,
+        markupPercent: l.markupPercent === null || l.markupPercent === undefined ? null : String(l.markupPercent),
         labour: labourRows(l.labour ?? [], had, on).map((x) => ({ ...x, lineNo: ++labourNo })),
         materials: materialRows(l.materials ?? [], projectNumber),
         otherCosts: (l.otherCosts ?? []).map((c, j) => {
@@ -755,6 +764,12 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
           if (!description) throw err('VALIDATION_ERROR', `${on}Other cost ${j + 1} needs a description, e.g. Accommodation`);
           if (!(c.quantity > 0) || !(c.unitCost > 0)) throw err('VALIDATION_ERROR', `${on}Other cost ${j + 1}: the quantity and unit cost are more than 0`);
           return { id: nextId('srfqo'), lineNo: ++otherNo, description, quantity: String(c.quantity), unitCost: String(c.unitCost) };
+        }),
+        allowances: (l.allowances ?? []).map((a, j) => {
+          const description = rfqText(a.description);
+          if (!description) throw err('VALIDATION_ERROR', `${on}Allowance ${j + 1} needs a description, e.g. Filters, pipe clamps, fittings`);
+          if (!(a.amount > 0)) throw err('VALIDATION_ERROR', `${on}Allowance ${j + 1}: the amount is in rand and cents, more than R0`);
+          return { id: nextId('srfqa'), lineNo: ++allowanceNo, description, amount: Number(a.amount).toFixed(2) };
         }),
       };
     });
@@ -804,7 +819,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     const clientName = text('clientName', rfqText(project?.client ?? null));
     const created: MockSalesRfq = {
       id: nextId('srfq'), number: number(b.projectNumber), quoteReference: null, status: 'DRAFT', projectNumber: b.projectNumber,
-      description: text('description', rfqText(project?.name ?? null)), notes: text('notes'), penaltiesApply: b.penaltiesApply ?? false,
+      description: text('description', rfqText(project?.name ?? null)), notes: text('notes'), quoteNotes: text('quoteNotes'), penaltiesApply: b.penaltiesApply ?? false,
       markupPercent: b.markupPercent === null || b.markupPercent === undefined ? null : String(b.markupPercent), deliveryPrice: String(b.deliveryPrice ?? 0), vatRate: null,
       clientName, clientAddress: text('clientAddress'), contactName: text('contactName'), clientReference: text('clientReference'),
       paymentTerms: text('paymentTerms', '30 days from invoice date.'), validity: text('validity', '30 days from issue of quotation.'),
@@ -850,9 +865,11 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     const missing = [
       ...rfq.equipmentLines.flatMap((l) => [
         !l.equipment && (one ? 'the equipment being quoted' : `the equipment on line ${l.lineNo}`),
-        l.labour.length === 0 && l.materials.length === 0 && l.otherCosts.length === 0 && (one ? 'labour, a quote or another cost to price' : `labour, a quote or another cost on line ${l.lineNo}`),
+        l.labour.length === 0 && l.materials.length === 0 && (l.allowances ?? []).length === 0 && l.otherCosts.length === 0 && (one ? 'labour, a quote, an allowance or another cost to price' : `labour, a quote, an allowance or another cost on line ${l.lineNo}`),
       ]),
-      !rfq.clientName && "the client's name", rfq.markupPercent === null && 'the markup',
+      rfq.equipmentLines.length > 0 && rfq.equipmentLines.every((l) => l.quantity === 0) && (one ? 'a quantity of 1 or more' : 'a quantity of 1 or more on at least one line'),
+      !rfq.clientName && "the client's name",
+      rfq.markupPercent === null && rfq.equipmentLines.some((l) => l.markupPercent === null) && 'the markup',
     ].filter((m): m is string => !!m);
     if (missing.length) throw err('VALIDATION_ERROR', `Before submitting ${rfq.number}, add ${missing.join(', ')}.`);
     const equipmentLines = rfq.equipmentLines.map((l) => ({ ...l, materials: materialRows(l.materials.map((m) => ({ rfqId: m.rfqId, supplierId: m.supplierId })), rfq.projectNumber) }));

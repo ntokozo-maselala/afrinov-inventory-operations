@@ -2,21 +2,22 @@
 // the price the form shows while a Sales RFQ is typed.
 import { describe, it, expect } from 'vitest';
 import {
-  buildQuotation, quotationCompanyFromSettings, quotationConditions, quotationDescription, quotationFilename, quotationHeading, quotationLines, quotationMoney, quotationStamp,
+  buildQuotation, quotationCompanyFromSettings, quotationConditions, quotationDescription, quotationFilename, quotationHeading, quotationLines, quotationMoney, quotationNotes,
+  quotationStamp,
 } from './salesQuotation';
 import { costingPreview, mayApprove, parseAmount, type SalesEquipmentLine, type SalesRfq } from './salesRfq';
 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
 
 const pumpLine = (over: Partial<SalesEquipmentLine> = {}): SalesEquipmentLine => ({
-  id: 'e-1', lineNo: 1, equipment: 'Main Piston Pump', details: null, quantity: 1, labour: [], materials: [], otherCosts: [],
-  totals: { quantity: 1, labour: '0.00', material: '154866.25', other: '0.00', unitCost: '154866.25', unitMarkup: '0.00', unitPrice: '154866.25', total: '154866.25' },
+  id: 'e-1', lineNo: 1, equipment: 'Main Piston Pump', details: null, quantity: 1, markupPercent: null, labour: [], materials: [], otherCosts: [],
+  totals: { quantity: 1, markupPercent: '0', labour: '0.00', material: '154866.25', other: '0.00', unitCost: '154866.25', unitMarkup: '0.00', unitPrice: '154866.25', total: '154866.25' },
   ...over,
 });
 
 const rfq = (over: Partial<SalesRfq> = {}): SalesRfq => ({
   id: 'r-1', number: 'AFRI-02A-1469-02-01', quoteReference: 'AFRI-02A-1469-04-1', status: 'APPROVED', projectNumber: 'AFRI-1469',
-  equipment: 'Main Piston Pump', equipmentLines: [pumpLine()], description: null, notes: null, penaltiesApply: false, markupPercent: '0', deliveryPrice: '0', vatRate: '15',
+  equipment: 'Main Piston Pump', equipmentLines: [pumpLine()], description: null, notes: null, quoteNotes: null, penaltiesApply: false, markupPercent: '0', deliveryPrice: '0', vatRate: '15',
   clientName: 'Northam Platinum', clientAddress: 'Main Office\nFarm Zondereinde 384KQ\nDistrict of Thabazimbi, South Africa', contactName: 'Bongi', clientReference: null,
   paymentTerms: '30 days from Invoice date.', validity: '30 days from issue of quotation.', deliveryDuration: '2 - 4 weeks from date of receiving official order', deliveryTerms: 'DAP, Northam Platinum',
   signerPhone: '+27 73 805 9123', signerEmail: 'Northamplats@afrinov.co.za', issuedAt: '2026-10-27T00:00:00.000Z', closingDate: null, createdAt: '2026-10-20T08:00:00.000Z',
@@ -57,6 +58,22 @@ describe('the quotation', () => {
     ]);
   });
 
+  // AFRI-0413 Rev 2: the flexibles the client supplies are priced at quantity 0, "R -".
+  it('prints a line at quantity 0 with its unit price and R -, charging nothing', () => {
+    const flexibles = pumpLine({
+      id: 'e-3', lineNo: 2, equipment: 'Electrode Flexibles per Furnace (Supplied to Client)', quantity: 0,
+      totals: { ...pumpLine().totals, quantity: 0, unitPrice: '276660.56', total: '0.00' },
+    });
+    expect(quotationLines(rfq({ equipmentLines: [pumpLine(), flexibles] }))[1]).toEqual(['2', 'Electrode Flexibles per Furnace (Supplied to Client)', '0', 'R 276 660,56', 'R -']);
+  });
+
+  it("prints the company's Notes, then the quotation's own, one per line", () => {
+    expect(quotationNotes('Orders to be made out to Afrinov (Pty) Ltd.', rfq({ quoteNotes: 'All Flexibles to be free issued by client\n\n Second note ' })))
+      .toEqual(['Orders to be made out to Afrinov (Pty) Ltd.', 'All Flexibles to be free issued by client', 'Second note']);
+    expect(quotationNotes('', rfq({ quoteNotes: 'Only this one' }))).toEqual(['Only this one']);
+    expect(quotationNotes('', rfq())).toEqual([]);
+  });
+
   it('numbers the conditions, leaving out any left blank', () => {
     expect(quotationConditions(rfq({ validity: ' ' }))).toEqual([
       'Payments terms: 30 days from Invoice date.',
@@ -87,8 +104,17 @@ describe('the quotation', () => {
       expect(pdf, s).toContain(s);
     }
     expect(pdf).not.toContain('NOT FOR ISSUE');
-    // The faint flame mark in the middle of the page, as on the example.
-    expect(pdf).toMatch(/\/ca 0\.15/);
+    // The template's watermark, the official flame picture washed out (477 x 313),
+    // under the official logo picture (468 x 421).
+    expect(pdf).toMatch(/\/Width 477[\s\S]*\/Height 313/);
+    expect(pdf).toMatch(/\/Width 468[\s\S]*\/Height 421/);
+  });
+
+  it("prints the quotation's own Notes under the company's", async () => {
+    const pdf = text(await buildQuotation(rfq({ quoteNotes: 'All Flexibles to be free issued by client' }), { name: 'Afrinov', notes: 'Orders to be made out to Afrinov (Pty) Ltd.', letterhead: '' }));
+    expect(pdf).toContain('Orders to be made out to Afrinov');
+    expect(pdf).toContain('All Flexibles to be free issued by client');
+    expect(pdf.indexOf('Orders to be made out to Afrinov')).toBeLessThan(pdf.indexOf('All Flexibles to be free issued by client'));
   });
 });
 
@@ -97,7 +123,7 @@ describe('the price while it is typed', () => {
     const pump = { quantity: 1, labour: [{ hours: 10, hourlyRate: 400 }, { hours: 5.5, hourlyRate: 300 }], materials: [9000], otherCosts: [] };
     expect(costingPreview({ lines: [pump], markupPercent: 40, deliveryPrice: 500, vatRate: 15 })).toEqual({
       labour: 5650, material: 9000, other: 0, cost: 14650, markup: 5860, equipment: 20510, totalExVat: 21010, vat: 3151.5, totalIncVat: 24161.5,
-      lines: [{ unitCost: 14650, unitPrice: 20510, total: 20510 }],
+      lines: [{ markupPercent: 40, unitCost: 14650, unitPrice: 20510, total: 20510 }],
     });
     expect(costingPreview({ lines: [{ ...pump, labour: [], materials: [100] }], markupPercent: null, deliveryPrice: 0, vatRate: 15 }).equipment).toBeNull();
   });
@@ -111,11 +137,23 @@ describe('the price while it is typed', () => {
       ],
       markupPercent: 33.33, deliveryPrice: 0, vatRate: 15,
     });
-    expect(p.lines[0]).toEqual({ unitCost: 1000.01, unitPrice: 1333.31, total: 3999.93 });
+    expect(p.lines[0]).toEqual({ markupPercent: 33.33, unitCost: 1000.01, unitPrice: 1333.31, total: 3999.93 });
     // 3 200 + 876.25 = 4 076.25; × 33.33% = 1 358.61.
-    expect(p.lines[1]).toEqual({ unitCost: 4076.25, unitPrice: 5434.86, total: 5434.86 });
+    expect(p.lines[1]).toEqual({ markupPercent: 33.33, unitCost: 4076.25, unitPrice: 5434.86, total: 5434.86 });
     // 999.90 + 1 358.61; and cost + markup = equipment.
     expect(p).toMatchObject({ material: 3000, other: 876.28, cost: 7076.28, markup: 2358.51, equipment: 9434.79 });
+  });
+
+  // AFRI-0413's costing sheet: the maintenance at 56%, the spares at 62%.
+  it("prices each line at its own markup, or the job's, and only once every line has one, as the server does", () => {
+    const lines = [
+      { quantity: 1, labour: [], materials: [], otherCosts: [{ quantity: 1, unitCost: 255600 }] },
+      { quantity: 1, markupPercent: 62, labour: [], materials: [], otherCosts: [{ quantity: 1, unitCost: 45000 }] },
+    ];
+    const p = costingPreview({ lines, markupPercent: 56, deliveryPrice: 0, vatRate: 15 });
+    expect(p.lines.map((l) => [l.markupPercent, l.total])).toEqual([[56, 398736], [62, 72900]]);
+    expect(p).toMatchObject({ totalExVat: 471636, vat: 70745.4, totalIncVat: 542381.4 });
+    expect(costingPreview({ lines, markupPercent: null, deliveryPrice: 0, vatRate: 15 })).toMatchObject({ totalExVat: null, lines: [{ total: null }, { total: 72900 }] });
   });
 
   it('reads an amount typed with a comma or a point', () => {
