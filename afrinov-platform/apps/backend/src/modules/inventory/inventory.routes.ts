@@ -123,17 +123,29 @@ export const stockReceiptSchema = z.object({
 
 export const stockCountSchema = z.object({
   locationId: uuidSchema,
+  // Whose stock: a project's, or Stores stock (system audit C6).
+  heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
+  // Full: every item with stock here is on it; Spot: the ones given (system audit C5).
+  kind: z.enum(['FULL', 'SPOT']).optional(),
+  // When the count sheet was opened; needed when counts are blind (system audit C4).
+  openedAt: z.iso.datetime().optional(),
   note: z.string().trim().max(500).optional(),
   lines: z.array(z.object({
     materialId: uuidSchema,
     // What the system shows, checked against the balance when posting. It can be below
     // zero after a booking mistake, which is what the count is there to correct.
-    expectedQuantity: storedSignedQuantity,
+    // Left out on a blind sheet.
+    expectedQuantity: storedSignedQuantity.nullable().optional(),
     countedQuantity: storedCount,
     note: z.string().trim().max(200).optional(),
   })).min(1).max(2000),
 });
 
+
+export const countSheetQuerySchema = z.object({
+  locationId: uuidSchema,
+  heldForProject: z.string().trim().min(1).max(64).optional(),
+});
 
 export const returnSchema = z.object({
   quantity: storedQuantity,
@@ -323,6 +335,14 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
       statusCode: 200,
       body: await WriteOffApprovalService.reject(id, parsed.data.reason, actorId(req), mayDecide, tx),
     }));
+  });
+
+  // The count sheet: every item with stock in one stock at one location, and when it was opened (system audit C4-C6).
+  app.get('/stock-counts/sheet', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.AdjustInventory);
+    const parsed = countSheetQuerySchema.safeParse(req.query);
+    if (!parsed.success) throw Errors.validation('Choose the location to count', parsed.error.flatten());
+    return StockCountService.sheet(parsed.data);
   });
 
   // A stock count by location; differences become COUNT_VARIANCE adjustments.

@@ -18,10 +18,10 @@ import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
 import { changePasswordSchema, loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, signInQuerySchema, temporaryPasswordSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import {
-  issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema,
+  issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema, countSheetQuerySchema,
   consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema,
 } from '../modules/inventory/inventory.routes.js';
-import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema } from '../modules/inventory/tool.routes.js';
+import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema, toolRepairedSchema, toolRepairWriteOffSchema } from '../modules/inventory/tool.routes.js';
 import {
   createMaterialSchema,
   moveLeftoversSchema,
@@ -47,6 +47,7 @@ import {
   closeSchema,
   cancelSchema,
   createGRSchema,
+  supplierReturnSchema,
 } from '../modules/procurement/procurement.routes.js';
 import {
   awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, listRfqQuerySchema, recommendQuoteSchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
@@ -378,7 +379,8 @@ export const OPERATIONS: Operation[] = [
       + 'from today, but not after the project’s end date; a chosen dueOn is refused with 400 when before today, after '
       + 'the project ends, or more than inventory.toolMaxLoanDays away (administrators may exceed that). When the recipient '
       + 'already has an overdue tool: 400 unless overrideReason is given (details.overdueLoans lists them), or 409 '
-      + 'INVALID_STATE when inventory.toolOverdueCheckout blocks it. Returns the slip, its loans and the due date.',
+      + 'INVALID_STATE when inventory.toolOverdueCheckout blocks it. Returns the slip, its loans and the due date. '
+      + 'A tool held for repair is not lent (system audit B2). Retry-safe with an Idempotency-Key header (B3).',
     permissions: [P.CheckOutTool], body: toolCheckOutSchema, success: 201, errors: [404, 409, 422],
   },
   {
@@ -390,8 +392,20 @@ export const OPERATIONS: Operation[] = [
       + 'than inventory.writeOffApprovalAbove, or with no unit cost, stays on loan while its write-off waits for '
       + 'approval by someone else (writeOffRequestIds, its loan in heldLoanIds; lostWaiting on the loan in GET /tools). '
       + 'Whether lost tools wait is decided on everything lost of one tool from one location on the check-in. Approving posts its '
-      + 'return and its write-off against the loan. writeOffIds lists the write-offs posted at once.',
+      + 'return and its write-off against the loan. writeOffIds lists the write-offs posted at once. '
+      + 'A DAMAGED tool is held for repair, not lent, until marked repaired or written off (system audit B2). Retry-safe with an Idempotency-Key header (B3).',
     permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
+  },
+  {
+    method: 'post', path: '/tools/repairs/:id/repaired', tag: 'Tools', summary: 'Mark a tool held for repair as repaired',
+    description: 'It can be lent again (system audit B2). Refused with 409 when dealt with already, or while a write-off of it waits for approval. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.AdjustInventory], body: toolRepairedSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/tools/repairs/:id/write-off', tag: 'Tools', summary: 'Write off a tool held for repair',
+    description: 'As damaged, with a reason (system audit B2): posted at once (201), or, over the write-off limit or with no unit cost, waiting for '
+      + 'someone else\'s approval (202), the tool staying held until then. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.AdjustInventory], body: toolRepairWriteOffSchema, success: 201, errors: [404, 409],
   },
   {
     method: 'post', path: '/tools/loans/:id/due-date', tag: 'Tools', summary: 'Change a tool loan’s due date, later or earlier',
@@ -466,12 +480,20 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.TransferInventory], body: transferSchema, success: 201, errors: [404, 422],
   },
   {
+    method: 'get', path: '/stock-counts/sheet', tag: 'Stock movements', summary: 'The count sheet for one stock at one location',
+    description: 'Every item with book stock there, Stores stock or one project\'s (heldForProject), the projects with stock here, and openedAt, '
+      + 'when the sheet was opened by the database\'s clock. With inventory.blindCounts on, expected is null on every line (system audit C4-C6).',
+    permissions: [P.AdjustInventory], query: countSheetQuerySchema, errors: [400, 404],
+  },
+  {
     method: 'post', path: '/stock-counts', tag: 'Stock movements', summary: 'Post a stock count for one location',
     description: 'The counted quantity of each item, with the system quantity the counter was shown. Every difference '
       + 'is posted as a COUNT_VARIANCE adjustment linked to one count id; items that match are recorded as counted only. '
       + 'A difference over inventory.writeOffApprovalAbove, or of an item with no unit cost, is recorded for someone '
       + 'else to approve instead (its requestId; waitingForApproval counts them), and posts as part of the count once approved. '
-      + 'All or nothing. Refused with 409 CONFLICT when the stock at the location has changed since it was shown, '
+      + 'A count is of Stores stock or one project\'s (heldForProject), and FULL or SPOT (kind): a full count is refused (400) unless every item with '
+      + 'stock there is on it. A line whose stock moved since it was shown, or, on a blind sheet (openedAt), was posted to since the sheet was opened, '
+      + 'is held back for a recount (heldBack) and the rest post (system audit C4-C7). Refused with 409 CONFLICT when every line moved, '
       + '409 INVALID_STATE for an item with an adjustment already waiting at the location, 400 for a difference too '
       + 'large for one movement, and 404 for an unknown location or material.',
     permissions: [P.AdjustInventory], body: stockCountSchema, success: 201, errors: [404, 409],
@@ -538,7 +560,8 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/inventory-transactions/:id/reversal', tag: 'Stock movements',
     summary: 'Reverse a movement',
     description: 'Posts an opposite entry linked to the original; the ledger is never edited. Both legs of a transfer are reversed together. '
-      + 'Refused with 409 CONFLICT when already reversed, 409 INVALID_STATE for a reversal, a receipt against a purchase order, '
+      + 'A receipt line against a purchase order is reversed with its order: the line\'s received quantity goes down and the order reopens (system audit A7). '
+      + 'Refused with 409 CONFLICT when already reversed, 409 INVALID_STATE for a reversal, a whole order received at once, a receipt line partly returned to the supplier, '
       + 'or an adjustment over the write-off limit (put right by an adjustment the other way, for approval), '
       + 'and 422 INSUFFICIENT_BALANCE when the stock has already been used.',
     permissions: [P.ReverseInventoryTransaction], body: reversalSchema, success: 201, errors: [404, 409, 422],
@@ -694,7 +717,8 @@ export const OPERATIONS: Operation[] = [
     description: 'All or none. Stock held for the project first becomes Stores stock where it is (a linked TRANSFER_OUT and TRANSFER_IN, reference MoveToStores, not reversed on its own). '
       + 'The project\'s own item, or one with no project, then becomes a Stores item in its chosen `category`, keeping its SKU, stock and history, with no project and no Required Stock. '
       + 'A Stores item, or another project\'s item, is sent with no category: it keeps what it is, and only the stock held for this project moves. '
-      + 'Refused (400) for an item still on an open project order or request for quotation, or held for another project: it stays project material until that is finished.',
+      + 'Refused (400) for an item still on an open project order or request for quotation, or held for another project: it stays project material until that is finished. '
+      + 'Retry-safe with an Idempotency-Key header (system audit B3).',
     permissions: [P.EditMaterial], body: moveLeftoversSchema, errors: [404, 409],
   },
   {
@@ -703,7 +727,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/materials/no-project/leftovers/move', tag: 'Projects', summary: 'Move Projects items with no project to Stores',
-    description: 'All or none, as for a closed project\'s leftovers: each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no Required Stock. Refused (400) for an item still on an open project order or request for quotation: it stays project material until that is finished.',
+    description: 'All or none, as for a closed project\'s leftovers: each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no Required Stock. Refused (400) for an item still on an open project order or request for quotation: it stays project material until that is finished. Retry-safe with an Idempotency-Key header (system audit B3).',
     permissions: [P.EditMaterial], body: moveLeftoversSchema, errors: [404, 409],
   },
 
@@ -885,14 +909,22 @@ export const OPERATIONS: Operation[] = [
     description: 'Against an approved order (purchaseOrderId is required: a receipt with no order is refused with 400): a Stores order needs `order:stores_stock`, '
       + 'a project order `receive:purchase_order`, and its stock is held for the order\'s project. Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
       + 'refused with 400 if still to come). Retry-safe with an Idempotency-Key header, as Receive stock sends: a '
-      + 'repeat replays the first receipt, and the same key with other details is refused with 409.',
+      + 'repeat replays the first receipt, and the same key with other details is refused with 409. A line may go over what its order line still owes '
+      + 'by up to purchaseOrders.overDeliveryPercent of the ordered quantity, with overDeliveryReason (system audit A8).',
     procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404, 409],
   },
   {
     method: 'post', path: '/goods-receipts/:id/post', tag: 'Goods receipts', summary: 'Post a receipt into stock',
     description:
-      'All-or-nothing. 400 when a line would exceed its order line\'s ordered quantity; 409 when already posted.',
+      'All-or-nothing. 400 when a line would exceed its order line\'s ordered quantity by more than purchaseOrders.overDeliveryPercent allows, or without its reason; 409 when already posted.',
     procurement: true, permissions: [P.ReceiveInventory], errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/goods-receipts/:id/lines/:lineId/return', tag: 'Goods receipts', summary: 'Send goods back to the supplier',
+    description: 'Against one line of a posted receipt, with a reason and the supplier\'s reference (system audit A6): a RETURN_TO_SUPPLIER movement takes the '
+      + 'stock off, and against an order the line\'s received quantity goes down, so the order owes the goods again. No more than the line less what went back already; '
+      + 'refused for a reversed line, and with 422 when the stock is no longer there. By whoever receives the order\'s kind. Retry-safe with an Idempotency-Key header.',
+    procurement: true, permissions: [P.ReceiveInventory], body: supplierReturnSchema, success: 201, errors: [400, 404, 409, 422],
   },
   {
     method: 'get', path: '/sales-rfqs', tag: 'Sales requests for quotation', summary: 'List Sales requests for quotation',

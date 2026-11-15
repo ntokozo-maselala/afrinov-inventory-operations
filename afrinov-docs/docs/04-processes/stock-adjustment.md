@@ -33,16 +33,24 @@ A tool lost on loan is written off from its check-in (ADJUSTMENT, LOSS), and
 the borrower is recorded as responsible automatically.
 
 ## Steps — stock count (implemented process)
-1. Stock count page (`/stock/count`): choose a location; the page shows the
-   system quantity of each item there; enter the counted quantities.
+1. Stock count page (`/stock/count`): choose a location and whose stock,
+   Stores or one project's held there, and whether it is a **spot** count (the
+   items counted) or a **full** count (everything with stock there). The sheet
+   (`GET /api/v1/stock-counts/sheet`) lists every item with book stock in that
+   stock and when it was opened. With **blind counts** on
+   (`inventory.blindCounts`), it shows no system quantities (ADR-040).
 2. `POST /api/v1/stock-counts` (`adjust:inventory`) →
    `StockCountService.post`: one count per location at a time (database
-   lock); if any shown quantity no longer matches the balance, the whole
-   count is refused (409) and the counter reloads; otherwise each
-   difference becomes an ADJUSTMENT with reason COUNT_VARIANCE, all
-   sharing one count id (`reference_type = 'StockCount'`), and a
-   `STOCK_COUNT` audit entry is written. Items counted equal to the system
-   get no row.
+   lock). A full count is refused unless every item with stock there is on it;
+   the screen offers to count blank ones as 0, once confirmed as not found. A
+   line whose stock moved while counting (its shown figure no longer matches,
+   or, blind, something was posted to it since the sheet opened) is **held
+   back** for a recount and the rest post; only when every line moved is the
+   count refused (409). Each difference becomes an ADJUSTMENT with reason
+   COUNT_VARIANCE in the stock counted, all sharing one count id
+   (`reference_type = 'StockCount'`), and a `STOCK_COUNT` audit entry records
+   the kind, the stock and what was held back. Items counted equal to the
+   system get no row.
 
 ## Steps — correcting a mistake (reversal)
 1. Movements page → open the movement → Reverse, with a reason (3–500

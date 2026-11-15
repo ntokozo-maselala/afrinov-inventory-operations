@@ -71,6 +71,40 @@ describe('Tools page', () => {
     mockPost.mockReset().mockResolvedValue({});
   });
 
+  // System audit B2: a damaged tool is held until the store repairs or writes it off.
+  it('shows a tool held for repair, offers no check-out of it, and lets the store mark it repaired', async () => {
+    const held = { ...TOOLS[2]!, heldForRepair: '1', locations: [{ locationId: 'l-1', locationName: 'Stores', quantity: '1', heldForRepair: '1' }],
+      repairs: [{ id: 'rep-1', locationId: 'l-1', locationName: 'Stores', quantity: '1', note: 'Blade cracked', reportedAt: `${at(-1)}T08:00:00.000Z`, reportedBy: 'Vusi', writeOffWaiting: false }] };
+    mockGet.mockImplementation(async (path: string) => (path === '/tools' ? [TOOLS[0], TOOLS[1], held] : path.startsWith('/settings/values') ? settings : []));
+    mockPost.mockResolvedValue({ id: 'rep-1', resolution: 'REPAIRED' });
+    renderPage();
+    await screen.findByText('Saw Cutter');
+    expect(within(row('Saw Cutter')).getByText('1 held for repair')).toBeInTheDocument();
+    expect(within(row('Saw Cutter')).queryByRole('button', { name: 'Check out' })).not.toBeInTheDocument();
+    fireEvent.click(within(row('Saw Cutter')).getByRole('button', { name: 'Mark Saw Cutter at Stores repaired' }));
+    const drawer = await screen.findByRole('dialog');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Mark repaired' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tools/repairs/rep-1/repaired', { note: undefined }, { idempotencyKey: expect.any(String) }));
+    expect(await screen.findByText('1 × Saw Cutter repaired: it can be lent again')).toBeInTheDocument();
+  });
+
+  it('asks why before writing off a held tool, and says when the write-off waits for approval', async () => {
+    const held = { ...TOOLS[2]!, heldForRepair: '1', locations: [{ locationId: 'l-1', locationName: 'Stores', quantity: '1', heldForRepair: '1' }],
+      repairs: [{ id: 'rep-1', locationId: 'l-1', locationName: 'Stores', quantity: '1', note: null, reportedAt: `${at(-1)}T08:00:00.000Z`, reportedBy: 'Vusi', writeOffWaiting: false }] };
+    mockGet.mockImplementation(async (path: string) => (path === '/tools' ? [held] : path.startsWith('/settings/values') ? settings : []));
+    mockPost.mockResolvedValue({ id: 'rep-1', status: 'PENDING_APPROVAL', requestId: 'req-1' });
+    renderPage();
+    await screen.findByText('Saw Cutter');
+    fireEvent.click(within(row('Saw Cutter')).getByRole('button', { name: 'Write off Saw Cutter at Stores' }));
+    const drawer = await screen.findByRole('dialog');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Write off' }));
+    expect(await within(drawer).findByText('Say why it can’t be repaired.')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+    fireEvent.change(within(drawer).getByLabelText(/Why it can/), { target: { value: 'Motor burnt out' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Write off' }));
+    expect(await screen.findByText(/waits for someone else to approve it under Write-offs to approve; until then it stays held/)).toBeInTheDocument();
+  });
+
   it('shows what is in store, who has the rest, until when, and the serial numbers', async () => {
     renderPage();
     await screen.findByText('Scraper');
@@ -121,7 +155,7 @@ describe('Tools page', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tools/check-out', {
       recipientId: 'r-Sabelo', projectNumber: undefined, note: undefined, dueOn: at(7), overrideReason: undefined,
       lines: [{ materialId: 'm-saw', locationId: 'l-1', quantity: 1 }],
-    }));
+    }, { idempotencyKey: expect.any(String) }));
     expect(await screen.findByText(/^Checked out 1 tool to Sabelo, due back /)).toBeInTheDocument();
   });
 
@@ -143,7 +177,7 @@ describe('Tools page', () => {
     expect(mockPost).not.toHaveBeenCalled();
     fireEvent.change(within(drawer).getByLabelText('Reason to lend anyway', { exact: false }), { target: { value: 'Second crew' } });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Check out' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tools/check-out', expect.objectContaining({ recipientId: 'r-Bukho', overrideReason: 'Second crew' })));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tools/check-out', expect.objectContaining({ recipientId: 'r-Bukho', overrideReason: 'Second crew' }), { idempotencyKey: expect.any(String) }));
   });
 
   it('will not lend to a contractor with an overdue tool when the store blocks it', async () => {
@@ -210,7 +244,7 @@ describe('Tools page', () => {
     expect(await within(drawer).findByText('Say what happened to a lost tool.')).toBeInTheDocument();
     fireEvent.change(within(drawer).getByLabelText('What happened', { exact: false }), { target: { value: 'Left on site' } });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Check in' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tools/check-in', { lines: [{ loanId: 't-1', quantity: 1, condition: 'LOST', note: 'Left on site' }] }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tools/check-in', { lines: [{ loanId: 't-1', quantity: 1, condition: 'LOST', note: 'Left on site' }] }, { idempotencyKey: expect.any(String) }));
   });
 
   // ADR-028: a lost tool over the write-off limit waits for someone else's approval.

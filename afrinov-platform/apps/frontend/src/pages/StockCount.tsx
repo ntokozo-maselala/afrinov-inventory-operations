@@ -1,8 +1,11 @@
-// Stock count by location: choose a location, type what is on the shelf next
-// to each item, and post. Each difference from the system becomes a
-// COUNT_VARIANCE adjustment (POST /stock-counts). Items left blank are not
-// touched. A half-done count is kept in this browser per location, and the
-// count sheet prints without the system quantities, for counting blind.
+// Stock count by location: choose a location and whose stock (Stores, or a
+// project's), type what is on the shelf next to each item, and post. Each
+// difference from the system becomes a COUNT_VARIANCE adjustment (POST
+// /stock-counts). A spot count leaves blank items alone; a full count needs
+// every item, a blank one confirmed as 0. With blind counts on, the sheet shows
+// no system figures. A line whose stock moved while counting is held back for
+// a recount and the rest post (system audit C4-C7, ADR-040). A half-done count
+// is kept in this browser per location and stock.
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -17,8 +20,7 @@ import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { usePermissions } from '../hooks/usePermissions';
 import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
-import type { CountRecord, CurrentStockRow, Material } from '../api/types';
-import { isStoresStock } from '../lib/heldFor';
+import type { CountRecord, Material } from '../api/types';
 import { formatDateTime } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { locationLabel } from '../lib/locations';
@@ -28,15 +30,24 @@ import { useUnits } from '../hooks/useUnits';
 import { parseQuantity, type UnitKind } from '../lib/quantity';
 
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
-interface Row { materialId: string; sku: string; name: string; unit: string; system: number }
+/** A line of the count: system null on a blind sheet; onSheet false for an item added as found. */
+interface Row { materialId: string; sku: string; name: string; unit: string; system: number | null; onSheet: boolean }
+/** The count sheet (GET /stock-counts/sheet). */
+interface CountSheet {
+  locationId: string; heldForProject: string | null; blind: boolean; openedAt: string; projects: string[];
+  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string | null }>;
+}
+interface CountResult { adjusted: number; waitingForApproval?: number; heldBack?: Array<{ materialId: string; sku: string }> }
+type CountKind = 'SPOT' | 'FULL';
 interface Draft { counts: Record<string, string>; notes: Record<string, string>; extra: string[]; note: string }
 
 const EMPTY: Draft = { counts: {}, notes: {}, extra: [], note: '' };
-const draftKey = (locationId: string) => `stock-count-draft:${locationId}`;
+// Stores stock keeps the key drafts had before project stock could be counted.
+const draftKey = (locationId: string, stockOf = '') => `stock-count-draft:${locationId}${stockOf ? `:${stockOf}` : ''}`;
 
-function loadDraft(locationId: string): Draft {
+function loadDraft(locationId: string, stockOf = ''): Draft {
   try {
-    const raw = localStorage.getItem(draftKey(locationId));
+    const raw = localStorage.getItem(draftKey(locationId, stockOf));
     if (!raw) return EMPTY;
     const d = JSON.parse(raw) as Partial<Draft>;
     return { counts: d.counts ?? {}, notes: d.notes ?? {}, extra: d.extra ?? [], note: d.note ?? '' };
@@ -45,10 +56,10 @@ function loadDraft(locationId: string): Draft {
   }
 }
 
-function saveDraft(locationId: string, draft: Draft) {
+function saveDraft(locationId: string, stockOf: string, draft: Draft) {
   try {
-    if (Object.keys(draft.counts).length === 0 && Object.keys(draft.notes).length === 0 && draft.extra.length === 0 && !draft.note) localStorage.removeItem(draftKey(locationId));
-    else localStorage.setItem(draftKey(locationId), JSON.stringify(draft));
+    if (Object.keys(draft.counts).length === 0 && Object.keys(draft.notes).length === 0 && draft.extra.length === 0 && !draft.note) localStorage.removeItem(draftKey(locationId, stockOf));
+    else localStorage.setItem(draftKey(locationId, stockOf), JSON.stringify(draft));
   } catch {
     // Private windows and blocked storage: the count still works, it just is not kept.
   }
@@ -69,7 +80,13 @@ export function StockCount() {
   const materials = useApi<Material[]>('/materials');
   const { kindOf } = useUnits();
   const [locationId, setLocationId] = useState('');
-  const stock = useApi<CurrentStockRow[]>(locationId ? `/reports/current-stock?locationId=${encodeURIComponent(locationId)}` : null);
+  // Whose stock: '' for Stores, or a project number (system audit C6).
+  const [stockOf, setStockOf] = useState('');
+  const [kind, setKind] = useState<CountKind>('SPOT');
+  const sheetPath = locationId ? `/stock-counts/sheet?locationId=${encodeURIComponent(locationId)}${stockOf ? `&heldForProject=${encodeURIComponent(stockOf)}` : ''}` : null;
+  const stock = useApi<CountSheet>(sheetPath);
+  // Blind counts (inventory.blindCounts): the sheet carries no system figures at all.
+  const blind = stock.data?.blind === true;
   // The last few counts here, including ones that found no differences.
   const recent = useApi<CountRecord[]>(locationId ? `/stock-counts?locationId=${encodeURIComponent(locationId)}&limit=5` : null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -78,27 +95,29 @@ export function StockCount() {
   const [hideSystem, setHideSystem] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<{ message: string; moved: boolean } | null>(null);
+  const [error, setError] = useState<{ message: string; moved: boolean; blanks?: string[] } | null>(null);
+  // Lines held back because their stock moved while counting (system audit C7).
+  const [heldBack, setHeldBack] = useState<string[]>([]);
   const toast = useToast();
   const idem = useIdempotencyKey('stock-count');
 
-  useEffect(() => { if (locationId) saveDraft(locationId, draft); }, [locationId, draft]);
+  useEffect(() => { if (locationId) saveDraft(locationId, stockOf, draft); }, [locationId, stockOf, draft]);
 
   const activeLocations = useMemo(() => (locations.data ?? []).filter((l) => l.active).sort((a, b) => a.name.localeCompare(b.name)), [locations.data]);
   const location = activeLocations.find((l) => l.id === locationId);
   const materialById = useMemo(() => new Map((materials.data ?? []).map((m) => [m.id, m])), [materials.data]);
 
-  // A count is of Stores stock, as the server posts it: stock held for a project
-  // isn't listed, and an item held only for a project is added as found, at 0.
+  // The sheet's items, every one with stock in the chosen stock here, and any added as found (0 on the books).
   const rows = useMemo<Row[]>(() => {
-    const listed = (stock.data ?? []).filter(isStoresStock).map((r) => ({ materialId: r.materialId, sku: r.materialSku, name: r.materialName, unit: r.unitOfMeasure, system: Number(r.quantity) }));
+    const listed: Row[] = (stock.data?.lines ?? []).map((r) => ({ materialId: r.materialId, sku: r.sku, name: r.name, unit: r.unitOfMeasure, system: r.expected === null ? null : Number(r.expected), onSheet: true }));
     const ids = new Set(listed.map((r) => r.materialId));
     const extra = draft.extra.filter((id) => !ids.has(id)).flatMap((id) => {
       const m = materialById.get(id);
-      return m ? [{ materialId: id, sku: m.sku, name: m.name, unit: m.unitOfMeasure, system: 0 }] : [];
+      return m ? [{ materialId: id, sku: m.sku, name: m.name, unit: m.unitOfMeasure, system: blind ? null : 0, onSheet: false }] : [];
     });
     return [...listed, ...extra].sort((a, b) => a.name.localeCompare(b.name));
-  }, [stock.data, draft.extra, materialById]);
+  }, [stock.data, draft.extra, materialById, blind]);
+  const hidden = hideSystem || blind;
 
   const shown = useMemo(() => {
     const terms = filter.toLowerCase().split(/\s+/).filter(Boolean);
@@ -117,17 +136,35 @@ export function StockCount() {
   const invalid = counted.filter((r) => Number.isNaN(countOf(r)));
   const differences = counted.filter((r) => {
     const c = countOf(r);
-    return c !== null && !Number.isNaN(c) && Math.abs(c - r.system) > 0.00005;
+    return c !== null && !Number.isNaN(c) && r.system !== null && Math.abs(c - r.system) > 0.00005;
   });
-  const up = differences.filter((r) => countOf(r)! > r.system).length;
+  const up = differences.filter((r) => countOf(r)! > r.system!).length;
   // Stock cannot really be below zero; such a figure comes from a booking mistake, and the count corrects it.
-  const belowZero = rows.filter((r) => r.system < 0);
+  const belowZero = rows.filter((r) => r.system !== null && r.system < 0);
+  // A full count needs every item on the sheet (system audit C5).
+  const blanks = rows.filter((r) => r.onSheet && countOf(r) === null);
 
   function chooseLocation(id: string) {
     setLocationId(id);
+    setStockOf('');
     setDraft(id ? loadDraft(id) : EMPTY);
     setFilter('');
     setConfirming(false);
+    setError(null);
+    setHeldBack([]);
+  }
+
+  function chooseStock(of: string) {
+    setStockOf(of);
+    setDraft(locationId ? loadDraft(locationId, of) : EMPTY);
+    setConfirming(false);
+    setError(null);
+    setHeldBack([]);
+  }
+
+  /** A full count's blank items, confirmed as not found: counted as 0. */
+  function countBlanksAsZero() {
+    setDraft((d) => ({ ...d, counts: { ...d.counts, ...Object.fromEntries(blanks.map((r) => [r.materialId, '0'])) } }));
     setError(null);
   }
 
@@ -147,7 +184,7 @@ export function StockCount() {
   function offersNote(r: Row): boolean {
     const c = countOf(r);
     if (c === null || Number.isNaN(c)) return false;
-    return hideSystem || Math.abs(c - r.system) > 0.00005;
+    return hidden || r.system === null || Math.abs(c - r.system) > 0.00005;
   }
 
   function setCount(materialId: string, value: string) {
@@ -170,6 +207,10 @@ export function StockCount() {
     setError(null);
     if (counted.length === 0) { setError({ message: 'Type the counted quantity of at least one item.', moved: false }); return; }
     if (invalid.length > 0) { setError({ message: `Check the count for ${invalid.map((r) => r.sku).join(', ')}: enter a number of 0 or more, and a whole number for an item counted in each, pair, box and the like.`, moved: false }); return; }
+    if (kind === 'FULL' && blanks.length > 0) {
+      setError({ message: `A full count needs every item on the sheet. ${blanks.length} ${blanks.length === 1 ? 'is' : 'are'} blank: ${blanks.slice(0, 5).map((r) => r.sku).join(', ')}${blanks.length > 5 ? ', …' : ''}. Count ${blanks.length === 1 ? 'it' : 'them'}, or confirm ${blanks.length === 1 ? 'it was' : 'they were'} not found.`, moved: false, blanks: blanks.map((r) => r.materialId) });
+      return;
+    }
     setConfirming(true);
   }
 
@@ -178,14 +219,18 @@ export function StockCount() {
     setError(null);
     const countBody = {
       locationId,
+      ...(stockOf ? { heldForProject: stockOf } : {}),
+      kind,
+      // When the sheet was opened: movements since are held back, blind or not.
+      openedAt: stock.data?.openedAt,
       note: draft.note.trim() || undefined,
       lines: counted.map((r) => {
         const lineNote = offersNote(r) ? draft.notes[r.materialId]?.trim() : '';
-        return { materialId: r.materialId, expectedQuantity: r.system, countedQuantity: countOf(r)!, ...(lineNote ? { note: lineNote } : {}) };
+        return { materialId: r.materialId, ...(r.system !== null ? { expectedQuantity: r.system } : {}), countedQuantity: countOf(r)!, ...(lineNote ? { note: lineNote } : {}) };
       }),
     };
     try {
-      const result = await api.post<{ adjusted: number; waitingForApproval?: number }>('/stock-counts', countBody, { idempotencyKey: idem.keyFor(countBody) });
+      const result = await api.post<CountResult>('/stock-counts', countBody, { idempotencyKey: idem.keyFor(countBody) });
       // Differences over the write-off limit wait for someone else's approval (ADR-028).
       const waiting = result.waitingForApproval ?? 0;
       toast.success(
@@ -193,7 +238,15 @@ export function StockCount() {
         waiting > 0 ? `${waiting} difference${waiting === 1 ? '' : 's'} over the write-off limit wait${waiting === 1 ? 's' : ''} for someone else to approve under Write-offs to approve.` : undefined,
       );
       idem.confirm();
-      setDraft(EMPTY);
+      // The lines whose stock moved stay on the draft, for counting again (system audit C7).
+      const back = (result.heldBack ?? []).map((h) => h.materialId);
+      setHeldBack((result.heldBack ?? []).map((h) => h.sku));
+      setDraft((d) => (back.length === 0 ? EMPTY : {
+        ...d,
+        counts: Object.fromEntries(Object.entries(d.counts).filter(([id]) => back.includes(id)).map(([id]) => [id, ''])),
+        notes: Object.fromEntries(Object.entries(d.notes).filter(([id]) => back.includes(id))),
+        extra: d.extra.filter((id) => back.includes(id)),
+      }));
       setConfirming(false);
       stock.reload();
       recent.reload();
@@ -241,11 +294,27 @@ export function StockCount() {
               </Select>
             </Field>
             {locationId && (
-              <div className="flex flex-wrap gap-2 md:justify-end">
-                <label className="inline-flex items-center gap-2 text-sm text-surface-700">
-                  <input type="checkbox" checked={hideSystem} onChange={(e) => setHideSystem(e.target.checked)} />
-                  Hide system quantities while counting
-                </label>
+              <div className="flex flex-wrap gap-2 md:justify-end items-end">
+                <Field label="Whose stock" htmlFor="count-stock">
+                  <Select id="count-stock" value={stockOf} onChange={(e) => chooseStock(e.target.value)}>
+                    <option value="">Stores stock</option>
+                    {(stock.data?.projects ?? (stockOf ? [stockOf] : [])).map((p) => <option key={p} value={p}>Held for {p}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Count" htmlFor="count-kind">
+                  <Select id="count-kind" value={kind} onChange={(e) => { setKind(e.target.value as CountKind); setError(null); }}>
+                    <option value="SPOT">Spot: the items I count</option>
+                    <option value="FULL">Full: everything here</option>
+                  </Select>
+                </Field>
+                {blind
+                  ? <span className="text-sm text-surface-600 pb-2">Blind count: system quantities are not shown</span>
+                  : (
+                    <label className="inline-flex items-center gap-2 text-sm text-surface-700 pb-2">
+                      <input type="checkbox" checked={hideSystem} onChange={(e) => setHideSystem(e.target.checked)} />
+                      Hide system quantities while counting
+                    </label>
+                  )}
                 <Button type="button" variant="secondary" leadingIcon={<Icon.Print size={14} />} onClick={() => window.print()}>Print count sheet</Button>
               </div>
             )}
@@ -270,7 +339,7 @@ export function StockCount() {
                   {recent.data.map((c) => (
                     <li key={c.id} className="py-1.5 flex flex-wrap gap-x-3">
                       <span className="text-meta whitespace-nowrap">{formatDateTime(c.at)}</span>
-                      <span>{c.counted} item{c.counted === 1 ? '' : 's'} counted, {c.adjusted === 0 ? 'no differences' : `${c.adjusted} adjusted`}{c.note ? ` (${c.note})` : ''}</span>
+                      <span>{c.kind === 'FULL' ? 'Full count' : 'Spot count'}{c.heldForProject ? ` of ${c.heldForProject}'s stock` : ''}: {c.counted} item{c.counted === 1 ? '' : 's'} counted, {c.adjusted === 0 ? 'no differences' : `${c.adjusted} adjusted`}{c.note ? ` (${c.note})` : ''}</span>
                       <span className="text-meta">by {c.countedByName}</span>
                     </li>
                   ))}
@@ -299,7 +368,7 @@ export function StockCount() {
                   </p>
                 </div>
 
-                {belowZero.length > 0 && !hideSystem && (
+                {belowZero.length > 0 && !hidden && (
                   <Alert tone="warning" title={`${belowZero.length} item${belowZero.length === 1 ? ' shows' : 's show'} below zero here`}>
                     Stock can never really be below zero, so these figures come from a booking mistake. Count these items carefully:
                     posting the count sets them to what is on the shelf.
@@ -313,29 +382,29 @@ export function StockCount() {
                         <th scope="col">Item</th>
                         <th scope="col">Code</th>
                         <th scope="col">Unit</th>
-                        <th scope="col" className={`text-right print:hidden ${hideSystem ? 'hidden' : ''}`}>System</th>
+                        <th scope="col" className={`text-right print:hidden ${hidden ? 'hidden' : ''}`}>System</th>
                         <th scope="col" className="text-right">Counted</th>
-                        <th scope="col" className={`text-right print:hidden ${hideSystem ? 'hidden' : ''}`}>Difference</th>
+                        <th scope="col" className={`text-right print:hidden ${hidden ? 'hidden' : ''}`}>Difference</th>
                         <th scope="col">Note</th>
                       </tr>
                     </thead>
                     <tbody>
                       {stock.loading && <tr><td colSpan={7} className="text-surface-500">Loading stock…</td></tr>}
                       {!stock.loading && shown.length === 0 && (
-                        <tr><td colSpan={7} className="text-surface-500">{rows.length === 0 ? 'Nothing is booked at this location. Add any items you find below.' : 'No item matches.'}</td></tr>
+                        <tr><td colSpan={7} className="text-surface-500">{rows.length === 0 ? (stockOf ? `Nothing is held for ${stockOf} here. Add any items you find below.` : 'Nothing is booked at this location. Add any items you find below.') : 'No item matches.'}</td></tr>
                       )}
                       {!stock.loading && shown.map((r) => {
                         const c = countOf(r);
-                        const diff = c === null || Number.isNaN(c) ? null : c - r.system;
+                        const diff = c === null || Number.isNaN(c) || r.system === null ? null : c - r.system;
                         return (
                           <tr key={r.materialId}>
                             <td>
                               {r.name}
-                              {r.system < 0 && !hideSystem && <span className="block text-xs text-danger-600 print:hidden">Below zero: cannot be right</span>}
+                              {r.system !== null && r.system < 0 && !hidden && <span className="block text-xs text-danger-600 print:hidden">Below zero: cannot be right</span>}
                             </td>
                             <td className="text-surface-600">{r.sku}</td>
                             <td className="text-surface-600">{r.unit}</td>
-                            <td className={`text-right tabular-nums print:hidden ${hideSystem ? 'hidden' : ''} ${r.system < 0 ? 'text-danger-600 font-medium' : ''}`}>{fmt(r.system)}</td>
+                            <td className={`text-right tabular-nums print:hidden ${hidden ? 'hidden' : ''} ${r.system !== null && r.system < 0 ? 'text-danger-600 font-medium' : ''}`}>{r.system === null ? '' : fmt(r.system)}</td>
                             <td className="text-right">
                               <span className="hidden print:inline">____________</span>
                               <Input
@@ -348,7 +417,7 @@ export function StockCount() {
                                 invalid={c !== null && Number.isNaN(c)}
                               />
                             </td>
-                            <td className={`text-right tabular-nums print:hidden ${hideSystem ? 'hidden' : ''} ${diff && diff < 0 ? 'text-danger-600' : diff && diff > 0 ? 'text-success-600' : 'text-surface-500'}`}>
+                            <td className={`text-right tabular-nums print:hidden ${hidden ? 'hidden' : ''} ${diff && diff < 0 ? 'text-danger-600' : diff && diff > 0 ? 'text-success-600' : 'text-surface-500'}`}>
                               {diff === null ? '' : Math.abs(diff) < 0.00005 ? '✓' : `${diff > 0 ? '+' : ''}${fmt(diff)}`}
                             </td>
                             <td>
@@ -382,9 +451,20 @@ export function StockCount() {
                 </div>
               </div>
 
+              {heldBack.length > 0 && (
+                <Alert tone="warning" title={`${heldBack.length} item${heldBack.length === 1 ? '' : 's'} moved while you were counting`}>
+                  The rest of the count posted. {heldBack.join(', ')} {heldBack.length === 1 ? 'was' : 'were'} held back: count {heldBack.length === 1 ? 'it' : 'them'} again and post.
+                </Alert>
+              )}
+
               {error && (
                 <Alert tone="danger" title={error.moved ? 'Stock moved while you were counting' : 'Cannot post the count'}>
                   <p>{error.message}</p>
+                  {error.blanks && error.blanks.length > 0 && (
+                    <Button type="button" size="sm" variant="secondary" className="mt-2" onClick={countBlanksAsZero}>
+                      Not found: count the {error.blanks.length} blank item{error.blanks.length === 1 ? '' : 's'} as 0
+                    </Button>
+                  )}
                   {error.moved && (
                     <Button type="button" size="sm" variant="secondary" className="mt-2" onClick={() => { setError(null); stock.reload(); }}>
                       Reload system quantities
@@ -395,9 +475,11 @@ export function StockCount() {
 
               {confirming && (
                 <Alert tone="warning" title="Post this count?">
-                  {differences.length === 0
-                    ? `All ${counted.length} counted items match the system, so nothing will change. The count is recorded.`
-                    : `${differences.length} adjustment${differences.length === 1 ? '' : 's'} will be posted at ${location?.name}: ${up} up, ${differences.length - up} down. Items left blank are not changed.`}
+                  {blind
+                    ? `${counted.length} item${counted.length === 1 ? '' : 's'} counted at ${location?.name}. Differences from the system are worked out when it posts.${kind === 'SPOT' ? ' Items left blank are not changed.' : ''}`
+                    : differences.length === 0
+                      ? `All ${counted.length} counted items match the system, so nothing will change. The count is recorded.`
+                      : `${differences.length} adjustment${differences.length === 1 ? '' : 's'} will be posted at ${location?.name}: ${up} up, ${differences.length - up} down.${kind === 'SPOT' ? ' Items left blank are not changed.' : ''}`}
                 </Alert>
               )}
 

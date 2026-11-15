@@ -7,6 +7,7 @@ import { Errors } from '../../shared/errors.js';
 import { fourDecimals } from './rfq.routes.js';
 import { storedQuantity } from '../../shared/decimal.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
+import { SupplierReturnService } from './supplier-return.service.js';
 import { listOrderedFor } from './ordered-for.js';
 import { COUNTER_RECEIPTS_OFF } from '../inventory/inventory.routes.js';
 import { EMAIL_PATTERN, SUPPLIER_CURRENCIES, cleanText } from './supplier-fields.js';
@@ -152,11 +153,20 @@ export const createGRSchema = z.object({
         locationId: z.uuid(),
         quantity: storedQuantity,
         purchaseOrderLineId: z.uuid().optional(),
+        // Why more than is still owed came, within the over-delivery allowance (system audit A8).
+        overDeliveryReason: z.string().trim().max(500).optional(),
       }),
     )
     .min(1),
   /** Post it into stock as well, in the same step. */
   post: z.boolean().optional(),
+});
+
+/** Goods sent back: how many, why, and the supplier's reference (system audit A6). */
+export const supplierReturnSchema = z.object({
+  quantity: storedQuantity,
+  reason: z.string().trim().min(1).max(500),
+  supplierReference: z.string().trim().max(120).optional(),
 });
 
 function actorId(req: unknown): string {
@@ -492,6 +502,23 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     if (saved?.purchaseOrderId) await requireReceiveOrder(req, saved.purchaseOrderId);
     const posted = await GoodsReceiptService.post(id, actorId(req));
     return reply.send(posted);
+  });
+
+  // Goods sent back to the supplier, against one line of a posted receipt
+  // (system audit A6): by whoever receives that order's kind.
+  app.post('/goods-receipts/:id/lines/:lineId/return', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ReceiveInventory);
+    const { id, lineId } = req.params as { id: string; lineId: string };
+    const parsed = supplierReturnSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'How many go back, and why', details: parsed.error.flatten() } });
+    }
+    const saved = await prisma.goodsReceipt.findUnique({ where: { id }, select: { purchaseOrderId: true } });
+    if (saved?.purchaseOrderId) await requireReceiveOrder(req, saved.purchaseOrderId);
+    return idempotentMutation(req, reply, 'POST /goods-receipts/:id/lines/:lineId/return', async (tx) => ({
+      statusCode: 201,
+      body: await SupplierReturnService.returnToSupplier({ goodsReceiptId: id, lineId, ...parsed.data, actorId: actorId(req) }, tx),
+    }));
   });
 }
 

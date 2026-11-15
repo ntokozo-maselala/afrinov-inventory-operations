@@ -56,7 +56,7 @@ describe('ProjectLeftovers page', () => {
     expect(within(pipe).queryByRole('option', { name: 'Tools' })).not.toBeInTheDocument();
     fireEvent.change(pipe, { target: { value: 'CONSUMABLES' } });
     fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 'p-1', category: 'CONSUMABLES' }] }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 'p-1', category: 'CONSUMABLES' }] }, { idempotencyKey: expect.any(String) }));
     // Said in the toast, and kept on the page with where they went.
     expect(await screen.findByRole('link', { name: 'Stores tab of Materials' })).toHaveAttribute('href', '/materials?section=STORES');
   });
@@ -77,7 +77,7 @@ describe('ProjectLeftovers page', () => {
     expect(within(bolt).getAllByRole('option').map((o) => o.textContent)).toEqual(['Leave for now', 'Move its stock (Consumables)']);
     fireEvent.change(bolt, { target: { value: 'KEEP' } });
     fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 's-1' }] }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 's-1' }] }, { idempotencyKey: expect.any(String) }));
     // Sent with no category: it keeps its own (Qodo, PR #149).
   });
 
@@ -93,7 +93,7 @@ describe('ProjectLeftovers page', () => {
     expect(within(bar).getAllByRole('option').map((o) => o.textContent)).toEqual(['Leave for now', "Move its stock (stays 1402's material)"]);
     fireEvent.change(bar, { target: { value: 'KEEP' } });
     fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 'x-1' }] }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 'x-1' }] }, { idempotencyKey: expect.any(String) }));
   });
 
   it('shows why a move was refused', async () => {
@@ -196,7 +196,7 @@ describe('ProjectLeftovers for items with no project', () => {
     expect(screen.queryByText(/is still open/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Stores category for OLD-PLATE'), { target: { value: 'CONSUMABLES' } });
     fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/materials/no-project/leftovers/move', { items: [{ materialId: 'p-1', category: 'CONSUMABLES' }] }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/materials/no-project/leftovers/move', { items: [{ materialId: 'p-1', category: 'CONSUMABLES' }] }, { idempotencyKey: expect.any(String) }));
   });
 
   it('says when none is in stock', async () => {

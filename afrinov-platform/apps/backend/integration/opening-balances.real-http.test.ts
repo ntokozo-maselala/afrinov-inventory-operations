@@ -107,12 +107,19 @@ describe('opening balance import against a real database', () => {
 
   it('refuses part of an item counted in each, or a unit not on the list, before writing anything', async () => {
     await expect(OpeningBalanceService.import({
-      plan: plan([material(`IT-OB-HALF-${run}`, balances(), { unitOfMeasure: 'each' })]), openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'test.xlsm',
-    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: `Opening item IT-OB-HALF-${run} is counted in whole numbers (each). Enter 1, 2, 3 …` });
+      plan: plan([
+        material(`IT-OB-HALF-${run}`, balances(), { unitOfMeasure: 'each' }),
+        material(`IT-OB-HALF2-${run}`, balances(), { unitOfMeasure: 'pair' }),
+      ]), openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'test.xlsm',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      // Every one at once, not the first only (system audit H6).
+      message: expect.stringMatching(new RegExp(`^2 items can't be imported on their unit: IT-OB-HALF-${run} is counted in each: .*; IT-OB-HALF2-${run} is counted in pair: `)),
+    });
     await expect(OpeningBalanceService.import({
       plan: plan([material(`IT-OB-LOTS-${run}`, [{ location: rackName, quantity: 1 }], { unitOfMeasure: 'LOTS' })]), openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'test.xlsm',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    expect(await prisma.material.count({ where: { sku: { in: [`IT-OB-HALF-${run}`, `IT-OB-LOTS-${run}`] } } })).toBe(0);
+    expect(await prisma.material.count({ where: { sku: { in: [`IT-OB-HALF-${run}`, `IT-OB-HALF2-${run}`, `IT-OB-LOTS-${run}`] } } })).toBe(0);
   });
 
   it('creates the items and locations and posts one dated receipt per item and location', async (ctx) => {

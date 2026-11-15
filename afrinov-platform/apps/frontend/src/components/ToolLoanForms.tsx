@@ -19,7 +19,7 @@ import { useIdempotencyKey } from '../lib/idempotency';
 import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, movedWay, overdueBlocks, suggestedDueOn, useLoanTerms } from '../lib/toolLoans';
 import { today } from '../lib/dates';
 import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
-import type { OpenLoan, ToolRow } from '../api/types';
+import { lendable, type OpenLoan, type ToolRepairRow, type ToolRow } from '../api/types';
 import type { HandoverSlip } from './HandoverPanel';
 
 /** What can still come back on a loan: what is out, less any lost one waiting for its write-off to be approved. */
@@ -66,6 +66,8 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
   const [dueOn, setDueOn] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
   const [serverWantsReason, setServerWantsReason] = useState(false);
+  // Retry-safe: a retry after a dropped connection replays the loan, never lends a second set (system audit B3).
+  const idem = useIdempotencyKey('tool-check-out');
   const [lines, setLines] = useState<Line[]>(() => [line(start?.locations[0] ? stockKey(start.materialId, start.locations[0].locationId) : '')]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,17 +75,18 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
   const { kindOf } = useUnits();
 
   // What is in store, per tool and location.
-  const available = useMemo(() => tools.flatMap((t) => t.locations.map((l) => ({ tool: t, ...l }))), [tools]);
+  // Less what is held for repair, which isn't lent (system audit B2).
+  const available = useMemo(() => tools.flatMap((t) => t.locations.map((l) => ({ tool: t, ...l, free: lendable(l) })).filter((a) => a.free > 0)), [tools]);
   const byKey = useMemo(() => new Map(available.map((a) => [stockKey(a.tool.materialId, a.locationId), a])), [available]);
   const options = useMemo<SearchOption[]>(() => available.map((a) => ({
     value: stockKey(a.tool.materialId, a.locationId),
     label: `${a.tool.name} (${a.tool.sku}${a.tool.serialNumber ? ` · S/N ${a.tool.serialNumber}` : ''}) · ${locationName(a.locationId, a.locationName)}`,
-    detail: `${formatNumber(Number(a.quantity))} in store`,
+    detail: Number(a.heldForRepair ?? 0) > 0 ? `${formatNumber(a.free)} to lend · ${formatNumber(Number(a.heldForRepair))} held for repair` : `${formatNumber(Number(a.quantity))} in store`,
   })), [available, locationName]);
 
   const asked = new Map<string, number>();
   for (const l of lines) if (l.stockKey && readQuantity(l.quantity) > 0) asked.set(l.stockKey, (asked.get(l.stockKey) ?? 0) + readQuantity(l.quantity));
-  const over = new Set([...asked].filter(([k, q]) => q > Number(byKey.get(k)?.quantity ?? 0)).map(([k]) => k));
+  const over = new Set([...asked].filter(([k, q]) => q > (byKey.get(k)?.free ?? 0)).map(([k]) => k));
   const update = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
   // The due date: suggested from the loan period and the project, unless chosen.
@@ -123,7 +126,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
     if (needsReason && !overrideReason.trim()) { setError(`Say why tools are lent to ${recipient?.name ?? 'this person'} while they have an overdue tool.`); return; }
     setBusy(true);
     try {
-      const posted = await api.post<{ slipId?: string }>('/tools/check-out', {
+      const body = {
         recipientId,
         projectNumber: projectNumber || undefined,
         note: note.trim() || undefined,
@@ -133,7 +136,9 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
           const a = byKey.get(l.stockKey)!;
           return { materialId: a.tool.materialId, locationId: a.locationId, quantity: readQuantity(l.quantity) };
         }),
-      });
+      };
+      const posted = await api.post<{ slipId?: string }>('/tools/check-out', body, { idempotencyKey: idem.keyFor(body) });
+      idem.confirm();
       const who = recipient?.name ?? 'recipient';
       onDone(`Checked out ${filled.length} tool${filled.length === 1 ? '' : 's'} to ${who}, due back ${formatDay(due)}`, posted?.slipId ? {
         id: posted.slipId,
@@ -148,6 +153,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
         }),
       } : undefined);
     } catch (err) {
+      idem.resolve(err);
       const apiErr = err as ApiError;
       // The list on screen was older than the server's: it found an overdue tool this form did not know of.
       if (apiErr.details?.['overrideReasonRequired'] === true) setServerWantsReason(true);
@@ -187,7 +193,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
           const tooMany = over.has(l.stockKey);
           return (
             <div key={l.key} className="grid grid-cols-1 sm:grid-cols-[1fr_6rem_auto] gap-2 items-start">
-              <Field label={`Tool ${i + 1}`} htmlFor={`loan-tool-${l.key}`} help={a ? `In store at ${locationName(a.locationId, a.locationName)}: ${formatNumber(Number(a.quantity))}` : undefined}>
+              <Field label={`Tool ${i + 1}`} htmlFor={`loan-tool-${l.key}`} help={a ? `To lend at ${locationName(a.locationId, a.locationName)}: ${formatNumber(a.free)}` : undefined}>
                 <SearchSelect
                   id={`loan-tool-${l.key}`} value={l.stockKey} onChange={(v) => update(l.key, { stockKey: v, quantity: l.quantity || '1' })}
                   options={options} placeholder="Search by name, code, serial number or location" noMatchText="No tool in store matches"
@@ -251,6 +257,8 @@ export function CheckInForm({ tool, onCancel, onDone }: {
   const canWriteOff = usePermissions().hasPermission('inventory:adjust');
   const { kindOf } = useUnits();
   const [busy, setBusy] = useState(false);
+  // Retry-safe, as check-out is (system audit B3).
+  const checkInKey = useIdempotencyKey('tool-check-in');
   const [error, setError] = useState<string | null>(null);
   const update = (loanId: string, patch: Partial<Back>) => setBack((b) => ({ ...b, [loanId]: { ...b[loanId]!, ...patch } }));
   // A loan whose location has closed since goes back somewhere open (system audit A2).
@@ -276,12 +284,14 @@ export function CheckInForm({ tool, onCancel, onDone }: {
     if (homeless) { setError(`${homeless.locationName} has closed: choose where it goes back.`); return; }
     setBusy(true);
     try {
-      const result = await api.post<{ heldLoanIds?: string[] }>('/tools/check-in', {
+      const body = {
         lines: lines.map((l) => {
           const b = back[l.loanId]!;
           return { loanId: l.loanId, quantity: readQuantity(b.quantity), condition: b.condition, note: b.note.trim() || undefined, ...(needsPlace(l) ? { locationId: b.locationId } : {}) };
         }),
-      });
+      };
+      const result = await api.post<{ heldLoanIds?: string[] }>('/tools/check-in', body, { idempotencyKey: checkInKey.keyFor(body) });
+      checkInKey.confirm();
       // A lost tool over the write-off limit is written off once someone else
       // approves it (ADR-028): it stays on loan, so it is not counted as checked in.
       const held = new Set(result?.heldLoanIds ?? []);
@@ -293,6 +303,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
         : checkedIn === 0 ? `Nothing checked in yet: ${waits}`
           : `Checked in ${formatNumber(checkedIn)} × ${tool.name}. Separately, ${waits}`);
     } catch (err) {
+      checkInKey.resolve(err);
       setError((err as ApiError).message);
     } finally {
       setBusy(false);
@@ -441,6 +452,57 @@ export function ChangeDueDateForm({ tool, loan, onCancel, onDone }: {
       <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
         <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>
         <Button variant="primary" type="submit" loading={busy} disabled={atLimit}>Change due date</Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Dealing with a tool held for repair (system audit B2): repaired, so it can be
+ * lent again, or written off as damaged. Over the write-off limit, the
+ * write-off waits for someone else to approve it, and the tool stays held.
+ */
+export function RepairForm({ tool, repair, mode, onCancel, onDone }: {
+  tool: ToolRow; repair: ToolRepairRow; mode: 'repaired' | 'write-off';
+  onCancel: () => void; onDone: (message: string) => void;
+}) {
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const idem = useIdempotencyKey(`tool-repair-${mode}`);
+  const writeOff = mode === 'write-off';
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (writeOff && !note.trim()) { setError('Say why it can\u2019t be repaired.'); return; }
+    setBusy(true);
+    try {
+      const body = { note: note.trim() || undefined };
+      const result = await api.post<{ status?: 'POSTED' | 'PENDING_APPROVAL' }>(`/tools/repairs/${encodeURIComponent(repair.id)}/${mode}`, body, { idempotencyKey: idem.keyFor(body) });
+      idem.confirm();
+      const what = `${formatNumber(Number(repair.quantity))} × ${tool.name}`;
+      onDone(!writeOff ? `${what} repaired: it can be lent again`
+        : result?.status === 'PENDING_APPROVAL' ? `Writing off ${what} waits for someone else to approve it under Write-offs to approve; until then it stays held`
+          : `${what} written off as damaged`);
+    } catch (err) {
+      idem.resolve(err);
+      setError((err as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <form onSubmit={submit} className="space-y-4" noValidate>
+      <p className="text-sm text-surface-600">
+        {formatNumber(Number(repair.quantity))} × {tool.name} at {repair.locationName}, checked in damaged {formatDate(repair.reportedAt)} by {repair.reportedBy}{repair.note ? `: ${repair.note}` : '.'}
+      </p>
+      <Field label={writeOff ? 'Why it can\u2019t be repaired' : 'What was done (optional)'} htmlFor="repair-note" required={writeOff}>
+        <Textarea id="repair-note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} placeholder={writeOff ? 'e.g. Motor burnt out' : 'e.g. New chuck fitted'} invalid={writeOff && !!error && !note.trim()} />
+      </Field>
+      {error && <Alert tone="danger" title={writeOff ? 'Not written off' : 'Not saved'}>{error}</Alert>}
+      <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
+        <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>
+        <Button variant={writeOff ? 'danger' : 'primary'} type="submit" loading={busy}>{writeOff ? 'Write off' : 'Mark repaired'}</Button>
       </div>
     </form>
   );

@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { AdjustmentReasonCode, InventoryTransactionType, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { heldForRepair, heldAt, TOOL_REPAIR_REFERENCE } from '../../shared/inventory/tool-repairs.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
@@ -32,6 +33,15 @@ import {
   addDays, currentDueOn, dayOf, daysBetween, defaultDueOn, dueOnAt, dueOnBefore, dueOnProblem, loanDatesOf, loanState, overdueBlocksCheckout,
   type LoanState, type LoanTerms,
 } from './tool-loan-terms.js';
+
+/**
+ * Runs in the caller's transaction when given one (a keyed request's, so the
+ * idempotency key is stored with the movement: system audit B3), else in its own.
+ */
+function inTransaction<T>(outer: Prisma.TransactionClient | undefined, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return outer ? work(outer) : prisma.$transaction(work);
+}
+
 
 type Decimal = Prisma.Decimal;
 type Tx = Prisma.TransactionClient;
@@ -172,13 +182,17 @@ export interface ToolRow {
   name: string;
   serialNumber: string | null;
   unitOfMeasure: string;
-  /** On the shelf, across every location. */
+  /** On the shelf, across every location, held for repair included. */
   inStore: string;
+  /** Of what is on the shelf, held for repair: not lent (system audit B2). */
+  heldForRepair: string;
   onLoan: string;
   /** In store + on loan. */
   owned: string;
-  locations: Array<{ locationId: string; locationName: string; quantity: string }>;
+  locations: Array<{ locationId: string; locationName: string; quantity: string; heldForRepair: string }>;
   loans: OpenLoan[];
+  /** Damaged check-ins waiting to be repaired or written off. */
+  repairs: Array<{ id: string; locationId: string; locationName: string; quantity: string; note: string | null; reportedAt: string; reportedBy: string; writeOffWaiting: boolean }>;
 }
 
 /** An overdue loan named when lending more to the same recipient. */
@@ -253,9 +267,20 @@ export const ToolLoanService = {
         orderBy: { postedAt: 'asc' },
       }),
     ]);
-    const [returned, terms, lostWaiting] = await Promise.all([
+    const [returned, terms, lostWaiting, held, repairs] = await Promise.all([
       returnedByLoan(prisma, loans.map((l) => l.id)), loanTerms(), pendingLostByLoan(loans.map((l) => l.id), prisma),
+      heldForRepair(prisma, ids),
+      prisma.toolRepair.findMany({
+        where: { materialId: { in: ids }, resolvedAt: null },
+        include: { location: { select: { name: true } }, reportedBy: { select: { name: true } } },
+        orderBy: [{ reportedAt: 'asc' }, { id: 'asc' }],
+      }),
     ]);
+    // A write-off of a held tool waiting for approval (ADR-028), by repair.
+    const writeOffWaiting = new Set((await prisma.adjustmentRequest.findMany({
+      where: { status: 'PENDING', referenceType: TOOL_REPAIR_REFERENCE, referenceId: { in: repairs.map((r) => r.id) } },
+      select: { referenceId: true },
+    })).map((r) => r.referenceId!));
     const today = dayOf(now);
     // Each slip's receipt, from all its lines: a slip may lend several tools.
     const slipLines = new Map<string, Array<{ id: string; quantity: string; reversed: boolean }>>();
@@ -309,6 +334,9 @@ export const ToolLoanService = {
       const inStore = mine.reduce((a, b) => a.plus(b.quantity), toDecimal(0));
       const loansOut = open.get(t.id) ?? [];
       const onLoan = loansOut.reduce((a, l) => a.plus(l.out), toDecimal(0));
+      // Held for repair, no more than is on the shelf there.
+      const heldHere = (locationId: string, onShelf: Decimal) => Prisma.Decimal.min(held.get(`${t.id}|${locationId}`) ?? toDecimal(0), onShelf);
+      const heldTotal = mine.reduce((a, b) => a.plus(heldHere(b.locationId, b.quantity)), toDecimal(0));
       return {
         materialId: t.id,
         sku: t.sku,
@@ -316,12 +344,17 @@ export const ToolLoanService = {
         serialNumber: t.serialNumber,
         unitOfMeasure: t.unitOfMeasure,
         inStore: inStore.toString(),
+        heldForRepair: heldTotal.toString(),
         onLoan: onLoan.toString(),
         owned: inStore.plus(onLoan).toString(),
         locations: mine
-          .map((b) => ({ locationId: b.locationId, locationName: b.location.name, quantity: b.quantity.toString() }))
+          .map((b) => ({ locationId: b.locationId, locationName: b.location.name, quantity: b.quantity.toString(), heldForRepair: heldHere(b.locationId, b.quantity).toString() }))
           .sort((a, b) => a.locationName.localeCompare(b.locationName)),
         loans: loansOut,
+        repairs: repairs.filter((r) => r.materialId === t.id).map((r) => ({
+          id: r.id, locationId: r.locationId, locationName: r.location.name, quantity: r.quantity.toString(), note: r.note,
+          reportedAt: r.reportedAt.toISOString(), reportedBy: r.reportedBy.name, writeOffWaiting: writeOffWaiting.has(r.id),
+        })),
       };
     });
   },
@@ -331,7 +364,7 @@ export const ToolLoanService = {
    * on one date. Someone who already has an overdue tool is lent more only
    * with a reason, or not at all when inventory.toolOverdueCheckout blocks it.
    */
-  async checkOut(input: CheckOutInput): Promise<{ slipId: string; loanIds: string[]; dueOn: string }> {
+  async checkOut(input: CheckOutInput, outer?: Prisma.TransactionClient): Promise<{ slipId: string; loanIds: string[]; dueOn: string }> {
     if (!input.recipientId) throw Errors.validation('Choose who the tools are checked out to');
     if (input.lines.length === 0) throw Errors.validation('Add at least one tool');
     const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, qty: toDecimal(l.quantity) }));
@@ -345,7 +378,7 @@ export const ToolLoanService = {
       else totals.set(key, { ...l });
     }
 
-    return prisma.$transaction(async (tx) => {
+    return inTransaction(outer, async (tx) => {
       await lock(tx, totals.keys());
       // Tools are Stores items, so their stock is the store's own.
       await lockInventoryBalances([...totals.values()].map((t) => storesStock(t.materialId, t.locationId)), tx);
@@ -359,10 +392,15 @@ export const ToolLoanService = {
         if (material.category !== 'TOOLS') throw Errors.validation(`${material.sku} is not a tool; issue it on Issue stock instead`);
         await checkLocationActive(t.locationId, tx);
         const inStore = await getCurrentBalance(storesStock(t.materialId, t.locationId), tx);
-        if (inStore.lt(t.qty)) {
+        // A tool held for repair isn't lent (system audit B2).
+        const held = await heldAt(tx, t.materialId, t.locationId);
+        const free = Prisma.Decimal.max(inStore.minus(held), 0);
+        if (free.lt(t.qty)) {
           throw Errors.insufficientBalance(
-            `Cannot check out ${t.qty.toString()} × ${material.sku}: only ${inStore.toString()} in store there.`,
-            { materialId: t.materialId, locationId: t.locationId, requested: t.qty.toString(), available: inStore.toString() },
+            held.gt(0)
+              ? `Cannot check out ${t.qty.toString()} × ${material.sku}: only ${free.toString()} can be lent there; ${held.toString()} ${held.eq(1) ? 'is' : 'are'} held for repair.`
+              : `Cannot check out ${t.qty.toString()} × ${material.sku}: only ${inStore.toString()} in store there.`,
+            { materialId: t.materialId, locationId: t.locationId, requested: t.qty.toString(), available: free.toString(), heldForRepair: held.toString() },
           );
         }
       }
@@ -445,13 +483,13 @@ export const ToolLoanService = {
    * and its write-off together (writeOffLost). Its request is in
    * writeOffRequestIds, and its loan in heldLoanIds; one rejected leaves the tool on loan.
    */
-  async checkIn(input: CheckInInput): Promise<{ returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[]; heldLoanIds: string[] }> {
+  async checkIn(input: CheckInInput, outer?: Prisma.TransactionClient): Promise<{ returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[]; heldLoanIds: string[] }> {
     if (input.lines.length === 0) throw Errors.validation('Add at least one tool to check in');
     const lines = input.lines.map((l) => ({ ...l, qty: toDecimal(l.quantity), note: l.note?.trim() || null }));
     if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Check-in quantity must be positive');
     if (lines.some((l) => l.condition === 'LOST' && !l.note)) throw Errors.validation('Say what happened to a lost tool');
 
-    return prisma.$transaction(async (tx) => {
+    return inTransaction(outer, async (tx) => {
       const loanIds = [...new Set(lines.map((l) => l.loanId))];
       const loans = await tx.inventoryTransaction.findMany({
         where: { id: { in: loanIds } },
@@ -572,6 +610,10 @@ export const ToolLoanService = {
           },
         });
         returnIds.push(back.id);
+        // Back on the shelf, but held for repair: not lent until repaired or written off (system audit B2).
+        if (l.condition === 'DAMAGED') {
+          await tx.toolRepair.create({ data: { materialId: loan.materialId, locationId: backTo(l), quantity: l.qty, returnId: back.id, note: l.note, reportedById: input.actorId, reportedAt: postedAt } });
+        }
       }
       for (const key of new Set(stockKeys.map((k) => `${k.materialId}|${k.locationId}`))) {
         const [materialId, locationId] = key.split('|') as [string, string];

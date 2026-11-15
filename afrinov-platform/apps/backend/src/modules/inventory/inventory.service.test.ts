@@ -210,6 +210,8 @@ const fakeTx = {
       return { id: u.id, name: u.name, active: u.active };
     },
   },
+  // No tool is held for repair here (system audit B2).
+  toolRepair: { groupBy: async () => [], findMany: async () => [] },
   auditLogEntry: {
     create: async ({ data }: { data: { actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown } }) => {
       auditLog.push(data);
@@ -226,6 +228,15 @@ const fakeTx = {
     findUnique: async ({ where }: { where: { key: string } }) => mockSettings.get(where.key) ?? null,
     findMany: async ({ where }: { where: { key: { in: string[] } } }) =>
       where.key.in.filter((key) => mockSettings.has(key)).map((key) => ({ key, value: mockSettings.get(key)!.value })),
+  },
+  // Each posted line records its movement (system audit A6, A7).
+  goodsReceiptLine: {
+    findFirst: async () => null,
+    findMany: async () => [],
+    update: async ({ where, data }: { where: { id: string }; data: { transactionId: string } }) => {
+      for (const gr of goodsReceipts.values()) for (const l of gr.lines as Array<{ id?: string; transactionId?: string }>) if (l.id === where.id) l.transactionId = data.transactionId;
+      return data;
+    },
   },
   goodsReceipt: {
     findUnique: async ({ where, include }: { where: { id: string }; include?: { lines?: boolean } }) => {
@@ -1102,7 +1113,8 @@ describe('InventoryService — ADR-002 invariants', () => {
       }
     });
 
-    it('refuses to reverse stock received against a purchase order', async () => {
+    // System audit A7: a receipt line against an order is reversed with its order, once it can be told which line it was.
+    it('refuses to reverse stock received against a purchase order when its line cannot be told, or the whole order was received at once', async () => {
       goodsReceipts.set('gr-1', { id: 'gr-1', status: 'POSTED', purchaseOrderId: 'po-1', lines: [] });
       trxRows.push({
         id: 'gr-trx', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(5),
@@ -1110,7 +1122,12 @@ describe('InventoryService — ADR-002 invariants', () => {
       });
       await expect(
         InventoryService.reverse({ transactionId: 'gr-trx', reason: 'Wrong supplier', actorId: 'u' }),
-      ).rejects.toThrow(/purchase order/);
+      ).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/Which line of .* this was can't be told/) });
+      trxRows.push({
+        id: 'po-trx', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(5),
+        actorId: 'u', postedAt: new Date(), referenceType: 'PurchaseOrder', referenceId: 'po-1',
+      });
+      await expect(InventoryService.reverse({ transactionId: 'po-trx', reason: 'Wrong supplier', actorId: 'u' })).rejects.toThrow(/purchase order/);
     });
 
     // Receiving a whole order at once books against the order itself; reversing

@@ -88,9 +88,24 @@ export type LoanState = 'ON_LOAN' | 'DUE_SOON' | 'OVERDUE' | 'NEEDS_DECISION';
 export interface ToolRow {
   materialId: string; sku: string; name: string; serialNumber: string | null; unitOfMeasure: string;
   inStore: string; onLoan: string; owned: string;
-  locations: Array<{ locationId: string; locationName: string; quantity: string }>;
+  /** Of what is on the shelf, held for repair: not lent (system audit B2). */
+  heldForRepair?: string;
+  locations: Array<{ locationId: string; locationName: string; quantity: string; heldForRepair?: string }>;
   loans: OpenLoan[];
+  /** Damaged check-ins waiting to be repaired or written off. */
+  repairs?: ToolRepairRow[];
 }
+
+/** A tool checked in damaged, held for repair (system audit B2). */
+export interface ToolRepairRow {
+  id: string; locationId: string; locationName: string; quantity: string; note: string | null;
+  reportedAt: string; reportedBy: string;
+  /** A write-off of it waits for someone else's approval. */
+  writeOffWaiting: boolean;
+}
+
+/** What can be lent from a tool's location: on the shelf, less what is held for repair. */
+export const lendable = (l: { quantity: string; heldForRepair?: string }) => Math.max(Number(l.quantity) - Number(l.heldForRepair ?? 0), 0);
 
 /** One item at one location (GET /reports/current-stock). */
 export interface CurrentStockRow {
@@ -163,8 +178,12 @@ export interface MovementRow {
   /** A RETURN: whether used up or broken booked with it still counts; it is reversed only once they are withdrawn. */
   bookedMarksLive?: boolean | null;
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
-  /** A receipt against a purchase order: it cannot be reversed from the movement, only on the order. */
+  /** A whole order received at once (retired, system audit D3): line by line unknown, so not reversed. */
   fromPurchaseOrder?: boolean;
+  /** A receipt against an order: reversing it, or sending goods back, takes it off the order too (system audit A6, A7). */
+  againstOrder?: boolean;
+  /** The goods receipt and its line a RECEIPT posted, and how much of the line went back to the supplier and can still go. */
+  receiptId?: string | null; receiptLineId?: string | null; returnedToSupplier?: string | null; returnableToSupplier?: string | null;
   /** An ADJUSTMENT over the write-off limit: not reversed directly, but put right by one the other way, for approval. */
   reversalNeedsApproval?: boolean;
   /** A transfer's other leg: where the stock went to (or came from). */
@@ -265,6 +284,8 @@ export interface CountRecord {
   id: string; cursor: string; at: string;
   locationId: string | null; locationName: string; countedByName: string;
   counted: number; adjusted: number; note: string | null;
+  /** Full or Spot (system audit C5), and whose stock: a project's, or null for Stores (C6). Older counts may lack them. */
+  kind?: 'FULL' | 'SPOT'; heldForProject?: string | null;
   differences: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; quantity: string }>;
   /** Every item counted, matched or not, with what the system had. Empty for counts posted before sheets were kept. */
   lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string; note?: string | null }>;

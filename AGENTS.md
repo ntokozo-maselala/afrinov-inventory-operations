@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1342, frontend 1559)
+npm test               # both workspaces (backend 1350, frontend 1570)
 npm run build          # both workspaces
 ```
 
@@ -235,6 +235,17 @@ Use these forms; the older spellings still work but are deprecated or removed.
   section. Sign-ins go on `sign_in_events` (`recordSignIn`), kept 12 months.
   `POST /purchase-orders/:id/receive` and `POST /stock-items` are retired: in
   integration tests receive with `receiveOutstanding` (`integration/helpers.ts`).
+- **Putting stock right (ADR-040).** Goods going back to a supplier are a
+  `RETURN_TO_SUPPLIER` against a receipt line, never a loss; a receipt line
+  against an order is reversed with its order. Both lower the order line's
+  received quantity through `lowerReceived` (`src/shared/inventory/receipt-corrections.ts`),
+  after holding the order and its line (`lockOrderLine`) and before the stock,
+  as receiving does. A posted receipt line keeps its movement in
+  `transaction_id`. A tool checked in damaged is held for repair
+  (`tool_repairs`): a new path that lends or moves a tool reads `heldAt`, and a
+  transfer moves the hold (`moveHeld`). Counts are of one stock (Stores or a
+  project's), FULL or SPOT, from a sheet with an `openedAt`; a moved line is
+  held back, not the whole count.
 - **The seed loads demo data only with `SEED_DEMO_DATA=true`, never in
   production** (`src/db/seed-plan.ts`). Reference data (permissions, roles,
   settings, the admin) goes before the `if (!plan.demo)` return in

@@ -72,21 +72,27 @@ describe('stock counts over real HTTP', () => {
     expect(byItem).toEqual({ [items.disc]: ['20', '17'], [items.gloves]: ['6', '6'], [items.found]: ['0', '2.5'] });
   });
 
-  it('refuses the whole count when stock moved while counting, and posts nothing', async () => {
+  // System audit C7: only the line that moved is held back; the rest posts.
+  it('holds back the line whose stock moved while counting, and posts the rest', async () => {
     // The sheet showed 17 discs, but 1 was issued at the counter meanwhile.
     const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT counter ${run}`, type: 'WORKER' });
     expect((await api('POST', '/inventory-issues', { recipientId: recipient.body.id, lines: [{ materialId: items.disc, locationId: rackId, quantity: 1 }] })).status).toBe(201);
 
-    const res = await api<{ error: { code: string; message: string } }>('POST', '/stock-counts', {
+    const res = await api<{ counted: number; heldBack: Array<{ materialId: string; expected: string; current: string }> }>('POST', '/stock-counts', {
       locationId: rackId,
       lines: [
-        { materialId: items.tape, expectedQuantity: 4, countedQuantity: 3 },
+        { materialId: items.tape, expectedQuantity: 4, countedQuantity: 4 },
         { materialId: items.disc, expectedQuantity: 17, countedQuantity: 15 },
       ],
     });
-    expect(res.status).toBe(409);
-    expect(res.body.error.message).toMatch(new RegExp(`IT-CNT-disc-${run}: 17 → 16`));
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ counted: 1, heldBack: [{ materialId: items.disc, expected: '17', current: '16' }] });
     expect(await onHand(items.tape)).toBe('4');
+    expect(await onHand(items.disc)).toBe('16');
+    // Every line moved: nothing to post.
+    const all = await api<{ error: { code: string; message: string } }>('POST', '/stock-counts', { locationId: rackId, lines: [{ materialId: items.disc, expectedQuantity: 17, countedQuantity: 15 }] });
+    expect(all.status).toBe(409);
+    expect(all.body.error.message).toMatch(new RegExp(`IT-CNT-disc-${run}: 17 → 16`));
     expect(await onHand(items.disc)).toBe('16');
   });
 

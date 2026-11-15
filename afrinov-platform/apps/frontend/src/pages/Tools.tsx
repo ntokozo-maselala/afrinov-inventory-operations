@@ -16,10 +16,10 @@ import { Drawer } from '../components/Modal';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
-import { ChangeDueDateForm, CheckInForm, CheckOutForm, LoanDue } from '../components/ToolLoanForms';
+import { ChangeDueDateForm, CheckInForm, CheckOutForm, LoanDue, RepairForm } from '../components/ToolLoanForms';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDate, formatNumber } from '../lib/format';
-import type { OpenLoan, ToolRow } from '../api/types';
+import { lendable, type OpenLoan, type ToolRepairRow, type ToolRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { Badge } from '../components/Badge';
 import { HandoverPanel, type HandoverSlip } from '../components/HandoverPanel';
@@ -33,7 +33,11 @@ const VIEWS: Array<{ value: string; label: string; loans?: (l: OpenLoan) => bool
   { value: 'overdue', label: 'Overdue', loans: (l) => l.overdue },
   { value: 'decide', label: 'Needs a decision', loans: (l) => l.state === 'NEEDS_DECISION' },
   { value: 'in', label: 'In store' },
+  { value: 'repair', label: 'Held for repair' },
 ];
+
+/** What can be lent of a tool, across its locations. */
+const canLendAny = (t: ToolRow) => t.locations.some((l) => lendable(l) > 0);
 
 const sumOut = (loans: OpenLoan[]) => loans.reduce((n, l) => n + Number(l.out), 0);
 
@@ -42,6 +46,9 @@ export function Tools() {
   const { hasPermission } = usePermissions();
   const canLend = hasPermission('tools:lend');
   const canChangeDue = hasPermission('tools:extend');
+  // A damaged tool is repaired or written off by the store (system audit B2).
+  const canRepair = hasPermission('inventory:adjust');
+  const [repairing, setRepairing] = useState<{ tool: ToolRow; repair: ToolRepairRow; mode: 'repaired' | 'write-off' } | null>(null);
   const toast = useToast();
   // The Dashboard and Recipients link here with ?view=overdue or ?q=<name>.
   const [params] = useSearchParams();
@@ -62,6 +69,7 @@ export function Tools() {
       if (view === 'out' && !(Number(t.onLoan) > 0)) return false;
       if (loanFilter && !t.loans.some(loanFilter)) return false;
       if (view === 'in' && !(Number(t.inStore) > 0)) return false;
+      if (view === 'repair' && !(t.repairs?.length)) return false;
       const hay = `${t.name} ${t.sku} ${t.serialNumber ?? ''} ${t.loans.map((l) => `${l.recipientName ?? ''} ${l.projectNumber ?? ''}`).join(' ')} ${t.locations.map((l) => l.locationName).join(' ')}`.toLowerCase();
       return terms.every((term) => hay.includes(term));
     });
@@ -103,6 +111,20 @@ export function Tools() {
         <div>
           <span className="font-mono">{formatNumber(Number(t.inStore))}</span>
           {t.locations.length > 0 && <div className="text-xs text-surface-500">{t.locations.map((l) => (t.locations.length > 1 ? `${l.locationName} (${formatNumber(Number(l.quantity))})` : l.locationName)).join(', ')}</div>}
+          {(t.repairs ?? []).map((r) => (
+            <div key={r.id} className="mt-1 text-xs">
+              <Badge tone="warning" title={r.note ?? undefined}>{formatNumber(Number(r.quantity))} held for repair</Badge>
+              <span className="text-surface-500"> · {r.locationName}{r.note ? ` · ${r.note}` : ''}</span>
+              {r.writeOffWaiting
+                ? <div className="text-surface-500">Write-off waiting for approval</div>
+                : canRepair && (
+                  <div className="flex gap-1 mt-0.5">
+                    <Button size="sm" variant="ghost" onClick={() => setRepairing({ tool: t, repair: r, mode: 'repaired' })} aria-label={`Mark ${t.name} at ${r.locationName} repaired`}>Repaired</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRepairing({ tool: t, repair: r, mode: 'write-off' })} aria-label={`Write off ${t.name} at ${r.locationName}`}>Write off</Button>
+                  </div>
+                )}
+            </div>
+          ))}
         </div>
       ),
       width: '11rem',
@@ -139,7 +161,7 @@ export function Tools() {
       width: '12rem',
       render: (t: ToolRow) => (
         <div className="flex justify-end gap-2">
-          {Number(t.inStore) > 0 && <Button size="sm" variant="secondary" onClick={() => setCheckingOut({ start: t })}>Check out</Button>}
+          {canLendAny(t) && <Button size="sm" variant="secondary" onClick={() => setCheckingOut({ start: t })}>Check out</Button>}
           {t.loans.length > 0 && <Button size="sm" variant="secondary" onClick={() => setCheckingIn(t)}>Check in</Button>}
         </div>
       ),
@@ -156,7 +178,7 @@ export function Tools() {
         title="Tools"
         description="Tools are checked out, not used up: check one out to the person taking it until a due date, and check it back in when it returns. New tools come in through Receive stock."
         actions={canLend && (
-          <Button variant="primary" size="sm" leadingIcon={<Icon.Wrench size={14} />} onClick={() => setCheckingOut({})} disabled={!all.some((t) => Number(t.inStore) > 0)}>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Wrench size={14} />} onClick={() => setCheckingOut({})} disabled={!all.some(canLendAny)}>
             Check out tools
           </Button>
         )}
@@ -209,6 +231,11 @@ export function Tools() {
       {checkingIn && (
         <Drawer open onClose={() => setCheckingIn(null)} title={`Check in: ${checkingIn.name}`} description="How many came back from each check-out, and in what condition. A lost tool is written off." width="md">
           <CheckInForm tool={checkingIn} onCancel={() => setCheckingIn(null)} onDone={done} />
+        </Drawer>
+      )}
+      {repairing && (
+        <Drawer open onClose={() => setRepairing(null)} title={repairing.mode === 'repaired' ? `Repaired: ${repairing.tool.name}` : `Write off: ${repairing.tool.name}`} description={repairing.mode === 'repaired' ? 'It can be lent again.' : 'Written off as damaged. Over the write-off limit, someone else approves it first.'} width="md">
+          <RepairForm tool={repairing.tool} repair={repairing.repair} mode={repairing.mode} onCancel={() => setRepairing(null)} onDone={(m) => { setRepairing(null); toast.success(m); tools.reload(); }} />
         </Drawer>
       )}
       {changingDue && (

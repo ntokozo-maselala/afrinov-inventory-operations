@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from './Button';
-import { Field, Select, Textarea } from './Field';
+import { Field, Input, Select, Textarea } from './Field';
 import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
@@ -105,6 +105,10 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
   // first. Once they are, the booked quantities stay for the record but no
   // longer hold the reversal back (Qodo, PR #144).
   const returnWithMarks = transaction.type === 'RETURN' && !transaction.reversesId && !!transaction.bookedMarksLive;
+  // Goods sent back to the supplier against this receipt line (system audit A6): by the store, while some is left on the line.
+  const canReturnToSupplier = hasPermission('inventory:receive')
+    && transaction.type === 'RECEIPT' && !!transaction.receiptLineId && !!transaction.receiptId
+    && !transaction.reversesId && !transaction.reversedById && Number(transaction.returnableToSupplier ?? 0) > 0;
   const canReverse = hasPermission('inventory:reverse')
     && !hasReturns
     && !hasOutcomes
@@ -112,6 +116,8 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     && !transaction.reversesId
     && !transaction.reversedById
     && !fromPurchaseOrder
+    // Part of it went back to the supplier: the rest goes back the same way (system audit A6).
+    && !(Number(transaction.returnedToSupplier ?? 0) > 0)
     && !needsApproval
     && !isMark
     && !isStatusChange
@@ -269,6 +275,10 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           This stock was received against a purchase order{transaction.receiptNumber ? ` (${transaction.receiptNumber})` : ''}, so it cannot be reversed here: correct it on the order.
         </p>
       )}
+
+      {canReturnToSupplier && (
+        <SupplierReturnSection transaction={transaction} returnable={Number(transaction.returnableToSupplier)} onReturned={() => onReturned?.()} onError={onError} />
+      )}
       {needsApproval && !transaction.reversesId && !transaction.reversedById && hasPermission('inventory:reverse') && (
         <p className="text-sm text-surface-600 border-t border-surface-200 pt-4">
           This adjustment is over the write-off limit, or its item has no unit cost, so it isn&apos;t reversed here. Post an adjustment the other way from Stock: it waits for someone else to approve it.
@@ -315,7 +325,8 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           <h3 className="text-h3 text-surface-900">Correct a mistake</h3>
           <p className="text-sm text-surface-600">
             Movements cannot be edited. Reversing posts an opposite entry and keeps both in the history
-            {isTransfer ? '; both legs of the transfer are reversed together' : ''}.
+            {isTransfer ? '; both legs of the transfer are reversed together' : ''}
+            {transaction.againstOrder && transaction.type === 'RECEIPT' ? '. The order is put right too: it shows these as still owed' : ''}.
           </p>
           {reversing ? (
             <div className="space-y-2">
@@ -426,6 +437,86 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
         </div>
       ) : (
         <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>Return to stock</Button>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Goods sent back to the supplier against this receipt line (system audit A6):
+ * off the stock, and owed again on the order. With a reason and the supplier's
+ * reference, such as their credit note.
+ */
+function SupplierReturnSection({ transaction, returnable, onReturned, onError }: {
+  transaction: Omit<MovementRow, 'cursor'>;
+  returnable: number;
+  onReturned: () => void;
+  onError: (err: ApiError) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [quantity, setQuantity] = useState('');
+  const [reason, setReason] = useState('');
+  const [reference, setReference] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [validation, setValidation] = useState<string | null>(null);
+  const idem = useIdempotencyKey(`supplier-return-${transaction.id}`);
+  const { kindOf } = useUnits();
+  const unit = transaction.unitOfMeasure ?? '';
+
+  async function submit() {
+    setValidation(null);
+    const parsed = parseQuantity(quantity, kindOf(unit), unit, { remainder: returnable });
+    if (!parsed.ok) { setValidation(parsed.empty ? 'Enter how many go back.' : parsed.error); return; }
+    if (parsed.value > returnable) { setValidation(`At most ${returnable} can go back.`); return; }
+    if (!reason.trim()) { setValidation('Say why they go back.'); return; }
+    setBusy(true);
+    const body = { quantity: parsed.value, reason: reason.trim(), supplierReference: reference.trim() || undefined };
+    try {
+      await api.post(`/goods-receipts/${encodeURIComponent(transaction.receiptId!)}/lines/${encodeURIComponent(transaction.receiptLineId!)}/return`, body, { idempotencyKey: idem.keyFor(body) });
+      idem.confirm();
+      setOpen(false);
+      setQuantity('');
+      setReason('');
+      setReference('');
+      onReturned();
+    } catch (err) {
+      const e = err as ApiError;
+      idem.resolve(err);
+      if (['VALIDATION_ERROR', 'INVALID_STATE', 'NOT_FOUND', 'INSUFFICIENT_BALANCE'].includes(e.code)) setValidation(e.message);
+      else if (e.code === 'FORBIDDEN') onError({ code: 'FORBIDDEN', message: 'You do not have permission to send goods back to the supplier.' });
+      else onError({ code: 'NETWORK_ERROR', message: 'Unable to send the goods back. Please try again.' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3 border-t border-surface-200 pt-4">
+      <h3 className="text-h3 text-surface-900">Return to supplier</h3>
+      <p className="text-sm text-surface-600">
+        Goods sent back to {transaction.supplierName ?? 'the supplier'}{transaction.receiptNumber ? ` from ${transaction.receiptNumber}` : ''}: they come off the stock{transaction.againstOrder ? ' and the order owes them again' : ''}. Up to {returnable} can go back.
+      </p>
+      {open ? (
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Field label="Quantity going back" htmlFor="supplier-return-qty" required>
+              <QuantityInput id="supplier-return-qty" kind={kindOf(unit)} unit={unit || undefined} value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
+            </Field>
+            <Field label="Supplier's reference" htmlFor="supplier-return-ref" help="Optional, e.g. their credit note or return number.">
+              <Input id="supplier-return-ref" value={reference} onChange={(e) => setReference(e.target.value)} maxLength={120} />
+            </Field>
+          </div>
+          <Field label="Why they go back" htmlFor="supplier-return-reason" required>
+            <Textarea id="supplier-return-reason" rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Wrong size delivered" />
+          </Field>
+          {validation && <p className="text-sm text-danger-700">{validation}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" type="button" onClick={() => { setOpen(false); setValidation(null); }} disabled={busy}>Cancel</Button>
+            <Button variant="primary" type="button" onClick={submit} loading={busy}>Return to supplier</Button>
+          </div>
+        </div>
+      ) : (
+        <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>Return to supplier</Button>
       )}
     </section>
   );

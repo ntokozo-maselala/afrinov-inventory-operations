@@ -14,6 +14,9 @@ import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances, type InventoryBalanceKey } from '../../shared/inventory/balances.js';
+import { heldAt, moveHeld } from '../../shared/inventory/tool-repairs.js';
+import { mostReceivable, overDeliveryShare } from '../procurement/over-delivery.js';
+import { lineOfReceipt, lockOrderLine, lowerReceived, returnedOn } from '../../shared/inventory/receipt-corrections.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
@@ -847,9 +850,20 @@ export const InventoryService = {
     const receiptIds = [...new Set(rows.filter((t) => t.referenceType === 'GoodsReceipt' && t.referenceId).map((t) => t.referenceId!))];
     const receipts = receiptIds.length === 0 ? [] : await prisma.goodsReceipt.findMany({
       where: { id: { in: receiptIds } },
-      select: { id: true, number: true, deliveryRef: true, purchaseOrderId: true, supplier: { select: { name: true } } },
+      select: {
+        id: true, number: true, deliveryRef: true, purchaseOrderId: true, supplier: { select: { name: true } },
+        // Each line, its movement and what went back on it, for returning one to the supplier (system audit A6).
+        lines: { select: { id: true, materialId: true, locationId: true, quantity: true, transactionId: true, supplierReturns: { select: { quantity: true } } } },
+      },
     });
     const receiptById = new Map(receipts.map((r) => [r.id, r]));
+    /** The receipt line a RECEIPT movement posted: by its link, or the only one like it. */
+    const receiptLineOf = (t: { id: string; materialId: string; locationId: string; quantity: Prisma.Decimal }, r: (typeof receipts)[number]) => {
+      const linked = r.lines.find((l) => l.transactionId === t.id);
+      if (linked) return linked;
+      const like = r.lines.filter((l) => !l.transactionId && l.materialId === t.materialId && l.locationId === t.locationId && l.quantity.eq(t.quantity));
+      return like.length === 1 ? like[0]! : null;
+    };
     // A return points at the issue it came back from: say when and where that was.
     const returnedIssueIds = [...new Set(rows.filter((t) => t.type === InventoryTransactionType.RETURN && t.referenceType === 'Return' && t.referenceId).map((t) => t.referenceId!))];
     const returnedIssues = returnedIssueIds.length === 0 ? [] : await prisma.inventoryTransaction.findMany({
@@ -939,8 +953,19 @@ export const InventoryService = {
       })(),
       ...(() => {
         const r = t.referenceId ? receiptById.get(t.referenceId) : undefined;
-        // fromPurchaseOrder: such a receipt also moved the order's received quantities, so it cannot be reversed here.
-        return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null, fromPurchaseOrder: !!r?.purchaseOrderId || t.referenceType === 'PurchaseOrder' };
+        // fromPurchaseOrder: received in one go against the order (retired), line by line unknown, so not reversed.
+        // A receipt line against an order is reversed with its order (system audit A7), and can go back to the supplier (A6).
+        const line = r && t.type === InventoryTransactionType.RECEIPT ? receiptLineOf(t, r) : null;
+        const returned = line ? line.supplierReturns.reduce((a, x) => a.plus(x.quantity), new Prisma.Decimal(0)) : null;
+        return {
+          receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null,
+          fromPurchaseOrder: t.referenceType === 'PurchaseOrder' || (!!r?.purchaseOrderId && !line),
+          againstOrder: !!r?.purchaseOrderId,
+          receiptId: r?.id ?? null,
+          receiptLineId: line?.id ?? null,
+          returnedToSupplier: returned?.toString() ?? null,
+          returnableToSupplier: line && returned ? line.quantity.minus(returned).toString() : null,
+        };
       })(),
       ...loanFields(t, loanDates),
     }]));
@@ -1145,17 +1170,28 @@ export const InventoryService = {
         if (original.type === InventoryTransactionType.LOAN || original.type === InventoryTransactionType.LOAN_RETURN || original.referenceType === 'ToolLoan') {
           throw Errors.invalidState('Tool check-outs and check-ins are not reversed: check the tool in, or out, again instead.');
         }
-        // Receipts against a purchase order also moved the order's received
-        // quantities, so they cannot be reversed here. Counter receipts
-        // (no purchase order) can. Receiving a whole order at once books its
-        // receipts against the order itself.
+        // Receiving a whole order at once (retired, system audit D3) booked its
+        // receipts against the order itself, line by line unknown: not reversed.
         if (original.referenceType === 'PurchaseOrder') {
           throw Errors.invalidState('Stock received against a purchase order cannot be reversed here.');
         }
+        // A receipt line against an order is reversed with its order: the line's
+        // received quantity goes down and the order owes it again (system audit
+        // A7). The order and its line are held first, as receiving holds them.
+        let orderCorrection: { purchaseOrderId: string; purchaseOrderLineId: string; goodsReceiptId: string; goodsReceiptNumber: string } | null = null;
         if (original.referenceType === 'GoodsReceipt' && original.referenceId) {
           const gr = await tx.goodsReceipt.findUnique({ where: { id: original.referenceId } });
           if (gr?.purchaseOrderId) {
-            throw Errors.invalidState('Stock received against a purchase order cannot be reversed here.');
+            if (original.type === InventoryTransactionType.RETURN_TO_SUPPLIER) {
+              throw Errors.invalidState('Goods returned to the supplier are not reversed: receive them again against the order, which owes them again.');
+            }
+            const line = await lineOfReceipt(tx, original);
+            if (!line?.purchaseOrderLineId) throw Errors.invalidState(`Which line of ${gr.number} this was can't be told. Return the goods to the supplier, or adjust the stock, instead.`);
+            if ((await returnedOn(tx, line.id)).gt(0)) {
+              throw Errors.invalidState(`Part of this line of ${gr.number} has gone back to the supplier, so it isn't reversed. Return the rest instead.`);
+            }
+            await lockOrderLine(tx, gr.purchaseOrderId, line.purchaseOrderLineId);
+            orderCorrection = { purchaseOrderId: gr.purchaseOrderId, purchaseOrderLineId: line.purchaseOrderLineId, goodsReceiptId: gr.id, goodsReceiptNumber: gr.number };
           }
         }
         // An adjustment over the write-off limit takes someone else's approval,
@@ -1242,6 +1278,11 @@ export const InventoryService = {
 
         for (const leg of legs) {
           await recomputeBalance(leg, tx);
+        }
+        if (orderCorrection) {
+          await lowerReceived(tx, { purchaseOrderId: orderCorrection.purchaseOrderId, purchaseOrderLineId: orderCorrection.purchaseOrderLineId, quantity: original.quantity }, {
+            actorId: input.actorId, action: 'PO_RECEIPT_REVERSED', goodsReceiptId: orderCorrection.goodsReceiptId, goodsReceiptNumber: orderCorrection.goodsReceiptNumber, reason,
+          });
         }
 
         const reversalIds = reversals.map((r) => r.id);
@@ -1531,6 +1572,13 @@ export const InventoryService = {
           { materialId: input.materialId, fromLocationId: input.fromLocationId, requested: qty.toString(), available: balance.toString() },
         );
       }
+      // A tool held for repair is held where it goes (system audit B2): what the
+      // free stock there doesn't cover moves its hold along, oldest first.
+      if (!heldForProject) {
+        const held = await heldAt(tx, input.materialId, input.fromLocationId);
+        const free = Prisma.Decimal.max(balance.minus(held), 0);
+        if (qty.gt(free)) await moveHeld(tx, input.materialId, input.fromLocationId, input.toLocationId, qty.minus(free));
+      }
 
       const out = await tx.inventoryTransaction.create({
         data: {
@@ -1674,9 +1722,11 @@ export const InventoryService = {
       });
       if (claimed.count === 0) throw Errors.invalidState('Goods receipt already posted');
 
+      // How far over the order a line may go (system audit A8), read once.
+      const share = gr.purchaseOrderId ? await overDeliveryShare(tx) : new Prisma.Decimal(0);
       for (const line of gr.lines) {
         const qty = toDecimal(line.quantity);
-        await tx.inventoryTransaction.create({
+        const receipt = await tx.inventoryTransaction.create({
           data: {
             materialId: line.materialId,
             locationId: line.locationId,
@@ -1688,6 +1738,8 @@ export const InventoryService = {
             heldForProject,
           },
         });
+        // The line knows its movement, so it can be reversed or returned on its own (system audit A6, A7).
+        await tx.goodsReceiptLine.update({ where: { id: line.id }, data: { transactionId: receipt.id } });
 
         if (line.purchaseOrderLineId) {
           // Prevent receiving more than the ordered quantity on a PO line.
@@ -1698,9 +1750,10 @@ export const InventoryService = {
             const orderedQty = toDecimal(poLine.orderedQty);
             const alreadyReceived = toDecimal(poLine.receivedQty);
             const projected = alreadyReceived.plus(qty);
-            if (projected.gt(orderedQty)) {
+            // Over the order only within the over-delivery allowance, with a reason given when recorded (system audit A8).
+            if (projected.gt(mostReceivable(orderedQty, share)) || (projected.gt(orderedQty) && !line.overDeliveryReason)) {
               throw Errors.validation(
-                `Receiving ${qty.toString()} would exceed the ordered quantity of ${orderedQty.toString()} for this line.`,
+                `Receiving ${qty.toString()} would exceed the ordered quantity of ${orderedQty.toString()} for this line${share.isZero() ? '' : ' by more than the over-delivery allowed, or without a reason'}.`,
                 { orderedQty: orderedQty.toString(), alreadyReceived: alreadyReceived.toString(), receiving: qty.toString() },
               );
             }

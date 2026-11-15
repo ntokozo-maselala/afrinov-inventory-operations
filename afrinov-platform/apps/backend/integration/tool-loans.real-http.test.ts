@@ -136,6 +136,10 @@ describe('tool loans over real HTTP', () => {
     expect(damaged.status).toBe(201);
     expect(await onShelf(drillId)).toBe('3');
     expect(await tool(drillId)).toMatchObject({ inStore: '3', onLoan: '0', owned: '3', loans: [] });
+    // Held for repair until the store marks it repaired (system audit B2).
+    const held = (await tool(drillId)) as unknown as { heldForRepair: string; repairs: Array<{ id: string }> };
+    expect(held.heldForRepair).toBe('1');
+    expect((await api('POST', `/tools/repairs/${held.repairs[0]!.id}/repaired`, { note: 'New chuck' })).status).toBe(200);
 
     const report = await api<HistoryRow[]>('GET', `/inventory-transactions?report=loans&materialId=${drillId}`);
     const returns = report.body.filter((r) => r.type === 'LOAN_RETURN');

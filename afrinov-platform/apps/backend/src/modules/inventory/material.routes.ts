@@ -4,6 +4,7 @@ import { MaterialService } from './material.service.js';
 import { STATUS_REASONS, type MaterialStatusReasonCode } from './material-status.js';
 import { CatalogueService } from './catalogue.service.js';
 import { LocationService } from './location.service.js';
+import { idempotentMutation } from '../../shared/idempotency.js';
 import { LEFTOVER_CATEGORIES, ProjectLeftoversService } from './project-leftovers.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
@@ -176,7 +177,11 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const actorId = (req as unknown as { user: { id: string } }).user.id;
-    return ProjectLeftoversService.moveToStores(null, parsed.data.items, actorId);
+    // Retry-safe, as every stock movement is (system audit B3).
+    return idempotentMutation(req, reply, 'POST /materials/no-project/leftovers/move', async (tx) => ({
+      statusCode: 200,
+      body: await ProjectLeftoversService.moveToStores(null, parsed.data.items, actorId, tx),
+    }));
   });
 
   // A project's material still in stock: once it is closed, its leftovers to move to Stores.
@@ -195,7 +200,10 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const actorId = (req as unknown as { user: { id: string } }).user.id;
-    return ProjectLeftoversService.moveToStores(projectNumber, parsed.data.items, actorId);
+    return idempotentMutation(req, reply, 'POST /projects/:projectNumber/leftovers/move', async (tx) => ({
+      statusCode: 200,
+      body: await ProjectLeftoversService.moveToStores(projectNumber, parsed.data.items, actorId, tx),
+    }));
   });
 }
 

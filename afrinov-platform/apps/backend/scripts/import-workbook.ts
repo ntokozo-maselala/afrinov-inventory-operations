@@ -25,6 +25,7 @@ import { analyseWorkbook, PROBLEM_TEXT, RESOLVED_BY_MAPPING, type Problem } from
 import { applyMapping, readMappingFile, suggestMapping, writeMappingFile, type MappedImport } from '../src/modules/migration/mapping.js';
 import { applyMasterData, readMasterDataFile, suggestMasterData, writeMasterDataFile, type MasterDataPlan } from '../src/modules/migration/master-data.js';
 import { problemCounts, renderReport } from '../src/modules/migration/workbook-report.js';
+import { kindsFrom, partUnitProblems } from '../src/modules/migration/unit-check.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
 
@@ -32,6 +33,18 @@ function databaseName(url: string | undefined): string | null {
   if (!url) return null;
   try {
     return decodeURIComponent(new URL(url).pathname.replace(/^\//, '')) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The unit list from the database in DATABASE_URL, or null when there is none to read. */
+async function unitList(): Promise<Array<{ code: string; kind: 'COUNTED' | 'MEASURED'; active: boolean }> | null> {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    const { prisma } = await import('../src/shared/db.js');
+    const { listUnits } = await import('../src/shared/units.js');
+    try { return await listUnits(prisma); } finally { await prisma.$disconnect(); }
   } catch {
     return null;
   }
@@ -129,6 +142,11 @@ async function main() {
     console.log(`Reading mapping file ${mappingPath}…`);
     const read = await readMappingFile(mappingPath);
     result = applyMapping(analysis, read.mapping);
+    // Whole units, as the real import checks them, every item at once (system audit H6).
+    const units = await unitList();
+    console.log(units ? 'Units checked against the database\'s list.' : 'Units checked against the list at release (no database to read): a unit added since is taken as measured.');
+    const unitProblems = partUnitProblems(result.materials, kindsFrom(units));
+    result = { ...result, problems: [...result.problems, ...unitProblems] };
     problems = [...analysis.problems.filter((p) => !RESOLVED_BY_MAPPING.has(p.code)), ...read.problems, ...result.problems];
   } else {
     await writeMappingFile(mappingPath, suggestMapping(analysis), analysis);

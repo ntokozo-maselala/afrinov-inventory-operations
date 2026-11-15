@@ -16,7 +16,7 @@ vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: signedIn.roles } })
 const { StockCount } = await import('./StockCount');
 const { ToastProvider } = await import('../components/Toast');
 
-let stockAtA1 = [
+let stockAtA1: Array<{ materialId: string; materialSku: string; materialName: string; unitOfMeasure: string; quantity: string; heldForProject?: string }> = [
   { materialId: 'm-1', materialSku: 'DISC-115', materialName: 'Cutting disc', unitOfMeasure: 'each', quantity: '10' },
   { materialId: 'm-2', materialSku: 'GLOVE-L', materialName: 'Welding gloves', unitOfMeasure: 'pair', quantity: '4' },
   { materialId: 'm-3', materialSku: 'TAPE', materialName: 'Insulation tape', unitOfMeasure: 'roll', quantity: '2' },
@@ -29,7 +29,17 @@ function renderPage() {
       { id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', active: true },
       { id: 'm-9', sku: 'BOLT-M12', name: 'M12 bolt', unitOfMeasure: 'each', active: true },
     ];
-    if (path.startsWith('/reports/current-stock?locationId=l-1')) return stockAtA1;
+    // The count sheet (system audit C4-C6): one stock at the location, with or without figures.
+    if (path.startsWith('/stock-counts/sheet?locationId=l-1')) {
+      const of = new URLSearchParams(path.split('?')[1]).get('heldForProject');
+      return {
+        locationId: 'l-1', heldForProject: of, blind: sheetBlind, openedAt: OPENED_AT,
+        projects: [...new Set(stockAtA1.map((r) => r.heldForProject).filter(Boolean))],
+        lines: stockAtA1.filter((r) => (r.heldForProject ?? null) === of).map((r) => ({
+          materialId: r.materialId, sku: r.materialSku, name: r.materialName, unitOfMeasure: r.unitOfMeasure, expected: sheetBlind ? null : r.quantity,
+        })),
+      };
+    }
     if (path.startsWith('/stock-counts')) return recentCounts;
     return [];
   });
@@ -43,6 +53,8 @@ async function chooseA1() {
 }
 
 let recentCounts: Array<Record<string, unknown>> = [];
+let sheetBlind = false;
+const OPENED_AT = '2026-11-12T08:00:00.000Z';
 
 const count = (name: string, value: string) => fireEvent.change(screen.getByLabelText(`Counted ${name}`), { target: { value } });
 
@@ -50,6 +62,7 @@ describe('StockCount page', () => {
   beforeEach(() => {
     localStorage.clear();
     recentCounts = [];
+    sheetBlind = false;
     stockAtA1 = stockAtA1.map((r) => ({ ...r }));
     mockGet.mockReset();
     mockPost.mockReset().mockResolvedValue({ countId: 'c-1', counted: 2, adjusted: 1, lines: [] });
@@ -79,6 +92,8 @@ describe('StockCount page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/stock-counts', {
       locationId: 'l-1',
+      kind: 'SPOT',
+      openedAt: OPENED_AT,
       note: 'Rack A recount',
       lines: [
         { materialId: 'm-1', expectedQuantity: 10, countedQuantity: 7.5 },
@@ -100,8 +115,8 @@ describe('StockCount page', () => {
     expect(within(screen.getByText('M12 bolt').closest('tr')!).getByText('+25')).toBeInTheDocument();
   });
 
-  // Qodo, PR #142: a count is of Stores stock, as the server posts it.
-  it('counts Stores stock only: stock held for a project is not listed, and an item held only for one is added at 0', async () => {
+  // Qodo, PR #142; system audit C6: a count is of one stock, Stores or a project's.
+  it('counts one stock at a time: a project\'s stock is not on the Stores sheet, and has a sheet of its own', async () => {
     const storesOnly = stockAtA1;
     // Put back for the tests after this one, which copy it in beforeEach.
     onTestFinished(() => { stockAtA1 = storesOnly; });
@@ -123,6 +138,63 @@ describe('StockCount page', () => {
     fireEvent.mouseDown(within(screen.getByRole('listbox')).getByRole('option', { name: /M12 bolt/ }));
     count('M12 bolt', '25');
     expect(within(screen.getByText('M12 bolt').closest('tr')!).getByText('+25')).toBeInTheDocument();
+
+    // The project's own sheet: its stock, posted as its stock.
+    fireEvent.change(screen.getByLabelText('Whose stock'), { target: { value: 'AFRI-1325' } });
+    await waitFor(() => expect(within(screen.getByText('M12 bolt').closest('tr')!).getByText('8')).toBeInTheDocument());
+    count('M12 bolt', '6');
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/stock-counts', expect.objectContaining({
+      heldForProject: 'AFRI-1325', lines: [{ materialId: 'm-9', expectedQuantity: 8, countedQuantity: 6 }],
+    }), expect.anything()));
+  });
+
+  // System audit C5: a full count leaves nothing on the sheet blank.
+  it('on a full count, asks for every item, and counts the ones not found as 0 when confirmed', async () => {
+    renderPage();
+    await chooseA1();
+    fireEvent.change(screen.getByLabelText('Count'), { target: { value: 'FULL' } });
+    count('Cutting disc', '10');
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    expect(screen.getByText(/A full count needs every item on the sheet. 2 are blank: TAPE, GLOVE-L/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Not found: count the 2 blank items as 0' }));
+    expect(screen.getByLabelText('Counted Welding gloves')).toHaveValue('0');
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/stock-counts', expect.objectContaining({ kind: 'FULL' }), expect.anything()));
+    expect(mockPost.mock.calls[0]![1].lines).toHaveLength(3);
+  });
+
+  // System audit C4: blind, the sheet has no figures and none are sent.
+  it('on a blind count, shows no system figures and sends when the sheet was opened instead', async () => {
+    sheetBlind = true;
+    renderPage();
+    await chooseA1();
+    expect(screen.getByText('Blind count: system quantities are not shown')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Hide system quantities/)).not.toBeInTheDocument();
+    expect(screen.queryByText('10')).not.toBeInTheDocument();
+    count('Cutting disc', '7');
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    expect(screen.getByText(/1 item counted at A-1. Differences from the system are worked out when it posts./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/stock-counts', expect.objectContaining({
+      openedAt: OPENED_AT, lines: [{ materialId: 'm-1', countedQuantity: 7, note: undefined }].map(({ note: _n, ...l }) => l),
+    }), expect.anything()));
+  });
+
+  // System audit C7: the lines that moved are counted again; the rest posted.
+  it('keeps the lines held back because their stock moved, for counting again', async () => {
+    mockPost.mockResolvedValueOnce({ countId: 'c-1', counted: 1, adjusted: 1, lines: [], heldBack: [{ materialId: 'm-1', sku: 'DISC-115' }] });
+    renderPage();
+    await chooseA1();
+    count('Cutting disc', '8');
+    count('Welding gloves', '3');
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    expect(await screen.findByText('1 item moved while you were counting')).toBeInTheDocument();
+    expect(screen.getByText(/DISC-115 was held back: count it again and post/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Counted Welding gloves')).toHaveValue('');
   });
 
   it('refuses nothing counted or a count that is not a number, without posting', async () => {
@@ -177,15 +249,16 @@ describe('StockCount page', () => {
 
   it('shows the recent counts at the location, links to them all, and refreshes them after posting', async () => {
     recentCounts = [{ id: 'c-0', cursor: 'c', at: '2026-10-10T08:00:00.000Z', locationId: 'l-1', locationName: 'A-1', countedByName: 'Vusi',
-      counted: 3, adjusted: 0, note: null, differences: [] }];
+      counted: 3, adjusted: 0, note: null, kind: 'FULL', heldForProject: 'AFRI-1325', differences: [] }];
     renderPage();
     await chooseA1();
-    expect(await screen.findByText('3 items counted, no differences')).toBeInTheDocument();
+    expect(await screen.findByText("Full count of AFRI-1325's stock: 3 items counted, no differences")).toBeInTheDocument();
     expect(screen.getByText('by Vusi')).toBeInTheDocument();
     expect(mockGet).toHaveBeenCalledWith('/stock-counts?locationId=l-1&limit=5');
     expect(screen.getByRole('link', { name: 'All counts, last 90 days' }).getAttribute('href')).toMatch(/^\/movements\?report=counts&locationId=l-1&from=/);
 
-    const counted = () => mockGet.mock.calls.filter((c) => String(c[0]).startsWith('/stock-counts')).length;
+    // The recent counts only, not the count sheet.
+    const counted = () => mockGet.mock.calls.filter((c) => String(c[0]).startsWith('/stock-counts?')).length;
     const before = counted();
     count('Cutting disc', '7');
     fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
