@@ -53,9 +53,20 @@ export interface SalesOtherCost {
   total: string;
 }
 
+/** Material estimated before any supplier has quoted, for one unit of the line: counted as material. */
+export interface SalesMaterialAllowance {
+  id: string;
+  lineNo: number;
+  description: string;
+  /** Rand excl. VAT, before markup. */
+  amount: string;
+}
+
 /** One equipment line's money: for one unit, then times its quantity. */
 export interface SalesLineTotals {
   quantity: number;
+  /** The markup it is priced at: its own, or the job's; null when neither is set. */
+  markupPercent: string | null;
   labour: string;
   material: string;
   other: string;
@@ -73,9 +84,13 @@ export interface SalesEquipmentLine {
   /** Printed under it, one per line. */
   details: string | null;
   quantity: number;
+  /** Its own markup; null: it takes the job's. */
+  markupPercent: string | null;
   labour: SalesLabourLine[];
   materials: SalesMaterial[];
   otherCosts: SalesOtherCost[];
+  /** Material allowed for before any supplier quoted; may be missing from older responses. */
+  allowances?: SalesMaterialAllowance[];
   totals: SalesLineTotals;
 }
 
@@ -104,6 +119,8 @@ export interface SalesRfq {
   equipment: string | null;
   description: string | null;
   notes: string | null;
+  /** Printed on the quotation under the company's Notes, one per line. */
+  quoteNotes: string | null;
   penaltiesApply: boolean;
   markupPercent: string | null;
   deliveryPrice: string;
@@ -137,6 +154,12 @@ export interface SalesRfq {
   equipmentLines: SalesEquipmentLine[];
   totals: SalesTotals;
 }
+
+/**
+ * A line at quantity 0 is priced for the client to see but not charged: the
+ * quotation prints its unit price and "R -" (AFRI-0413 lines 3 and 4).
+ */
+export const isCharged = (l: Pick<SalesEquipmentLine, 'quantity'>) => l.quantity > 0;
 
 /** Every quote counted, on whichever line. */
 export const allMaterials = (r: Pick<SalesRfq, 'equipmentLines'>): SalesMaterial[] => r.equipmentLines.flatMap((l) => l.materials);
@@ -196,18 +219,20 @@ const cents = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 /** One equipment line as the preview prices it, for one unit. */
 export interface PreviewLine {
   quantity: number;
+  /** Its own markup; null or left out: the job's. */
+  markupPercent?: number | null;
   labour: Array<{ hours: number; hourlyRate: number }>;
   materials: number[];
   otherCosts: Array<{ quantity: number; unitCost: number }>;
 }
 
-export interface PreviewLineTotals { unitCost: number; unitPrice: number | null; total: number | null }
+export interface PreviewLineTotals { markupPercent: number | null; unitCost: number; unitPrice: number | null; total: number | null }
 
 /**
  * The totals as the server will work them out, for the form while it is typed:
  * each line for one unit (labour, other costs and the markup rounded to cents),
- * its unit price rounded before it is multiplied by the quantity, then delivery
- * and VAT on the whole.
+ * at its own markup or the job's, its unit price rounded before it is multiplied
+ * by the quantity, then delivery and VAT on the whole, once every line has a markup.
  */
 export function costingPreview(input: {
   lines: PreviewLine[];
@@ -218,20 +243,20 @@ export function costingPreview(input: {
   labour: number; material: number; other: number; cost: number; markup: number | null; equipment: number | null;
   totalExVat: number | null; vat: number | null; totalIncVat: number | null; lines: PreviewLineTotals[];
 } {
-  const m = input.markupPercent;
   const priced = input.lines.map((l) => {
+    const m = l.markupPercent ?? input.markupPercent;
     const labour = cents(l.labour.reduce((sum, x) => sum + cents(x.hours * x.hourlyRate), 0));
     const material = cents(l.materials.reduce((sum, x) => sum + x, 0));
     const other = cents(l.otherCosts.reduce((sum, x) => sum + cents(x.quantity * x.unitCost), 0));
     const unitCost = cents(labour + material + other);
     const unitMarkup = m === null ? null : cents((unitCost * m) / 100);
     const unitPrice = unitMarkup === null ? null : cents(unitCost + unitMarkup);
-    return { quantity: l.quantity, labour, material, other, unitCost, unitMarkup, unitPrice, total: unitPrice === null ? null : cents(unitPrice * l.quantity) };
+    return { quantity: l.quantity, markupPercent: m, labour, material, other, unitCost, unitMarkup, unitPrice, total: unitPrice === null ? null : cents(unitPrice * l.quantity) };
   });
   const sum = (pick: (l: (typeof priced)[number]) => number) => cents(priced.reduce((s, l) => s + pick(l) * l.quantity, 0));
   const totals = { labour: sum((l) => l.labour), material: sum((l) => l.material), other: sum((l) => l.other), cost: sum((l) => l.unitCost) };
-  const lines = priced.map((l) => ({ unitCost: l.unitCost, unitPrice: l.unitPrice, total: l.total }));
-  if (m === null) return { ...totals, markup: null, equipment: null, totalExVat: null, vat: null, totalIncVat: null, lines };
+  const lines = priced.map((l) => ({ markupPercent: l.markupPercent, unitCost: l.unitCost, unitPrice: l.unitPrice, total: l.total }));
+  if (priced.some((l) => l.markupPercent === null)) return { ...totals, markup: null, equipment: null, totalExVat: null, vat: null, totalIncVat: null, lines };
   const markup = sum((l) => l.unitMarkup!);
   const equipment = cents(priced.reduce((s, l) => s + l.total!, 0));
   const totalExVat = cents(equipment + cents(input.deliveryPrice));

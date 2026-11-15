@@ -56,7 +56,7 @@ function titleFor(code: string): { title: string; message: string; tone: ErrorTo
     case 'SERVICE_UNAVAILABLE':
       return {
         title: "We're having trouble connecting",
-        message: 'Afrinov Inventory is temporarily unavailable. Please try again in a moment.',
+        message: 'Afrinov OMS is temporarily unavailable. Please try again in a moment.',
         tone: 'warning',
         retryable: true,
         retryLabel: 'Try again',

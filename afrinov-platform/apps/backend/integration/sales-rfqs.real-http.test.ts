@@ -34,12 +34,14 @@ interface SalesRfq {
   issuedAt: string | null;
   returnReason: string | null;
   clientAddress: string | null;
+  quoteNotes: string | null;
   equipmentLines: Array<{
-    lineNo: number; equipment: string | null; details: string | null; quantity: number;
+    lineNo: number; equipment: string | null; details: string | null; quantity: number; markupPercent: string | null;
     labour: Array<{ lineNo: number; role: string; hours: string; hourlyRate: string; total: string }>;
     materials: Array<{ rfqId: string; supplierId: string; amount: string; recommended: boolean; recommendedSupplier: { id: string } | null; unusable: boolean }>;
     otherCosts: Array<{ lineNo: number; description: string; quantity: string; unitCost: string; total: string }>;
-    totals: { quantity: number; labour: string; material: string; other: string; unitCost: string; unitMarkup: string | null; unitPrice: string | null; total: string | null };
+    allowances: Array<{ lineNo: number; description: string; amount: string }>;
+    totals: { quantity: number; markupPercent: string | null; labour: string; material: string; other: string; unitCost: string; unitMarkup: string | null; unitPrice: string | null; total: string | null };
   }>;
   totals: Totals;
 }
@@ -317,7 +319,7 @@ describe('Sales requests for quotation over real HTTP', () => {
       // A line with nothing to price, or no name, holds up submitting, by line.
       await sales('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump(), { details: 'Nothing yet' }] });
       const held = await sales<ApiErrorBody>('POST', `/sales-rfqs/${res.body.id}/submit`);
-      expect(held.body.error.message).toMatch(/the equipment on line 2, labour, a quote or another cost on line 2/);
+      expect(held.body.error.message).toMatch(/the equipment on line 2, labour, a quote, an allowance or another cost on line 2/);
 
       // Saving the lines replaces them; the Activity says what they were.
       const saved = await sales<SalesRfq>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump({ quantity: 3 })] });
@@ -327,6 +329,120 @@ describe('Sales requests for quotation over real HTTP', () => {
       const history = await sales<Array<{ action: string; after: { equipmentLines?: Array<{ quantity: number }> } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
       expect(history.body[0]!.after.equipmentLines?.map((l) => l.quantity)).toEqual([3]);
       expect((await sales<SalesRfq>('POST', `/sales-rfqs/${res.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
+    });
+
+    // AFRI-0413 Rev 2 prices the electrode flexibles at quantity 0, as the client
+    // supplies them, and adds "All Flexibles to be free issued by client".
+    it('prices a line at quantity 0 without charging it, and keeps the quotation\'s own notes, as AFRI-0413 Rev 2', async () => {
+      const sales = await as('SALES');
+      const res = await sales<SalesRfq>('POST', '/sales-rfqs', {
+        projectNumber, markupPercent: 50, deliveryPrice: 0,
+        quoteNotes: '  All Flexibles to be free issued by client \n\n Prices valid while stock lasts ',
+        equipmentLines: [
+          { equipment: 'Maintenance', otherCosts: [{ description: 'Oil testing', quantity: 1, unitCost: 1000 }] },
+          { equipment: 'Electrode Flexibles per Furnace (Supplied to Client)', quantity: 0, otherCosts: [{ description: 'Flexibles', quantity: 1, unitCost: 100080.27 }] },
+        ],
+      });
+      expect(res.status).toBe(201);
+      // Kept line by line, trimmed, blank lines dropped.
+      expect(res.body.quoteNotes).toBe('All Flexibles to be free issued by client\nPrices valid while stock lasts');
+      const [, flexibles] = res.body.equipmentLines;
+      // Its price shows; it charges nothing.
+      expect(flexibles).toMatchObject({ quantity: 0, totals: { unitCost: '100080.27', unitMarkup: '50040.14', unitPrice: '150120.41', total: '0.00' } });
+      expect(res.body.totals).toMatchObject({ cost: '1000.00', markup: '500.00', equipment: '1500.00', totalExVat: '1500.00' });
+
+      // A negative quantity is still refused.
+      expect((await sales('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [{ equipment: 'X', quantity: -1 }] })).status).toBe(400);
+      // A quotation that charges nothing isn't sent to the Director.
+      await sales('PATCH', `/sales-rfqs/${res.body.id}`, {
+        equipmentLines: [{ equipment: 'Electrode Flexibles', quantity: 0, otherCosts: [{ description: 'Flexibles', quantity: 1, unitCost: 10 }] }],
+      });
+      const nothing = await sales<ApiErrorBody>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(nothing.status).toBe(400);
+      expect(nothing.body.error.message).toMatch(/a quantity of 1 or more/);
+
+      // Clearing the notes clears them, and the Activity keeps the change.
+      const cleared = await sales<SalesRfq>('PATCH', `/sales-rfqs/${res.body.id}`, { quoteNotes: ' ' });
+      expect(cleared.body.quoteNotes).toBeNull();
+      const history = await sales<Array<{ after: { quoteNotes?: string | null } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
+      expect(history.body.some((h) => 'quoteNotes' in h.after && h.after.quoteNotes === null)).toBe(true);
+    });
+
+    // AFRI-0413's costing sheet marks each line up on its own: the maintenance
+    // × 1.3 × 1.2 (56%), the spares × 1.35 × 1.2 (62%).
+    it('marks each line up at its own markup, or the job\'s when it has none, as AFRI-0413 Rev 2', async () => {
+      const sales = await as('SALES');
+      const res = await sales<SalesRfq>('POST', '/sales-rfqs', {
+        projectNumber, markupPercent: 56, deliveryPrice: 0, clientName: 'Samancor TC Smelters (Pty)',
+        equipmentLines: [
+          { equipment: 'Maintenance', otherCosts: [{ description: 'Labour and costs', quantity: 1, unitCost: 255600 }] },
+          { equipment: 'Anticipated Spares', markupPercent: 62, otherCosts: [{ description: 'Spares allowance', quantity: 1, unitCost: 45000 }] },
+        ],
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.equipmentLines.map((l) => [l.markupPercent, l.totals.markupPercent, l.totals.total])).toEqual([[null, '56', '398736.00'], ['62', '62', '72900.00']]);
+      expect(res.body.totals).toMatchObject({ cost: '300600.00', markup: '171036.00', totalExVat: '471636.00', vat: '70745.40', totalIncVat: '542381.40' });
+
+      // A line's markup is checked like the job's, naming the line.
+      const bad = await sales<ApiErrorBody>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [{ equipment: 'X', markupPercent: 12.345, otherCosts: [{ description: 'Y', quantity: 1, unitCost: 1 }] }] });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error.message).toMatch(/^The equipment line: its markup has at most 2 decimal places/);
+
+      // Without the job's markup, the line with none of its own holds up submitting.
+      await sales('PATCH', `/sales-rfqs/${res.body.id}`, {
+        markupPercent: null,
+        equipmentLines: [
+          { equipment: 'Maintenance', otherCosts: [{ description: 'Labour and costs', quantity: 1, unitCost: 255600 }] },
+          { equipment: 'Anticipated Spares', markupPercent: 62, otherCosts: [{ description: 'Spares allowance', quantity: 1, unitCost: 45000 }] },
+        ],
+      });
+      const held = await sales<ApiErrorBody>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(held.status).toBe(400);
+      expect(held.body.error.message).toMatch(/the markup \(the job's, or one on line 1\)/);
+
+      // With its own markup on every line, no job markup is needed; the Activity keeps each line's.
+      const own = await sales<SalesRfq>('PATCH', `/sales-rfqs/${res.body.id}`, {
+        equipmentLines: [
+          { equipment: 'Maintenance', markupPercent: 56, otherCosts: [{ description: 'Labour and costs', quantity: 1, unitCost: 255600 }] },
+          { equipment: 'Anticipated Spares', markupPercent: 62, otherCosts: [{ description: 'Spares allowance', quantity: 1, unitCost: 45000 }] },
+        ],
+      });
+      expect(own.body.totals.totalExVat).toBe('471636.00');
+      const history = await sales<Array<{ after: { equipmentLines?: Array<{ markupPercent: string | null }> } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
+      expect(history.body[0]!.after.equipmentLines?.map((l) => l.markupPercent)).toEqual(['56', '62']);
+      const submitted = await sales<SalesRfq>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(submitted.body).toMatchObject({ status: 'PENDING_APPROVAL', totals: { totalExVat: '471636.00' } });
+    });
+
+    // AFRI-0413 quoted its spares at an allowance before Procurement asked Hytec.
+    it('allows for material no supplier has quoted yet, counted as material, as AFRI-0413 Rev 2 quotes its spares', async () => {
+      const sales = await as('SALES');
+      const res = await sales<SalesRfq>('POST', '/sales-rfqs', {
+        projectNumber, markupPercent: 62, deliveryPrice: 0, clientName: 'Samancor TC Smelters (Pty)',
+        equipmentLines: [{
+          equipment: "Anticipated Spares (1 Power Pack's): Filters, Pipe Clamps, Fittings",
+          allowances: [{ description: ' Filters,  pipe clamps, fittings ', amount: 45000 }],
+        }],
+      });
+      expect(res.status).toBe(201);
+      const [spares] = res.body.equipmentLines;
+      expect(spares!.allowances).toEqual([expect.objectContaining({ lineNo: 1, description: 'Filters, pipe clamps, fittings', amount: '45000.00' })]);
+      // Material, not another cost: 45 000 × 1.62 = 72 900.
+      expect(spares!.totals).toMatchObject({ material: '45000.00', other: '0.00', unitPrice: '72900.00', total: '72900.00' });
+      expect(res.body.totals).toMatchObject({ material: '45000.00', other: '0.00', totalExVat: '72900.00' });
+
+      // Checked, naming it.
+      const bad = await sales<ApiErrorBody>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [{ equipment: 'Spares', allowances: [{ description: ' ', amount: 10 }] }] });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error.message).toMatch(/^Allowance 1 needs a description/);
+      expect((await sales('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [{ equipment: 'Spares', allowances: [{ description: 'X', amount: 1.005 }] }] })).status).toBe(400);
+
+      // An allowance alone prices a line, so it can be submitted; the Activity keeps it.
+      const submitted = await sales<SalesRfq>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(submitted.body).toMatchObject({ status: 'PENDING_APPROVAL', totals: { totalExVat: '72900.00' } });
+      const history = await sales<Array<{ action: string; after: { equipmentLines?: Array<{ allowances: unknown[] }> } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
+      const created = history.body.find((h) => h.action === 'CREATE');
+      expect(created!.after.equipmentLines![0]!.allowances).toEqual([{ description: 'Filters, pipe clamps, fittings', amount: '45000.00' }]);
     });
 
     it('starts a new one with one empty equipment line, and moving it to another project takes its quotes off its lines', async () => {

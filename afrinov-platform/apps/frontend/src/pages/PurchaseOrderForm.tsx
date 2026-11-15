@@ -75,7 +75,8 @@ const blankLine = (): DraftLine => ({ key: nextLineKey++, materialId: '', ordere
 const badDiscount = (v: string) => {
   if (v.trim() === '') return false;
   const n = Number(v);
-  return !(Number.isFinite(n) && n >= 0 && n <= 100 && Number.isInteger(Math.round(n * 100 * 1e6) / 1e6));
+  // To 4 places, as a supplier's discount may need (5/18 off is 27.7778%).
+  return !(Number.isFinite(n) && n >= 0 && n <= 100 && Number.isInteger(Math.round(n * 10000 * 1e6) / 1e6));
 };
 
 /** One opening of the new-item drawer: the line it is for, and which opening it is. */
@@ -330,7 +331,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
     }));
     if (badQuantity) { setValidation(badQuantity); return; }
     if (validLines.some((l) => l.unitPrice.trim() !== '' && !(Number(l.unitPrice) >= 0))) { setValidation('A unit price must be 0 or more, or left blank.'); return; }
-    if (validLines.some((l) => badDiscount(l.discountPercent))) { setValidation('A discount must be between 0% and 100%, to 2 decimals, or left blank.'); return; }
+    if (validLines.some((l) => badDiscount(l.discountPercent))) { setValidation('A discount must be between 0% and 100%, to 4 decimals, or left blank.'); return; }
     const problem = checkVat(vatRate) ?? checkDetails(details);
     if (problem) { setValidation(problem); return; }
     setBusy(submit ? 'submit' : 'draft');
@@ -448,7 +449,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                 </div>
                 <div className="col-span-3 md:col-span-1">
                   {/* Off the unit price, as the supplier quotes it: the saving counts toward Procurement's KPIs. */}
-                  <Input type="number" min="0" max="100" step="0.01" inputMode="decimal" placeholder="0" value={l.discountPercent} onChange={(e) => updateLine(i, { discountPercent: e.target.value })} aria-label={`Line ${i + 1} discount percent`} className="text-right" />
+                  <Input type="number" min="0" max="100" step="0.0001" inputMode="decimal" placeholder="0" value={l.discountPercent} onChange={(e) => updateLine(i, { discountPercent: e.target.value })} aria-label={`Line ${i + 1} discount percent`} className="text-right" />
                 </div>
                 <div className="col-span-3 md:col-span-1">
                   <LineValue label={`Line ${i + 1} subtotal`} align="right">
@@ -686,7 +687,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
               <div className="col-span-3 md:col-span-1"><LineValue label={`${l.material.sku} quantity`} align="right">{formatNumber(Number(l.orderedQty))}</LineValue></div>
               <Input id={`po-edit-price-${l.id}`} aria-label={`${l.material.sku} unit price`} type="number" min="0" step="0.01" inputMode="decimal" placeholder="No price" value={prices[l.id] ?? ''}
                 onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right col-span-3 md:col-span-1" />
-              <Input id={`po-edit-discount-${l.id}`} aria-label={`${l.material.sku} discount percent`} type="number" min="0" max="100" step="0.01" inputMode="decimal" placeholder="0" value={discounts[l.id] ?? ''}
+              <Input id={`po-edit-discount-${l.id}`} aria-label={`${l.material.sku} discount percent`} type="number" min="0" max="100" step="0.0001" inputMode="decimal" placeholder="0" value={discounts[l.id] ?? ''}
                 onChange={(e) => setDiscounts((d) => ({ ...d, [l.id]: e.target.value }))} className="text-right col-span-3 md:col-span-1" />
               <div className="col-span-3 md:col-span-1">
                 <LineValue label={`${l.material.sku} subtotal`} align="right">{editMoney[i]?.subtotal ? formatMoney(editMoney[i]!.subtotal, po.currency ?? 'ZAR') : '—'}</LineValue>

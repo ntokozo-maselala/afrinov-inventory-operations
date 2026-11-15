@@ -16,7 +16,7 @@
 import { triggerDownload } from '../api/exportReport';
 import { drawLogo, drawLogoWatermark, pdfText } from './pdf';
 import { finishPages } from './poDocument';
-import type { SalesEquipmentLine, SalesRfq } from './salesRfq';
+import { isCharged, type SalesEquipmentLine, type SalesRfq } from './salesRfq';
 
 /** The wording Settings → Purchase orders has for quotations. */
 export interface QuotationCompany { name: string; notes: string; letterhead: string }
@@ -69,14 +69,24 @@ export function quotationDescription(line: Pick<SalesEquipmentLine, 'equipment' 
   return [line.equipment?.trim() || '-', ...details].join('\n');
 }
 
-/** The table's rows: each equipment line, then Delivery when it is charged, numbered on. */
+/**
+ * The table's rows: each equipment line, then Delivery when it is charged,
+ * numbered on. A line at quantity 0 shows its unit price and "R -", as AFRI-0413
+ * Rev 2 prints the flexibles the client supplies.
+ */
 export function quotationLines(r: Pick<SalesRfq, 'equipmentLines' | 'totals'>): string[][] {
   const rows = r.equipmentLines.map((l, i) => [
-    String(i + 1), quotationDescription(l), String(l.quantity), quotationMoney(l.totals.unitPrice), quotationMoney(l.totals.total),
+    String(i + 1), quotationDescription(l), String(l.quantity), quotationMoney(l.totals.unitPrice),
+    isCharged(l) ? quotationMoney(l.totals.total) : 'R -',
   ]);
   const delivery = Number(r.totals.delivery);
   if (delivery > 0) rows.push([String(rows.length + 1), 'Delivery', '1', quotationMoney(delivery), quotationMoney(delivery)]);
   return rows;
+}
+
+/** The Notes, one per line: the company's (Settings) first, then this quotation's own. */
+export function quotationNotes(companyNotes: string, r: Pick<SalesRfq, 'quoteNotes'>): string[] {
+  return [companyNotes, r.quoteNotes ?? ''].flatMap((n) => n.split('\n')).map((l) => l.trim()).filter(Boolean);
 }
 
 /** The numbered Conditions, each left off when blank. */
@@ -93,6 +103,11 @@ const INK: [number, number, number] = [20, 20, 20];
 const MUTED: [number, number, number] = [90, 99, 112];
 const SIDE = 18;
 const TOP = 14;
+// Where the quotation template puts its pictures, in mm on A4: the watermark
+// centred in the page's margins (14.1 mm left and right, 8.8 mm top, none at
+// the bottom), and the logo top right, as AFRI-0413 Rev 2 carries them.
+const WATERMARK_CENTRE = { x: 105.0, y: 152.9 } as const;
+const LOGO_BOX = { centre: 178.5, top: 14.0, height: 28.5 } as const;
 const BOTTOM = 14;
 
 export async function buildQuotation(r: SalesRfq, company: QuotationCompany, generatedAt = new Date()): Promise<ArrayBuffer> {
@@ -116,16 +131,17 @@ export async function buildQuotation(r: SalesRfq, company: QuotationCompany, gen
     const page = doc.getCurrentPageInfo().pageNumber;
     if (watermarked.has(page)) return;
     watermarked.add(page);
-    drawLogoWatermark(doc, pageWidth / 2, pageHeight / 2 + 10, 120);
+    drawLogoWatermark(doc, WATERMARK_CENTRE.x, WATERMARK_CENTRE.y);
   };
   watermark();
 
   // The logo top right, the date under it.
-  drawLogo(doc, pageWidth - SIDE - 20, TOP - 4, 26);
+  drawLogo(doc, LOGO_BOX.centre, LOGO_BOX.top, LOGO_BOX.height);
   const date = quotationDate(r.issuedAt ?? generatedAt.toISOString());
-  text(`DATE: ${date}`, pageWidth - SIDE, TOP + 32, { align: 'right' });
+  // Under the logo, where the template has the date (51.5 mm) and references (59.6 mm).
+  text(`DATE: ${date}`, pageWidth - SIDE, TOP + 38, { align: 'right' });
 
-  let y = TOP + 40;
+  let y = TOP + 46;
   text(`Our Reference: ${r.quoteReference ?? r.number}`, SIDE, y, { italic: true, size: 8 });
   text(`Your Reference: ${r.clientReference?.trim() || 'N/A'}`, pageWidth - SIDE, y, { italic: true, size: 8, align: 'right' });
 
@@ -171,6 +187,8 @@ export async function buildQuotation(r: SalesRfq, company: QuotationCompany, gen
     // A table running onto another page gets the watermark there too, under it.
     willDrawPage: watermark,
     styles: { font: 'helvetica', fontSize: 9, cellPadding: 1.4, lineColor: [0, 0, 0], lineWidth: 0.2, textColor: INK, overflow: 'linebreak' },
+    // No cell is filled, so the watermark shows through the table, as on the template.
+    bodyStyles: { fillColor: false },
     headStyles: { fillColor: false, textColor: INK, fontStyle: 'bold', halign: 'center' },
     footStyles: { fillColor: false, textColor: INK },
     // The Item, Qty and prices sit in the middle of a tall row, as the example has them.
@@ -182,13 +200,17 @@ export async function buildQuotation(r: SalesRfq, company: QuotationCompany, gen
   y = finalY() + 8;
 
   const ensure = (needed: number) => { if (y + needed > pageHeight - BOTTOM - 20) { doc.addPage(); watermark(); y = TOP; } };
-  if (company.notes) {
+  const notes = quotationNotes(company.notes, r);
+  if (notes.length) {
     ensure(14);
     text('Notes:', SIDE, y, { bold: true });
     y += 6;
-    for (const line of doc.splitTextToSize(pdfText(company.notes), width) as string[]) {
-      text(line, SIDE, y, { bold: true, italic: true });
-      y += 5;
+    for (const note of notes) {
+      for (const line of doc.splitTextToSize(pdfText(note), width) as string[]) {
+        ensure(6);
+        text(line, SIDE, y, { bold: true, italic: true });
+        y += 5;
+      }
     }
     y += 4;
   }

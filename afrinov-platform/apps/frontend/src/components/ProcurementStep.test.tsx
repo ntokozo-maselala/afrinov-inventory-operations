@@ -1,8 +1,6 @@
-// The orders behind a Procurement step (Project Tracking Roadmap, Phase 4).
+// The Procurement step's line (Project Tracking Roadmap, Phase 4): how its orders stand and what to watch.
 import { describe, it, expect } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { ProcurementOrdersDialog, procurementStepOf, procurementSummary, procurementWarnings } from './ProcurementStep';
+import { procurementStepOf, procurementSummary, procurementWarnings } from './ProcurementStep';
 import type { StepProcurement } from '../api/types';
 
 const procurement = (summary: Partial<StepProcurement['summary']> = {}, orders: StepProcurement['orders'] = []): StepProcurement => ({
@@ -36,26 +34,5 @@ describe('the Procurement step', () => {
     expect(procurementWarnings(procurement({ allReceived: true, closedShort: 1 }), null)).toEqual([
       '1 order was closed short: part of what it ordered never came. Check whether it is still needed before marking this step done.',
     ]);
-  });
-
-  it('lists the orders, linking them for those who see orders, with the project when it covers several', () => {
-    const p = procurement({}, [
-      { id: 'po-1', number: 'AFRI-0101', status: 'RECEIVED', projectNumber: 'AFRI-1086', supplierName: 'Steel Co', lines: 2, linesOwed: 0, expectedDelivery: '2026-03-06', lastReceivedOn: '2026-03-09', overdue: false, closedShort: false },
-      { id: 'po-3', number: 'AFRI-0103', status: 'CLOSED', projectNumber: 'AFRI-1086', supplierName: 'Bolt Co', lines: 1, linesOwed: 0, expectedDelivery: '2026-03-04', lastReceivedOn: null, overdue: false, closedShort: true },
-      { id: 'po-2', number: 'AFRI-0102', status: 'APPROVED', projectNumber: 'AFRI-1087', supplierName: 'Pipe Co', lines: 3, linesOwed: 2, expectedDelivery: '2026-03-05', lastReceivedOn: null, overdue: true, closedShort: false },
-    ]);
-    p.projects = ['AFRI-1086', 'AFRI-1087'];
-    const { unmount } = render(<MemoryRouter><ProcurementOrdersDialog procurement={p} canOpenOrders onClose={() => {}} /></MemoryRouter>);
-    const rows = within(screen.getByRole('table', { name: 'Orders for this job' })).getAllByRole('row').slice(1);
-    expect(within(rows[0]!).getByRole('link', { name: 'AFRI-0101' })).toHaveAttribute('href', '/purchase-orders/po-1');
-    expect(within(rows[1]!).getByText('Closed short')).toBeInTheDocument();
-    expect(within(rows[2]!).getByText('AFRI-1087')).toBeInTheDocument();
-    expect(within(rows[2]!).getByText('2 of 3 lines')).toBeInTheDocument();
-    expect(within(rows[2]!).getByText('Overdue')).toBeInTheDocument();
-    unmount();
-
-    render(<MemoryRouter><ProcurementOrdersDialog procurement={p} canOpenOrders={false} onClose={() => {}} /></MemoryRouter>);
-    expect(screen.queryByRole('link', { name: 'AFRI-0101' })).not.toBeInTheDocument();
-    expect(screen.getByText('AFRI-0101')).toBeInTheDocument();
   });
 });

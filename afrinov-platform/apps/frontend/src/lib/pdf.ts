@@ -12,7 +12,10 @@
 import { triggerDownload } from '../api/exportReport';
 import type { jsPDF } from 'jspdf';
 import { formatDateTime } from './format';
-import { LOGO_FILLS, LOGO_HIGHLIGHTS, LOGO_PATHS } from './logoArt';
+// Afrinov's official pictures, as its letterhead and quotation template carry
+// them, embedded so a PDF needs nothing from the network.
+import logoPng from '../assets/afrinov-logo.png?inline';
+import watermarkJpeg from '../assets/afrinov-watermark.jpeg?inline';
 
 export interface PdfColumn {
   header: string;
@@ -214,73 +217,26 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
   return doc.output('arraybuffer');
 }
 
-type PathOp = { op: 'm' | 'l' | 'c' | 'h'; c: number[] };
+/** Width over height of the logo picture (assets/afrinov-logo.png, 468 x 421). */
+const LOGO_RATIO = 468 / 421;
 
-/** An SVG path of absolute moves, lines and curves (all the logo uses) as PDF path operations. */
-export function parsePath(d: string): PathOp[] {
-  const tokens = d.match(/[MLCZ]|-?[\d.]+/gi) ?? [];
-  const ops: PathOp[] = [];
-  let command = '';
-  for (let i = 0; i < tokens.length;) {
-    const token = tokens[i]!;
-    if (/^[a-z]$/i.test(token)) {
-      command = token.toUpperCase();
-      i++;
-      if (command === 'Z') ops.push({ op: 'h', c: [] });
-      continue;
-    }
-    const n = command === 'C' ? 6 : 2;
-    ops.push({ op: command === 'M' ? 'm' : command === 'C' ? 'c' : 'l', c: tokens.slice(i, i + n).map(Number) });
-    i += n;
-    if (command === 'M') command = 'L'; // numbers after a move are lines
-  }
-  return ops;
-}
-
-/** The Afrinov logo as vector shapes, so it stays sharp in print: centred on `centre`, its top at `y`, `height` mm tall. */
+/** The Afrinov logo, the official picture: centred on `centre`, its top at `y`, `height` mm tall. */
 export function drawLogo(doc: jsPDF, centre: number, y: number, height: number) {
-  const shapes = LOGO_PATHS.map(parsePath);
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (const op of shapes.flat()) op.c.forEach((v, k) => (k % 2 === 0 ? xs : ys).push(v));
-  const left = Math.min(...xs);
-  const top = Math.min(...ys);
-  const scale = height / (Math.max(...ys) - top);
-  const x = centre - ((Math.max(...xs) - left) * scale) / 2;
-  shapes.forEach((ops, i) => {
-    if (LOGO_HIGHLIGHTS.has(i)) return; // too faint to show in print
-    doc.setFillColor(LOGO_FILLS[i] ?? '#E3001B');
-    doc.path(ops.map((o) => ({ op: o.op, c: o.c.map((v, k) => (k % 2 === 0 ? x + (v - left) * scale : y + (v - top) * scale)) })));
-    doc.fill();
-  });
+  const width = height * LOGO_RATIO;
+  doc.addImage(logoPng, 'PNG', centre - width / 2, y, width, height, 'afrinov-logo', 'SLOW');
 }
-
-/** The logo's flame mark alone (the red flame and the green leaf), without the wordmark. */
-const MARK_SHAPES = [0, 1];
 
 /**
- * The flame mark as a faint watermark, centred on (`centreX`, `centreY`),
- * `height` mm tall. Drawn before a page's content, so the text sits on top.
+ * The quotation template's watermark: the official flame picture, washed out as
+ * Word shows it (gain 0.3, black level 0.35), at the template's 536.6 x 352.1 pt
+ * (189.3 x 124.2 mm), centred on (`centreX`, `centreY`). The picture is the
+ * whole of the template's, white around the flame, so the flame sits where it
+ * does on the template. Drawn before a page's content, so the text sits on top.
  */
-export function drawLogoWatermark(doc: jsPDF, centreX: number, centreY: number, height: number, opacity = 0.15) {
-  const shapes = MARK_SHAPES.map((i) => parsePath(LOGO_PATHS[i]!));
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (const op of shapes.flat()) op.c.forEach((v, k) => (k % 2 === 0 ? xs : ys).push(v));
-  const left = Math.min(...xs);
-  const top = Math.min(...ys);
-  const scale = height / (Math.max(...ys) - top);
-  const x = centreX - ((Math.max(...xs) - left) * scale) / 2;
-  const y = centreY - height / 2;
-  const gs = doc as unknown as { GState: new (o: { opacity: number }) => unknown; setGState: (g: unknown) => void };
-  doc.saveGraphicsState();
-  gs.setGState(new gs.GState({ opacity }));
-  shapes.forEach((ops, n) => {
-    doc.setFillColor(LOGO_FILLS[MARK_SHAPES[n]!] ?? '#E3001B');
-    doc.path(ops.map((o) => ({ op: o.op, c: o.c.map((v, k) => (k % 2 === 0 ? x + (v - left) * scale : y + (v - top) * scale)) })));
-    doc.fill();
-  });
-  doc.restoreGraphicsState();
+export const WATERMARK_SIZE = { width: 189.3, height: 124.2 } as const;
+export function drawLogoWatermark(doc: jsPDF, centreX: number, centreY: number) {
+  const { width, height } = WATERMARK_SIZE;
+  doc.addImage(watermarkJpeg, 'JPEG', centreX - width / 2, centreY - height / 2, width, height, 'afrinov-watermark', 'SLOW');
 }
 
 export async function downloadPdf(report: PdfReport, filename: string): Promise<void> {

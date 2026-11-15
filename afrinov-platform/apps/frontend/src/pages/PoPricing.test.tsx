@@ -183,17 +183,17 @@ describe('line discounts', () => {
     })));
   });
 
-  it('takes a discount typed without a leading 0, and refuses one with 3 places', async () => {
+  it('takes a discount typed without a leading 0, and refuses one with 5 places', async () => {
     appAt('/purchase-orders/new');
     await screen.findByRole('heading', { name: 'New purchase order' });
     fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-za' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
     fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '1' } });
-    fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '10.005' } });
+    fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '10.00005' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     expect(await screen.findByText(/A discount must be between 0% and 100%/)).toBeInTheDocument();
-    // Just off two places, as the server refuses it.
+    // Just off four places, as the server refuses it.
     fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '4.350000007' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     await waitFor(() => expect(screen.getByText(/A discount must be between 0% and 100%/)).toBeInTheDocument());

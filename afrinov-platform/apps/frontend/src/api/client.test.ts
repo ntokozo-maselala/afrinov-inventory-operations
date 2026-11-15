@@ -116,7 +116,7 @@ describe('api/client.ts — API client utilities', () => {
       ));
       const err = await rejection(api.get("/stock"));
       expect(err.message).not.toMatch(/ECONNREFUSED/);
-      expect(err.message).toBe('Afrinov Inventory is temporarily unavailable. Please try again shortly.');
+      expect(err.message).toBe('Afrinov OMS is temporarily unavailable. Please try again shortly.');
     });
 
     it('rejects a domain message that looks like a stack trace', async () => {

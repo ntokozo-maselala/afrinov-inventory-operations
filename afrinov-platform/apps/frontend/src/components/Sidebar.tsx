@@ -214,8 +214,7 @@ export function Sidebar({ groups, onNavigate, isMobile = false }: SidebarProps) 
         </span>
         {!isCollapsed && !isMobile && (
           <div className="leading-tight truncate min-w-0">
-            <div className="text-sm font-semibold text-surface-900 dark:text-surface-900">Afrinov IMS</div>
-            <div className="text-xs text-surface-500 dark:text-surface-500">Inventory & Operations</div>
+            <div className="text-sm font-semibold text-surface-900 dark:text-surface-900">Afrinov OMS</div>
           </div>
         )}
       </div>

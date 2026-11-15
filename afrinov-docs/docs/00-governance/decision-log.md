@@ -1410,7 +1410,7 @@ option.
   every counted item holding part of a unit (`PART_UNIT`) and every unit not on
   the list (`UNLISTED_UNIT`) as blocking. The real import names them all at once.
 
-Migration `20260101000060_stock_accuracy` adds `tool_repairs`,
+Migration `20260101000064_stock_accuracy` adds `tool_repairs`,
 `supplier_returns`, the movement type, the two receipt line columns and the two
 settings.
 
