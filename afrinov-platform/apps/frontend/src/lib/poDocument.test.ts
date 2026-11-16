@@ -3,7 +3,7 @@
 // writes its pages uncompressed.
 import { describe, it, expect } from 'vitest';
 import {
-  approvedWithoutSigning, buildPoDocument, companyFromSettings, documentBlocks, documentFilename, documentLines, documentStamp, revisionLabel, smallPrint, type PoDocumentOrder,
+  approvedWithoutSigning, buildPoDocument, companyFromSettings, documentBlocks, documentFilename, documentHead, documentLines, documentStamp, documentTotals, hasLineDiscounts, revisionLabel, smallPrint, type PoDocumentOrder,
 } from './poDocument';
 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
@@ -118,21 +118,89 @@ describe('documentLines', () => {
     expect(second![5]).not.toBe('-');
   });
 
-  // The template has no discount column: the supplier is shown what it is paid.
-  it('prints a discounted line at its discounted unit price', () => {
-    const [line] = documentLines(order({ lines: [{ ...order().lines[0]!, discountPercent: '20', subtotal: '100.00', vat: '15.00', net: '115.00' }] }));
-    expect(line![3]).toMatch(/^R\s10,00$/);
-    expect(line![8]).toMatch(/^R\s115,00$/);
+  it('has no Discount column when no line has a discount', () => {
+    expect(hasLineDiscounts(order())).toBe(false);
+    expect(documentHead(order())).toEqual(['Item', 'Units', 'Description', 'Unit price', 'Qty', 'Delivery', 'Subtotal', 'VAT 15%', 'Net value']);
+    expect(documentLines(order())[0]).toHaveLength(9);
   });
 
-  it('keeps the places of a discounted price, so it agrees with the subtotal', () => {
-    // 12.50 less 12.5% = 10.9375; at 10.94, three would be 32.82, not the 32.81 charged.
-    const [line] = documentLines(order({ lines: [{ ...order().lines[0]!, orderedQty: '3', discountPercent: '12.5', subtotal: '32.81', vat: '4.92', net: '37.73' }] }));
-    expect(line![3]).toMatch(/^R\s10,9375$/);
+  // As the supplier quoted it: the list price and their discount, then what they are paid.
+  it('prints a discounted line at its list price, with the discount beside it', () => {
+    const po = order({ lines: [{ ...order().lines[0]!, discountPercent: '20', subtotal: '100.00', vat: '15.00', net: '115.00' }, order().lines[1]!] });
+    expect(documentHead(po)).toEqual(['Item', 'Units', 'Description', 'Unit price', 'Discount', 'Qty', 'Delivery', 'Subtotal', 'VAT 15%', 'Net value']);
+    const [line, unpriced] = documentLines(po);
+    expect(line![3]).toMatch(/^R\s12,50$/);
+    expect(line![4]).toBe('20%');
+    expect(line![7]).toMatch(/^R\s100,00$/);
+    expect(line![9]).toMatch(/^R\s115,00$/);
+    expect(unpriced![3]).toBe('-');
+    expect(unpriced![4]).toBe('-');
+  });
+
+  it("prints a supplier's discount to 4 places, as Hytec's 27.7778%", () => {
+    const po = order({ lines: [{ ...order().lines[0]!, unitPrice: '4433.04', orderedQty: '8', discountPercent: '27.7778', subtotal: '25613.11', vat: '3841.97', net: '29455.08' }] });
+    const [line] = documentLines(po);
+    expect(line![3]).toMatch(/^R\s4\s433,04$/);
+    expect(line![4]).toBe('27.7778%');
+  });
+});
+
+describe('documentTotals', () => {
+  it('is the order total alone when no line has a discount', () => {
+    const rows = documentTotals(order({ totals: { subtotal: '125.00', vat: '18.75', net: '143.75', unpricedLines: 1, discount: '0.00' } }));
+    expect(rows.map((r) => r.label)).toEqual(['Total amount of purchase order (ZAR)']);
+  });
+
+  it('shows what the lines come to before their discounts and what they save, as the order page does', () => {
+    const po = order({
+      lines: [{ ...order().lines[0]!, discountPercent: '27.7778' }],
+      totals: { subtotal: '55693.54', vat: '8354.04', net: '64047.58', unpricedLines: 0, discount: '21420.62' },
+    });
+    const [before, saved, total] = documentTotals(po);
+    expect(before!.label).toBe('Before discounts');
+    expect(before!.subtotal).toMatch(/^R\s77\s114,16$/);
+    expect(saved!.label).toBe('Line discounts');
+    expect(saved!.subtotal).toMatch(/^-R\s21\s420,62$/);
+    expect(total!.subtotal).toMatch(/^R\s55\s693,54$/);
+    expect(total!.net).toMatch(/^R\s64\s047,58$/);
   });
 });
 
 describe('buildPoDocument', () => {
+  it('prints the discount column and what the discounts save on an order with line discounts', async () => {
+    const out = text(await buildPoDocument(order({
+      lines: [{ ...order().lines[0]!, discountPercent: '20', subtotal: '100.00', vat: '15.00', net: '115.00' }],
+      totals: { subtotal: '100.00', vat: '15.00', net: '115.00', unpricedLines: 0, discount: '25.00' },
+    }), COMPANY));
+    for (const value of ['Discount', '20%', 'Before discounts', 'Line discounts', 'Total amount of purchase order']) expect(out).toContain(value);
+  });
+
+  // AFRI-0413's order: five discounted lines, penalties and collection, with the
+  // signature boxes still on its one page.
+  it('keeps a five-line discounted order, signature boxes and all, on one page', async () => {
+    const line = (sku: string) => ({ material: { sku, name: 'Rexroth filter element 2.0160 PWR10-A00-0-M0', unitOfMeasure: 'each' }, orderedQty: '2', unitPrice: '4433.04', discountPercent: '27.7778', subtotal: '6403.28', vat: '960.49', net: '7363.77', deliveryDate: '2026-11-17' });
+    const out = text(await buildPoDocument(order({
+      deliveryMethod: 'COLLECTION', penaltiesApply: true, notes: 'As per your quotation 48025009 Rev 01 for AFRI-02A-0413-02-01.',
+      lines: ['R928006809', 'R928005963', 'HP75L8-12MB', 'R928006755', 'R928005891'].map(line),
+      totals: { subtotal: '32016.40', vat: '4802.46', net: '36818.86', unpricedLines: 0, discount: '12313.80' },
+    }), {
+      // The wording in Settings as Afrinov has it, with no Code of Conduct.
+      ...COMPANY, codeOfConduct: '',
+      terms: 'The Supplier shall deliver all Goods and/or Services by the Purchase Order delivery date and notify the Purchaser in writing within 24 hours of any actual or anticipated delay.',
+      latePenalty: 'Late delivery will incur a penalty of 2% of the contract price per week (or part thereof), up to a maximum of 10%.',
+      documentation: 'Provide Material Certificates and Material Data Sheets where applicable.',
+      invoicing: 'The Purchaser may withhold payment for late delivery, missing documentation, or defective/non-conforming Goods or Services.',
+    }));
+    expect(out).toContain('Supplier acceptance');
+    expect(out).toContain('Page 1 of 1');
+  });
+
+  it('leaves the discount rows off an order without discounts', async () => {
+    const out = text(await buildPoDocument(order(), COMPANY));
+    expect(out).not.toContain('Before discounts');
+    expect(out).not.toContain('Line discounts');
+  });
+
   it('puts the saved supplier details in the PDF and leaves out the supplier master details', async () => {
     const out = text(await buildPoDocument(order({
       supplierContactName: 'Sean Buyer', supplierContactPhone: '060 970 5820', supplierContactEmail: 'branch@example.com', supplierAddress: 'Branch Depot\nRoodekop',

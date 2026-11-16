@@ -19,7 +19,7 @@ export interface PoDocumentLine {
   material: { sku: string; name: string; unitOfMeasure: string };
   orderedQty: string;
   unitPrice?: string | null;
-  /** Percent off the unit price: printed as the discounted price, as the template has no discount column. */
+  /** Percent off the unit price. An order with any discounted line prints the list price and a Discount column. */
   discountPercent?: string | null;
   subtotal?: string | null;
   vat?: string | null;
@@ -203,23 +203,62 @@ export function documentBlocks(po: PoDocumentOrder, company: PoCompany): { suppl
   };
 }
 
-/** The lines table, numbered as on the template, with "-" where a line has no price. */
+/** Whether any line has a discount: the lines then show the list price and the discount, as the supplier quoted them. */
+export function hasLineDiscounts(po: Pick<PoDocumentOrder, 'lines'>): boolean {
+  return po.lines.some((l) => Number(l.discountPercent ?? 0) > 0);
+}
+
+/** The lines table's headings: a Discount column after the unit price when any line has one. */
+export function documentHead(po: Pick<PoDocumentOrder, 'lines' | 'vatRate'>): string[] {
+  return ['Item', 'Units', 'Description', 'Unit price', ...(hasLineDiscounts(po) ? ['Discount'] : []), 'Qty', 'Delivery', 'Subtotal', `VAT ${formatRate(po.vatRate ?? 0)}`, 'Net value'];
+}
+
+/**
+ * The lines table, numbered as on the template, with "-" where a line has no price.
+ * With discounts, a line shows its list price and its discount, and the subtotal
+ * after the discount: what the supplier quoted, and what they are paid.
+ */
 export function documentLines(po: PoDocumentOrder): string[][] {
   const currency = po.currency ?? 'ZAR';
   const money = (v: string | null | undefined) => (v === null || v === undefined ? dash : formatMoney(v, currency));
-  return po.lines.map((l, i) => [
-    String(i + 1),
-    l.material.unitOfMeasure,
-    `${l.material.sku}  ${l.material.name}`,
-    // The template has no discount column: the price the supplier is paid,
-    // to as many places as it has (up to 4), so it times the quantity gives the subtotal.
-    l.unitPrice === null || l.unitPrice === undefined ? dash : formatUnitPrice(discountedUnitPrice(l), currency),
-    formatNumber(Number(l.orderedQty)),
-    l.deliveryDate ?? po.expectedDeliveryDate ? formatDate((l.deliveryDate ?? po.expectedDeliveryDate)!) : dash,
-    money(l.subtotal),
-    money(l.vat),
-    money(l.net),
-  ]);
+  const discounts = hasLineDiscounts(po);
+  return po.lines.map((l, i) => {
+    const priced = l.unitPrice !== null && l.unitPrice !== undefined;
+    const off = Number(l.discountPercent ?? 0);
+    return [
+      String(i + 1),
+      l.material.unitOfMeasure,
+      `${l.material.sku}  ${l.material.name}`,
+      // Without discounts this is the price paid, to as many places as it has (up to 4).
+      priced ? formatUnitPrice(discounts ? String(l.unitPrice) : discountedUnitPrice(l), currency) : dash,
+      ...(discounts ? [priced && off > 0 ? formatRate(off) : dash] : []),
+      formatNumber(Number(l.orderedQty)),
+      l.deliveryDate ?? po.expectedDeliveryDate ? formatDate((l.deliveryDate ?? po.expectedDeliveryDate)!) : dash,
+      money(l.subtotal),
+      money(l.vat),
+      money(l.net),
+    ];
+  });
+}
+
+export interface DocumentTotalRow { label: string; subtotal: string; vat: string; net: string }
+
+/**
+ * The rows under the lines: with discounts, what the lines come to before them
+ * and what they save, as the order page shows; then the order total.
+ */
+export function documentTotals(po: Pick<PoDocumentOrder, 'lines' | 'totals' | 'currency'>): DocumentTotalRow[] {
+  const totals = po.totals;
+  if (!totals) return [];
+  const currency = po.currency ?? 'ZAR';
+  const rows: DocumentTotalRow[] = [];
+  const saved = Number(totals.discount ?? 0);
+  if (hasLineDiscounts(po) && saved > 0) {
+    rows.push({ label: 'Before discounts', subtotal: formatMoney((Number(totals.subtotal) + saved).toFixed(2), currency), vat: '', net: '' });
+    rows.push({ label: 'Line discounts', subtotal: `-${formatMoney(saved.toFixed(2), currency)}`, vat: '', net: '' });
+  }
+  rows.push({ label: `Total amount of purchase order (${currency})`, subtotal: formatMoney(totals.subtotal, currency), vat: formatMoney(totals.vat, currency), net: formatMoney(totals.net, currency) });
+  return rows;
 }
 
 const INK: [number, number, number] = [33, 38, 46];
@@ -236,7 +275,6 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   const pageHeight = doc.internal.pageSize.getHeight();
   const width = pageWidth - 2 * SIDE;
   const finalY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
-  const currency = po.currency ?? 'ZAR';
   const blocks = documentBlocks(po, company);
 
   // Heading: the logo on the left, the order number on the right, as on the Order sheet.
@@ -274,33 +312,46 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   const rightY = pairsTable('Order', blocks.order, detailsTop, SIDE + half + 6);
   let y = Math.max(leftY, rightY) + 6;
 
-  // The lines, and the order total under them.
+  // The lines, and the order total under them. A Discount column only when a line has one.
   const totals = po.totals;
+  const discounts = hasLineDiscounts(po);
+  const before = discounts ? 7 : 6; // columns ahead of Subtotal
+  const moneyColumns = discounts ? [7, 8, 9] : [6, 7, 8];
+  const footRows = documentTotals(po);
   autoTable(doc, {
     startY: y,
     margin: { left: SIDE, right: SIDE, top: TOP, bottom: BOTTOM + 6 },
     tableWidth: width,
     theme: 'grid',
-    head: [['Item', 'Units', 'Description', 'Unit price', 'Qty', 'Delivery', 'Subtotal', `VAT ${formatRate(po.vatRate ?? 0)}`, 'Net value'].map(pdfText)],
+    head: [documentHead(po).map(pdfText)],
     body: documentLines(po).map((r) => r.map(pdfText)),
-    foot: totals ? [[
-      { content: pdfText(`Total amount of purchase order (${currency})`), colSpan: 6, styles: { halign: 'right' } },
-      pdfText(formatMoney(totals.subtotal, currency)),
-      pdfText(formatMoney(totals.vat, currency)),
-      pdfText(formatMoney(totals.net, currency)),
-    ]] : undefined,
+    // The figures above the total are lighter than the total itself.
+    foot: footRows.length ? footRows.map((r, i) => {
+      const light = i < footRows.length - 1 ? { fontStyle: 'normal' as const } : {};
+      return [
+        { content: pdfText(r.label), colSpan: before, styles: { halign: 'right' as const, ...light } },
+        { content: pdfText(r.subtotal), styles: light },
+        pdfText(r.vat),
+        pdfText(r.net),
+      ];
+    }) : undefined,
     showFoot: 'lastPage',
     styles: { font: 'helvetica', fontSize: 7.5, cellPadding: 1.3, lineColor: RULE, lineWidth: 0.1, textColor: INK, overflow: 'linebreak' },
     headStyles: { fillColor: [52, 58, 69], textColor: 255, fontStyle: 'bold' },
     footStyles: { fillColor: [243, 244, 246], textColor: INK, fontStyle: 'bold' },
-    columnStyles: {
+    columnStyles: discounts ? {
+      0: { cellWidth: 8, halign: 'right' }, 1: { cellWidth: 10 }, 2: { cellWidth: 'auto' },
+      3: { cellWidth: 18, halign: 'right' }, 4: { cellWidth: 16.5, halign: 'right' }, 5: { cellWidth: 8, halign: 'right' }, 6: { cellWidth: 18 },
+      7: { cellWidth: 20, halign: 'right' }, 8: { cellWidth: 18, halign: 'right' }, 9: { cellWidth: 21, halign: 'right' },
+    } : {
       0: { cellWidth: 9, halign: 'right' }, 1: { cellWidth: 12 }, 2: { cellWidth: 'auto' },
       3: { cellWidth: 20, halign: 'right' }, 4: { cellWidth: 11, halign: 'right' }, 5: { cellWidth: 18 },
       6: { cellWidth: 21, halign: 'right' }, 7: { cellWidth: 19, halign: 'right' }, 8: { cellWidth: 22, halign: 'right' },
     },
     didParseCell: (data) => {
       // Headers and totals line up with the figures under them.
-      if (data.section !== 'body' && [0, 3, 4, 6, 7, 8].includes(data.column.index)) data.cell.styles.halign = 'right';
+      const right = [0, 3, ...(discounts ? [4, 5] : [4]), ...moneyColumns];
+      if (data.section !== 'body' && right.includes(data.column.index)) data.cell.styles.halign = 'right';
     },
   });
   y = finalY() + 5;
@@ -341,7 +392,8 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   }
 
   // Originator, authorization and supplier acceptance, as at the foot of the Order sheet.
-  ensure(34);
+  // Room for the gap and the boxes only: the page's foot already keeps the footer clear.
+  ensure(2 + 26);
   y += 2;
   const signed = po.signatures ?? [];
   const finishedBy = approvedWithoutSigning(po);
