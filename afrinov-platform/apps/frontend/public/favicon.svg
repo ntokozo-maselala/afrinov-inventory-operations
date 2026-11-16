@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!--
+    Afrinov OMS tab icon: the Afrinov mark on a white tile, cut for 16 and 32 px.
+    The midrib and veins of the full mark (src/assets/icon/afrinov-mark.svg) are
+    left out: at this size they are thinner than a pixel and smear. The leaf and
+    the flame meet on x 32, a pixel edge at both 16 and 32 px, so the colour
+    change itself stays sharp. Colours are the logo's own.
+    After editing, run `npm run icons` in apps/frontend to rebuild favicon.ico.
+    (No double hyphen in this comment: XML does not allow one.)
+  -->
+  <title>Afrinov OMS</title>
+  <rect width="64" height="64" rx="14" fill="#FFFFFF"/>
+  <path fill="#21BB00" d="M32 26A16 16 0 0 0 32 58Z"/>
+  <path fill="#B60012" d="M32 6C34 17 48 27 48 42A16 16 0 0 1 32 58Z"/>
+</svg>

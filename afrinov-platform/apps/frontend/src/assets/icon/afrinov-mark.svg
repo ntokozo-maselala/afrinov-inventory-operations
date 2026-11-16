@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!--
+    The Afrinov mark, full cut, redrawn from the logo (src/assets/afrinov-logo.png):
+    a green leaf (half disc) beside a crimson flame, split by the midrib, with the
+    leaf's vein and two flame veins. Used for icons of 48 px and up; the 16 and 32 px
+    tab icon is public/favicon.svg. The mark is centred on (32, 30.5).
+    scripts/build-icons.mjs places it on its tiles: run `npm run icons` in
+    apps/frontend after editing.
+  -->
+  <defs>
+    <mask id="afrinov-mark-cuts" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="#FFFFFF"/>
+      <g fill="none" stroke="#000000">
+        <path d="M32 0V61" stroke-width="2"/>
+        <path d="M24.6 31.5C21.4 40 23.6 50 31 57" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M32 49L40.5 40.5M32 41.5L38.2 35.3" stroke-width="2" stroke-linecap="round"/>
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#afrinov-mark-cuts)">
+    <path fill="#21BB00" d="M32 24A17 17 0 0 0 32 58Z"/>
+    <path fill="#B60012" d="M32 3C34 14 49 25 49 41A17 17 0 0 1 32 58Z"/>
+  </g>
+</svg>
