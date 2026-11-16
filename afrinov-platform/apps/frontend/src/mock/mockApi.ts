@@ -372,6 +372,14 @@ const MOCK_OWN_ORDER = 'You raised this order, so someone else must sign it.';
 // Who signs as the server works it out (po-approval.ts). The mock has one
 // signed-in user, so it signs every step of the demo, except of an order it
 // raised: as the server, nobody signs an order they raised (ADR-028), or one twice.
+function mockRateAge(currency: string, locked: unknown): { setAt: string; days: number; stale: boolean } | null {
+  if (currency === 'ZAR' || (locked !== null && locked !== undefined)) return null;
+  const row = MOCK_SETTINGS[`purchaseOrders.exchangeRate${currency}`];
+  if (!row || !(Number(row.value) > 0)) return null;
+  const days = Math.max(0, Math.floor((Date.now() - Date.parse(row.updatedAt)) / 86_400_000));
+  return { setAt: row.updatedAt, days, stale: days > 30 };
+}
+
 function mockApproval(po: MockPurchaseOrder) {
   const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
   const currency = po.currency ?? 'ZAR';
@@ -392,6 +400,8 @@ function mockApproval(po: MockPurchaseOrder) {
   return {
     ...totals, currency, reason, noRate,
     exchangeRate: rate === null ? null : String(rate),
+    // As the server (system audit D8): until a rate is locked, when today's was last changed.
+    rate: mockRateAge(currency, po.exchangeRate),
     randValue: unpriced || noRate ? null : value.toFixed(2),
     canApprove: po.status === 'PENDING_APPROVAL' && !unpriced && !noRate && !own,
     steps: stepNames.map((step) => {
@@ -2690,7 +2700,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.exchangeRateEUR': row('purchaseOrders.exchangeRateEUR', 0, 'number', 'purchase_orders', 'Rand per euro, to work out who signs an order in EUR. An order keeps the rate it was submitted with.'),
     'purchaseOrders.exchangeRateGBP': row('purchaseOrders.exchangeRateGBP', 0, 'number', 'purchase_orders', 'Rand per pound, to work out who signs an order in GBP. An order keeps the rate it was submitted with.'),
     'purchaseOrders.requireApprovalBeforeProcessing': row('purchaseOrders.requireApprovalBeforeProcessing', true, 'boolean', 'purchase_orders', 'When on, submission routes through PENDING_APPROVAL; when off, submission auto-approves.'),
-    'purchaseOrders.allowCancellation': row('purchaseOrders.allowCancellation', true, 'boolean', 'purchase_orders', 'Allow cancelling purchase orders before delivery.'),
+    'purchaseOrders.allowCancellation': row('purchaseOrders.allowCancellation', true, 'boolean', 'purchase_orders', 'Allow cancelling purchase orders once submitted, before delivery. A draft can always be cancelled.'),
     'purchaseOrders.allowEditAfterApproval': row('purchaseOrders.allowEditAfterApproval', true, 'boolean', 'purchase_orders', 'Allow editing a purchase order once it has been approved.'),
     'purchaseOrders.deliveryTo': row('purchaseOrders.deliveryTo', 'Afrinov (PTY) Ltd', 'string', 'purchase_orders', 'Who goods are delivered to, on new purchase orders.'),
     'purchaseOrders.deliveryAddress': row('purchaseOrders.deliveryAddress', '10 Lime Street, Icon Industrial Park\nSunderland Ridge, Centurion 0157', 'string', 'purchase_orders', 'Delivery address on new purchase orders. One line per address line.'),

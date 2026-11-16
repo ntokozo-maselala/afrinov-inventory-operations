@@ -470,13 +470,17 @@ describe('PurchaseOrderService lifecycle', () => {
     await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', true, 'user-1');
   });
 
-  it('cancel is rejected when allowCancellation is off', async () => {
+  it('with allowCancellation off, a submitted order is not cancelled but a draft still is (system audit D6)', async () => {
     const { SettingsService } = await import('../settings/settings.service.js');
     await SettingsService.ensureSeeded();
     await SettingsService.set('purchaseOrders.allowCancellation', false, 'user-1');
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
-    await expect(PurchaseOrderService.cancel({ id: po.id, reason: 'no' }, 'user-1')).rejects.toThrow(/disabled/i);
+    const line = { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] };
+    const submitted = await PurchaseOrderService.create(line, 'user-1');
+    await PurchaseOrderService.submit(submitted.id, 'user-1');
+    await expect(PurchaseOrderService.cancel({ id: submitted.id, reason: 'no' }, 'user-1')).rejects.toThrow(/switched off/i);
+    const draft = await PurchaseOrderService.create(line, 'user-1');
+    expect((await PurchaseOrderService.cancel({ id: draft.id, reason: 'Started by mistake' }, 'user-1'))?.status).toBe('CANCELLED');
     await SettingsService.set('purchaseOrders.allowCancellation', true, 'user-1');
   });
 });

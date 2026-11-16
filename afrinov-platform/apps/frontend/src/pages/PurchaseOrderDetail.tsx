@@ -894,6 +894,8 @@ interface ApprovalView extends PoTotals {
   exchangeRate: string | null;
   /** In another currency with no exchange rate yet. */
   noRate: boolean;
+  /** Until the order locks a rate when submitted: when today's was last changed (system audit D8). */
+  rate?: { setAt: string; days: number; stale: boolean } | null;
   /** The signatures it needs, in signing order. */
   steps: Array<{ step: string; label: string; signature: { name: string; signedAt: string; standIn: boolean } | null }>;
   next: { step: string; label: string } | null;
@@ -938,8 +940,20 @@ function ApprovalPanel({ view, onAddPrices }: { view: ApprovalView; onAddPrices?
       {view.next && (names.length > 0
         ? <>Can sign next: {names.join(', ')}.</>
         : <>Nobody holds the {view.next.label} role yet. An admin can assign it under Settings → Users &amp; permissions.</>)}
+      {view.rate && <RateAge currency={view.currency} rate={view.rate} />}
     </Alert>
   );
+}
+
+/**
+ * When the exchange rate was typed in: it decides who signs, and is locked on
+ * the order when it is submitted, so an old one is called out (system audit D8).
+ */
+function RateAge({ currency, rate }: { currency: string; rate: { setAt: string; days: number; stale: boolean } }) {
+  const ago = rate.days === 0 ? 'today' : rate.days === 1 ? '1 day ago' : `${rate.days} days ago`;
+  return rate.stale
+    ? <p className="mt-2 font-medium text-warning-700">The {currency} rate was last changed on {formatDate(rate.setAt)}, {ago}. Check it under Settings → Purchase orders before this order is submitted: the rate is locked on it then.</p>
+    : <p className="mt-2 text-xs text-surface-500">{currency} rate last changed on {formatDate(rate.setAt)} ({ago}).</p>;
 }
 
 /** The order details from the template's Inputs sheet, under the summary. */

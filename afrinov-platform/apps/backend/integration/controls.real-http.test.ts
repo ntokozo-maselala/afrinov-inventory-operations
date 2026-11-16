@@ -110,6 +110,9 @@ describe('P3 controls over real HTTP', () => {
     expect(log.status).toBe(200);
     expect(log.body.items.map((i) => i.outcome)).toEqual(['SIGN_OUT', 'FAILED', 'SIGN_IN']);
     expect(log.body.items.every((i) => i.user?.id === storeId && !!i.ip)).toBe(true);
+    // Signing out ended that sign-in on the server (system audit F7); the tests after this sign in again.
+    expect((await store('GET', '/auth/me')).status).toBe(401);
+    store = client(server.port, await login(server.port, storeEmail, `It-${run}-STORE_CONTROLLER`));
     expect((await store('GET', '/sign-ins')).status).toBe(403);
     expect((await admin('GET', '/sign-ins?outcome=MAYBE')).status).toBe(400);
   });

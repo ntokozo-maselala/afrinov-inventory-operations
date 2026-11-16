@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1357, frontend 1577)
+npm test               # both workspaces (backend 1366, frontend 1615)
 npm run build          # both workspaces
 ```
 
@@ -144,7 +144,9 @@ Use these forms; the older spellings still work but are deprecated or removed.
   of posting twice. The key is scoped by actor, route *and* concrete path, so
   the same key on a different record is a `CONFLICT`, not a replay. Wire new
   mutation forms through `useIdempotencyKey` and rotate the key only after a
-  confirmed success — never after an `OUTCOME_UNKNOWN` failure.
+  confirmed success — never after an `OUTCOME_UNKNOWN` failure. Creating a
+  supplier, purchase order or RFQ takes a key too (ADR-042): a create service
+  called from `idempotentMutation` takes the transaction it is given.
 - **Quantities follow the item's unit.** Units live in `units_of_measure`;
   a COUNTED unit (each, pair, box) takes whole numbers, a MEASURED one (m, kg, l)
   up to 4 decimals. Every service that takes a quantity a person typed calls
@@ -214,7 +216,9 @@ Use these forms; the older spellings still work but are deprecated or removed.
   the idle time in force now. On the frontend `SessionKeeper` renews through
   `POST /auth/refresh` only after the person's own input (pointer, key, wheel,
   touch), never because a request was made, so a page that polls still signs
-  out when left alone (ADR-035).
+  out when left alone (ADR-035). Signing out ends the sign-in on the server:
+  `POST /auth/logout` sets `users.signed_out_before` and the hook refuses an
+  older sign-in, as for a password change (ADR-042).
 - **A password change ends every other sign-in; someone always holds Admin.**
   A sign-in that began before `users.password_changed_at` is refused, and while
   `must_change_password` is set (an Admin's temporary password) only

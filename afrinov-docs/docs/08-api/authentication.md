@@ -39,8 +39,10 @@
   the general limit (`RATE_LIMIT_AUTH`), and 10 wrong passwords per account in
   15 minutes. Behind a proxy, `TRUST_PROXY` names it so the address counted is
   the person's (`12-operations/reverse-proxy.md`).
-- **Planned:** server-side logout/revocation (logging out only discards the
-  token in the browser).
+- **Signing out ends the sign-in on the server** (ADR-042): `POST /auth/logout`
+  sets `users.signed_out_before` to just after the sign-in began, and a token
+  from a sign-in begun before it is refused ("You signed out. Sign in again."),
+  copies included. A sign-in begun later carries on.
 
 ## Evidence
 - `afrinov-platform/apps/backend/src/modules/identity/auth.routes.ts:5-26`

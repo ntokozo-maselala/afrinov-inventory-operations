@@ -196,6 +196,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     if (signInPredatesPassword(authTimeOf(payload as { iat?: unknown; auth_time?: unknown }), account.passwordChangedAt)) {
       return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated('Your password was changed. Sign in again.'), req.id));
     }
+    // A sign-in that was signed out stays out, copies of its token included (system audit F7).
+    if (signInPredatesPassword(authTimeOf(payload as { iat?: unknown; auth_time?: unknown }), account.signedOutBefore)) {
+      return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated('You signed out. Sign in again.'), req.id));
+    }
     // With an Admin's temporary password, choosing a new one is all a person can do.
     if (account.mustChangePassword && !PASSWORD_CHANGE_PATHS.has(pathnameOf(req.url))) {
       return reply.code(403).send(toErrorEnvelope(Errors.forbidden('Choose a new password before carrying on.'), req.id));

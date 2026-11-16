@@ -14,7 +14,7 @@ each route handler then calls `requirePermission` for the permission it
 needs (not one central check per request). The role-to-permission mapping
 in the database is written by the seed from `shared/permissions.ts`;
 changing a role's grants needs a code change and a re-seed — there is no
-role-editing endpoint (`manage:roles` is unused).
+role-editing endpoint (`manage:roles` was retired, ADR-042).
 
 ## Evidence
 - `afrinov-platform/apps/backend/src/shared/permissions.ts:3-91`

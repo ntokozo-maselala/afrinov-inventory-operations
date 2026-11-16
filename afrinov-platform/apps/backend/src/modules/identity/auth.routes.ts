@@ -6,6 +6,7 @@ import { Errors } from '../../shared/errors.js';
 import { issueSessionToken } from './session.js';
 import { authTimeOf } from './session-policy.js';
 import { recordSignIn } from './sign-in-log.js';
+import { prisma } from '../../shared/db.js';
 
 export const loginSchema = z.object({
   email: z.email(),
@@ -52,10 +53,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ token, user });
   });
 
-  // The person signs out (system audit F3): written on the sign-in log. The
-  // token itself runs out on its own; the screen forgets it.
+  // The person signs out: written on the sign-in log (system audit F3), and
+  // the sign-in ended on the server (F7). Every sign-in that began no later
+  // than this one is refused from now on, so a copied token is useless; one
+  // begun after it, on another computer or a moment later here, carries on.
   app.post('/auth/logout', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { sub, email } = req.user as { sub: string; email: string };
+    const began = authTimeOf(req.user as { iat?: unknown; auth_time?: unknown });
+    if (began !== null) {
+      const before = new Date((began + 1) * 1000);
+      // Never moved back: a later sign-out stands.
+      await prisma.user.updateMany({ where: { id: sub, OR: [{ signedOutBefore: null }, { signedOutBefore: { lt: before } }] }, data: { signedOutBefore: before } });
+    }
     await recordSignIn({ userId: sub, email, outcome: 'SIGN_OUT', ip: req.ip, userAgent: req.headers['user-agent'] ?? null },
       (err) => req.log.warn({ err: err.message }, 'Sign-in log write failed'));
     return reply.code(204).send();

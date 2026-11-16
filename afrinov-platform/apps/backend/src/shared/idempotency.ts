@@ -32,6 +32,10 @@ export const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 /** Endpoint scope: one key is unique per route, not shared across the API. */
 export type IdempotencyEndpoint =
+  // Creating records a retry would otherwise make twice (system audit D5).
+  | 'POST /suppliers'
+  | 'POST /purchase-orders'
+  | 'POST /rfqs'
   | 'POST /inventory-issues'
   | 'POST /inventory-transfers'
   | 'POST /inventory-adjustments'

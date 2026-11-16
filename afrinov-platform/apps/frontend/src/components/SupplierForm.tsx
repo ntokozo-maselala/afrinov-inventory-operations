@@ -8,6 +8,7 @@ import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { useIdempotencyKey } from '../lib/idempotency';
 import type { Supplier } from '../api/types';
 
 export interface CreatedSupplier { id: string; name: string }
@@ -39,6 +40,8 @@ export function SupplierForm({ initial, onCancel, onSaved, onError, onSuccess }:
   const [services, setServices] = useState(initial?.services ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
   const [busy, setBusy] = useState(false);
+  // A retry after a dropped connection returns the first supplier, not a second (system audit D5).
+  const idem = useIdempotencyKey('create-supplier');
   const [validation, setValidation] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
@@ -67,10 +70,14 @@ export function SupplierForm({ initial, onCancel, onSaved, onError, onSuccess }:
     try {
       const saved = initial
         ? await api.patch<CreatedSupplier>(`/suppliers/${initial.id}`, body)
-        : await api.post<CreatedSupplier>('/suppliers', body);
+        : await api.post<CreatedSupplier>('/suppliers', body, { idempotencyKey: idem.keyFor(body) });
+      if (!initial) idem.confirm();
       onSuccess();
       onSaved(saved);
-    } catch (err) { onError(err as ApiError); }
+    } catch (err) {
+      if (!initial) idem.resolve(err);
+      onError(err as ApiError);
+    }
     finally { setBusy(false); }
   }
 

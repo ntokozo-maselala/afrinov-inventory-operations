@@ -76,7 +76,7 @@ describe('the new-order form with project material', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
       projectNumber: '1402', lines: [expect.objectContaining({ materialId: 'p-1369', orderedQty: 4 })],
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 
   // Qodo, PR #130: the server refuses an order for a deactivated project.

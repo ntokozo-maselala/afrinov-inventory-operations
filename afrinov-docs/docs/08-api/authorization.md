@@ -29,8 +29,8 @@ Notes on the table, against the original proposal:
   ledger like every signed-in user.
 - Only ADMIN holds `manage:users`, `manage:settings` and `view:audit_log`.
   Settings changes additionally check for the ADMIN role in the route.
-- `edit:supplier` and `manage:roles` are granted but no endpoint checks them
-  (TD-011, TD-013). `checkout:tool` and `checkin:tool` are checked by the
+- `edit:supplier` is granted but no endpoint checks it (TD-013).
+  `manage:roles` is retired (ADR-042): roles are fixed in code. `checkout:tool` and `checkin:tool` are checked by the
   Tools endpoints; `extend:tool_loan` by `POST /tools/loans/:id/due-date` (the code keeps its first name; it allows a later or earlier date).
 - Marking an issue used up or broken is checked as `issue:inventory`;
   withdrawing that mark as `reverse:inventory_transaction` (ADR-026).

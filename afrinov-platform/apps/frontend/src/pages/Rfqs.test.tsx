@@ -132,7 +132,7 @@ describe('New request for quotation', () => {
 
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/rfqs', expect.objectContaining({
       projectNumber: 'AFRI-1325', description: undefined, lines: [{ materialId: 'm-1', quantity: 4.37 }], supplierIds: ['s-1', 's-3'],
-    })));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
     await screen.findByRole('heading', { name: 'AFRI-02A-1325-02-01' });
   });
 

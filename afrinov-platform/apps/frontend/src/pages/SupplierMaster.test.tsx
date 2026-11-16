@@ -92,7 +92,7 @@ describe('Suppliers list', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
     expect(mockPost).toHaveBeenCalledWith('/suppliers', expect.objectContaining({
       name: 'Fast Flame', vendorCode: 'V003', currency: 'ZAR', paymentTerms: 'C.O.D', services: 'Laser Cut & Machining', address: undefined, website: undefined,
-    }));
+    }), expect.objectContaining({ idempotencyKey: expect.any(String) }));
   });
 
   it('refuses a vendor code with spaces or symbols before sending it', async () => {

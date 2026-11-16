@@ -21,6 +21,7 @@ interface UserRow {
   active: boolean;
   mustChangePassword?: boolean;
   passwordChangedAt?: Date | null;
+  signedOutBefore?: Date | null;
   roles: { role: { id: string; name: string; permissions: { permission: { code: string } }[] } }[];
 }
 
@@ -57,6 +58,13 @@ vi.mock('../../shared/db.js', () => ({
   get prisma() {
     const fake = {
       user: {
+        updateMany: async ({ where, data }: { where: { id: string }; data: { signedOutBefore: Date } }) => {
+          const row = db.users.get(where.id);
+          // As the route's filter: never moved back.
+          if (!row || (row.signedOutBefore && row.signedOutBefore >= data.signedOutBefore)) return { count: 0 };
+          db.users.set(where.id, { ...row, ...data });
+          return { count: 1 };
+        },
         update: async ({ where, data }: { where: { id: string }; data: Partial<UserRow> }) => {
           const row = { ...db.users.get(where.id)!, ...data };
           db.users.set(where.id, row);
@@ -250,6 +258,38 @@ describe('auth routes', () => {
       const token = await signIn();
       const res = await app.inject({ method: 'GET', url: '/api/v1/auth/refresh', headers: { authorization: `Bearer ${token}` } });
       expect(res.statusCode).toBe(404);
+    });
+  });
+
+  // System audit F7: signing out ends the sign-in on the server, not just in the browser.
+  describe('signing out', () => {
+    afterEach(() => { db.users.get('user-active')!.signedOutBefore = null; });
+    const logout = (token: string) => app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: { authorization: `Bearer ${token}` } });
+
+    it('refuses the signed-out token, and any copy of it, at once', async () => {
+      at('2026-11-15T08:00:00Z');
+      const token = await signIn();
+      expect((await me(token)).statusCode).toBe(200);
+      at('2026-11-15T08:05:00Z');
+      expect((await logout(token)).statusCode).toBe(204);
+      const after = await me(token);
+      expect(after.statusCode).toBe(401);
+      expect(after.json().error.message).toBe('You signed out. Sign in again.');
+      expect((await refresh(token)).statusCode).toBe(401);
+    });
+
+    it('leaves a sign-in begun after it working, here or on another computer', async () => {
+      at('2026-11-15T08:00:00Z');
+      const old = await signIn();
+      at('2026-11-15T08:01:00Z');
+      const other = await signIn();
+      // The old sign-out lands late, after the newer sign-in: it ends only sign-ins up to its own.
+      at('2026-11-15T08:02:00Z');
+      expect((await logout(old)).statusCode).toBe(204);
+      expect((await me(old)).statusCode).toBe(401);
+      expect((await me(other)).statusCode).toBe(200);
+      const again = await signIn();
+      expect((await me(again)).statusCode).toBe(200);
     });
   });
 

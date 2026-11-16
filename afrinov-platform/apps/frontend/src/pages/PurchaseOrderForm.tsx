@@ -47,6 +47,7 @@ import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } f
 import { QuantityInput } from '../components/QuantityInput';
 import { useUnits } from '../hooks/useUnits';
 import { firstLineQuantityError, readQuantity } from '../lib/quantity';
+import { useIdempotencyKey } from '../lib/idempotency';
 import {
   PurchaseOrderDetailsFields, SupplierDetailsFields, checkDetails, detailsBody, draftFromOrder, supplierDetails,
   type OrderDetails, type OrderDetailsDraft,
@@ -181,6 +182,8 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const [vatOverride, setVatOverride] = useState<string | null>(null);
   const [details, setDetails] = useState<OrderDetailsDraft>(() => ({ ...draftFromOrder({}), afrinovContact: user?.name ?? '' }));
   const [busy, setBusy] = useState<'draft' | 'submit' | null>(null);
+  // A retry after a dropped connection opens the first draft, not a second (system audit D5).
+  const idem = useIdempotencyKey('create-purchase-order');
   const [validation, setValidation] = useState<string | null>(null);
   const settings = useApi<Record<string, unknown>>(`/settings/values?keys=${SETTING_KEYS.join(',')}`);
   const settingRate = Number(settings.data?.['purchaseOrders.vatRate'] ?? 15);
@@ -337,7 +340,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
     setBusy(submit ? 'submit' : 'draft');
     let createdId: string | null = null;
     try {
-      const created = await api.post<{ id: string; number: string }>('/purchase-orders', {
+      const orderBody = {
         supplierId,
         notes: notes.trim() || undefined,
         expectedDeliveryDate: dated.expected || undefined,
@@ -350,8 +353,10 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
           ...(Number(l.discountPercent) > 0 ? { discountPercent: Number(l.discountPercent) } : {}),
           ...(l.deliveryDate ? { deliveryDate: l.deliveryDate } : {}),
         })),
-      });
+      };
+      const created = await api.post<{ id: string; number: string }>('/purchase-orders', orderBody, { idempotencyKey: idem.keyFor(orderBody) });
       createdId = created.id;
+      idem.confirm();
       if (submit) await api.post(`/purchase-orders/${created.id}/submit`);
       toast.success(submit ? `${created.number} submitted for approval` : `${created.number} saved as a draft`);
       navigate(orderPath({ id: created.id, projectNumber: orderProject || null }));
@@ -362,6 +367,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
         toast.error('Saved as a draft, but not submitted', e.message);
         navigate(orderPath({ id: createdId, projectNumber: orderProject || null }));
       } else {
+        idem.resolve(err);
         toast.error('Could not save the purchase order', e.message);
         setValidation(e.message);
       }

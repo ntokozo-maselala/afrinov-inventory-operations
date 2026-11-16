@@ -198,7 +198,7 @@ describe('ReceiveStock with a new supplier (ADR-018)', () => {
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Kenflex' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save supplier' }));
 
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/suppliers', expect.objectContaining({ name: 'Kenflex' })));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/suppliers', expect.objectContaining({ name: 'Kenflex' }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
     await waitFor(() => expect(screen.getByLabelText(/^Supplier(?! address)/)).toHaveValue('s-new'));
     expect(screen.queryByRole('button', { name: 'Save supplier' })).not.toBeInTheDocument();
   });

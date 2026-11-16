@@ -1481,3 +1481,54 @@ so. Tests: `sa-dates.test.ts`, `month-close.service.test.ts`,
 `reports.real-http.test.ts`, `datesSouthAfrica.test.ts`, `MonthEnd.test.tsx`,
 `LocationStock.test.ts`, `WriteOffApprovals.test.tsx`, `DashboardControls.test.tsx`,
 `PoActivity.test.tsx`, `IssueStock.test.tsx`, `mockStoresToProject.test.ts`.
+
+### ADR-042 — Housekeeping: retry-safe creates, drafts always cancellable, dated exchange rates, a server sign-out, manage:roles retired, a second store controller and browser tests in CI
+**Date:** 2026-11-15 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P6, housekeeping) found small
+gaps. Creating a supplier, an order or an RFQ took no retry key, so a retry
+after a dropped connection made a second record (D5). With cancelling switched
+off, a draft couldn't be cleared away (D6). Exchange rates are typed in by hand
+and nothing said how old they were, though they decide who signs a foreign
+order (D8). Signing out only cleared the browser, so a copied token worked
+until its idle time ran out (F7). `manage:roles` was granted and checked by
+nothing (F8). With one store controller, Admin is the only approver of their
+write-offs and their only cover (H4). The Playwright browser tests ran in no
+workflow (H5). The owner approved the phase and answered no questions, so each
+finding takes its recommended option.
+
+**Decision:**
+- **Creating a supplier, purchase order or RFQ takes an Idempotency-Key**, as
+  the stock movements do: a retry with the same key and body returns the first
+  record, and the same key with different details is refused
+  (`IDEMPOTENCY_KEY_REUSED`). The forms send one per submission.
+- **A draft order can always be cancelled.** `purchaseOrders.allowCancellation`
+  governs orders once submitted.
+- **An exchange rate says when it was last changed**: on Settings, and on the
+  approval panel of an order that has not locked a rate yet
+  (`GET /purchase-orders/:id/approval` returns `rate: { setAt, days, stale }`).
+  Over 30 days it is called out, before the order is submitted at it.
+- **Signing out ends the sign-in on the server.** `POST /auth/logout` sets
+  `users.signed_out_before` to one second after the sign-in began; the
+  authentication hook refuses any sign-in that began before it, as it does one
+  older than a password change. The token, and any copy of it, stops working
+  at once. A sign-in begun later, on another computer or a moment after, carries on,
+  so a slow sign-out can't end the next person's session.
+- **`manage:roles` is retired**: removed from the code, its row deleted.
+  Roles stay fixed in code.
+- **A second person holds the store controller role** (no code): an account
+  for whoever covers the store, who approves the store controller's write-offs
+  over the limit and covers when they are away. The go-live guide says so.
+- **The browser tests gate a change**: `frontend-ci.yml` runs them (`e2e`) in
+  Chromium against the real backend and a throwaway database, on frontend and
+  backend changes. A sign-out journey is added.
+
+Migration `20260101000066_housekeeping` adds `users.signed_out_before`,
+deletes `manage:roles`, and rewrites the cancelling setting's description.
+
+**Consequences:** Signing out on a shared counter computer is final. A person
+signed in on two computers who signs out on the one they signed in to first
+keeps the later one. Frontend CI now also runs on backend changes, and takes a
+few minutes longer. Tests: `auth.routes.test.ts`, `procurement.service.test.ts`,
+`rate-age.test.ts`, `housekeeping.real-http.test.ts`, `PoDrafts.test.tsx`,
+`RateChanged.test.tsx`, `e2e/sign-out.spec.ts`.

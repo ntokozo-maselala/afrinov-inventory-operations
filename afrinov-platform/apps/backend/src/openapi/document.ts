@@ -190,7 +190,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/auth/logout', tag: 'Auth', summary: 'Sign out',
-    description: 'Writes SIGN_OUT on the sign-in log (system audit F3) and answers 204. The token itself runs out on its own; the screen forgets it.',
+    description: 'Writes SIGN_OUT on the sign-in log (system audit F3) and answers 204. The sign-in ends on the server too (system audit F7): every sign-in that began no later than this one is refused from now on, copies of its token included; one begun after it carries on.',
     success: 204, errors: [401],
   },
 
@@ -815,7 +815,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/suppliers', tag: 'Suppliers', summary: 'Create a supplier', permissions: [P.CreateSupplier],
-    description: 'Names are unique ignoring case, and so are vendor codes. Refused with 409 when either is taken.',
+    description: 'Names are unique ignoring case, and so are vendor codes. Refused with 409 when either is taken. Retry-safe with an Idempotency-Key header (system audit D5).',
     body: createSupplierSchema, success: 201, errors: [409],
   },
   { method: 'get', path: '/suppliers/:id', tag: 'Suppliers', summary: 'Get a supplier', errors: [404] },
@@ -850,7 +850,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/purchase-orders', tag: 'Purchase orders', summary: 'Create a draft purchase order',
-    description: 'With a project, a project order of Projects items, any of them: the order says which project they are for, whatever project an item was tagged with. Without one, a Stores order of Stores items only.',
+    description: 'With a project, a project order of Projects items, any of them: the order says which project they are for, whatever project an item was tagged with. Without one, a Stores order of Stores items only. Retry-safe with an Idempotency-Key header (system audit D5).',
     procurement: true, byOrderKind: P.CreatePurchaseOrder, body: createPOSchema, success: 201, errors: [404],
   },
   {
@@ -1013,7 +1013,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/rfqs', tag: 'Requests for quotation', summary: 'Raise a draft request for quotation',
-    description: "For one project and Projects items only, any of them (the RFQ says which project they are for): Stores stock is ordered without an RFQ. Numbered AFRI-02A-<project>-02-<nn> (other project numbers RFQ-<project>-<nn>). The description defaults to the project's name.",
+    description: "For one project and Projects items only, any of them (the RFQ says which project they are for): Stores stock is ordered without an RFQ. Numbered AFRI-02A-<project>-02-<nn> (other project numbers RFQ-<project>-<nn>). The description defaults to the project's name. Retry-safe with an Idempotency-Key header (system audit D5).",
     procurement: true, permissions: [P.CreatePurchaseOrder], body: createRfqSchema, success: 201,
   },
   {

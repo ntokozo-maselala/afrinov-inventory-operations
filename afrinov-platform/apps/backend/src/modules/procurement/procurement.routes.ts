@@ -287,8 +287,8 @@ export async function supplierRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid supplier payload', details: parsed.error.flatten() },
       });
     }
-    const created = await SupplierService.create(parsed.data, actorId(req));
-    return reply.code(201).send(created);
+    // Retry-safe with an Idempotency-Key: a retry after a dropped connection returns the first supplier (system audit D5).
+    return idempotentMutation(req, reply, 'POST /suppliers', async (tx) => ({ statusCode: 201, body: await SupplierService.create(parsed.data, actorId(req), tx) }));
   });
 
   app.get('/suppliers/:id', { preHandler: [app.authenticate] }, async (req) => {
@@ -360,8 +360,10 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     await requireForKind(req, parsed.data.projectNumber, PermissionCode.CreatePurchaseOrder);
-    const created = await PurchaseOrderService.create(parsed.data, actorId(req));
-    return reply.code(201).send(created);
+    // Retry-safe with an Idempotency-Key, as suppliers and RFQs (system audit D5).
+    return idempotentMutation(req, reply, 'POST /purchase-orders', async (tx) => ({
+      statusCode: 201, body: await PurchaseOrderService.create(parsed.data, actorId(req), tx ? { within: tx } : {}),
+    }));
   });
 
   app.patch('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req, reply) => {

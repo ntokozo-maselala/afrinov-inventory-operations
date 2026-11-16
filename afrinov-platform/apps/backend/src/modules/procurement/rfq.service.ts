@@ -411,8 +411,8 @@ export const RfqService = {
     return rfqs.map((r) => ({ ...r, closed: isClosed(r, today) }));
   },
 
-  async getById(id: string) {
-    const rfq = await prisma.rfq.findUnique({ where: { id }, include: DETAIL });
+  async getById(id: string, db: Prisma.TransactionClient | typeof prisma = prisma) {
+    const rfq = await db.rfq.findUnique({ where: { id }, include: DETAIL });
     if (!rfq) throw Errors.notFound('Rfq');
     return withQuotes(rfq, Number(await SettingsService.getValue<number>('purchaseOrders.vatRate')) || 0);
   },
@@ -424,9 +424,10 @@ export const RfqService = {
    * or inactive item or supplier, a missing or closed project, a Stores item,
    * unassigned project material, or another project's material.
    */
-  async create(input: CreateRfqInput, actorId: string) {
+  /** `within` joins the caller's transaction, as a retry-safe create does (system audit D5). */
+  async create(input: CreateRfqInput, actorId: string, within?: Prisma.TransactionClient) {
     const projectNumber = cleanText(input.projectNumber);
-    const id = await prisma.$transaction(async (tx) => {
+    const write = async (tx: Prisma.TransactionClient) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:rfq-number'))`;
       const projectName = projectNumber ? await openProjectName(projectNumber, tx) : null;
       await checkLines(input.lines, projectNumber, tx);
@@ -461,9 +462,10 @@ export const RfqService = {
         },
       });
       return rfq.id;
-    });
+    };
+    const id = within ? await write(within) : await prisma.$transaction(write);
     // The same shape as GET /rfqs/:id.
-    return RfqService.getById(id);
+    return RfqService.getById(id, within);
   },
 
   /**

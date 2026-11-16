@@ -14,6 +14,8 @@ export interface AccountState {
   /** An Admin's temporary password is still in use (ADR-036). */
   mustChangePassword: boolean;
   passwordChangedAt: Date | null;
+  /** Sign-ins that began before this were signed out (system audit F7). */
+  signedOutBefore: Date | null;
 }
 
 // DB-fresh active check. A token issued before a user was deactivated still
@@ -33,12 +35,13 @@ export async function accountInDb(userId: string, req?: FastifyRequest): Promise
   }
   const row = await prisma.user.findUnique({
     where: { id: userId },
-    select: { active: true, mustChangePassword: true, passwordChangedAt: true },
+    select: { active: true, mustChangePassword: true, passwordChangedAt: true, signedOutBefore: true },
   });
   const account = {
     active: !!row?.active,
     mustChangePassword: row?.mustChangePassword === true,
     passwordChangedAt: row?.passwordChangedAt ?? null,
+    signedOutBefore: row?.signedOutBefore ?? null,
   };
   if (req) accountCache.set(req, account);
   return account;

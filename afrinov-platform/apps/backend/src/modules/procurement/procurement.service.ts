@@ -23,7 +23,7 @@ import { toDecimal } from '../../shared/decimal.js';
 import { checkWholeUnits } from '../../shared/units.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
-import { OWN_ORDER, STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
+import { OWN_ORDER, STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, rateAge, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
 import { refuseProjectMaterialOnStoresOrder, refuseStoresOnProjectOrder } from '../inventory/material-section.js';
 import { inactiveMessage } from '../inventory/material-status.js';
@@ -105,15 +105,15 @@ export const SupplierService = {
     return supplier;
   },
 
-  async create(input: CreateSupplierInput, actorId: string) {
+  /** `within` joins the caller's transaction, as a retry-safe create does (system audit D5). */
+  async create(input: CreateSupplierInput, actorId: string, within?: Prisma.TransactionClient) {
     const name = cleanText(input.name);
     if (!name) throw Errors.validation('Name is required');
     await assertSupplierNameFree(name);
     const vendorCode = cleanVendorCode(input.vendorCode);
     if (vendorCode) await assertVendorCodeFree(vendorCode);
 
-    try {
-      return await prisma.$transaction(async (tx) => {
+    const write = async (tx: Prisma.TransactionClient) => {
         const created = await tx.supplier.create({
           data: {
             name,
@@ -139,7 +139,9 @@ export const SupplierService = {
           },
         });
         return created;
-      });
+    };
+    try {
+      return await (within ? write(within) : prisma.$transaction(write));
     } catch (err) {
       rethrowSupplierClash(err);
     }
@@ -834,6 +836,8 @@ export const PurchaseOrderService = {
       ...orderTotals(po.lines, po.vatRate ?? 0),
       currency: po.currency,
       exchangeRate: exchangeRateOf(po, settings)?.toString() ?? null,
+      // Until the order locks a rate on submission: when today's was last changed (system audit D8).
+      rate: po.exchangeRate === null ? await rateAge(po.currency) : null,
       randValue: state.randValue,
       noRate: state.block?.code === 'NO_RATE',
       steps: state.steps.map((step) => {
@@ -952,13 +956,15 @@ export const PurchaseOrderService = {
 
   async cancel(input: CancelInput, actorId: string) {
     const allowCancellation = await SettingsService.getValue<boolean>('purchaseOrders.allowCancellation');
-    if (!allowCancellation) {
-      throw Errors.forbidden('Cancelling purchase orders is disabled in system settings');
-    }
     return prisma.$transaction(async (tx) => {
       await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id } });
       if (!po) throw Errors.notFound('PurchaseOrder');
+      // A draft has gone to nobody, so it can always be cleared away; the setting
+      // governs orders once submitted (system audit D6).
+      if (!allowCancellation && po.status !== 'DRAFT') {
+        throw Errors.forbidden('Cancelling submitted purchase orders is switched off in Settings. A draft can still be cancelled.');
+      }
       const allowed: PurchaseOrderStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'];
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Purchase order in status ${po.status} cannot be cancelled`, { status: po.status });
