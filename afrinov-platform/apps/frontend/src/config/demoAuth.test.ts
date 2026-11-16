@@ -26,9 +26,16 @@ describe('demoAuth config', () => {
 
   it('exposes the documented sign-in copy', async () => {
     const { SIGN_IN_TITLE, SIGN_IN_TAGLINE, SIGN_IN_SUBTITLE } = await import('./demoAuth');
-    expect(SIGN_IN_TAGLINE).toBe('Welcome to your Inventory management system');
+    expect(SIGN_IN_TAGLINE).toBe('Welcome to your operations management system');
     expect(SIGN_IN_TITLE).toBe('Sign in to Afrinov OMS');
-    expect(SIGN_IN_SUBTITLE).toBe('Access your inventory management workspace');
+    expect(SIGN_IN_SUBTITLE).toBe('Access your operations management workspace');
+  });
+
+  it('describes the system as operations management, not inventory management', async () => {
+    const { SIGN_IN_TITLE, SIGN_IN_TAGLINE, SIGN_IN_SUBTITLE } = await import('./demoAuth');
+    for (const copy of [SIGN_IN_TAGLINE, SIGN_IN_TITLE, SIGN_IN_SUBTITLE]) {
+      expect(copy).not.toMatch(/inventory management|\bIMS\b/i);
+    }
   });
 
   it('isDemoCredentials matches case-insensitive on email and exact on password', async () => {
