@@ -281,5 +281,10 @@ Use these forms; the older spellings still work but are deprecated or removed.
   sign-in limit (`afrinov-docs/docs/12-operations/reverse-proxy.md`).
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
+- **Icons come from two SVGs.** `public/favicon.svg` is the tab icon (16 and
+  32 px, no veins) and `src/assets/icon/afrinov-mark.svg` the full mark; after
+  editing either, run `npm run icons --workspace=@afrinov/frontend` and commit
+  the PNGs and `favicon.ico` it writes. `src/icons.test.ts` checks the links,
+  sizes and that both SVGs parse (an XML comment can't hold a double hyphen).
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See
   the comment above the `@theme inline` block before editing colour tokens.
