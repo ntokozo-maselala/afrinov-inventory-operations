@@ -57,11 +57,12 @@ export const DEMO_CREDENTIALS: DemoCredentials = {
 
 /**
  * Tagline shown on the sign-in page. Centralised so the brand copy has one
- * source of truth.
+ * source of truth. OMS is the Operations Management System (index.html's
+ * description): keep these in step with it, not with "inventory".
  */
-export const SIGN_IN_TAGLINE = 'Welcome to your Inventory management system';
+export const SIGN_IN_TAGLINE = 'Welcome to your operations management system';
 export const SIGN_IN_TITLE = 'Sign in to Afrinov OMS';
-export const SIGN_IN_SUBTITLE = 'Access your inventory management workspace';
+export const SIGN_IN_SUBTITLE = 'Access your operations management workspace';
 
 /**
  * Compare the supplied credentials against the demo pair. The comparison is
