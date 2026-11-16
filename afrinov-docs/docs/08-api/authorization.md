@@ -11,14 +11,14 @@ role's grants each time it runs.
 ## Roles as implemented
 | Role | Permissions |
 |---|---|
-| ADMIN | All 40 permission codes; signs purchase orders only by also holding a signing role (ADR-030) |
+| ADMIN | All 42 permission codes; signs purchase orders, and approves project issues, only by also holding the role that does (ADR-030, ADR-043) |
 | STORE_CONTROLLER | create/edit material; create/edit/delete location, manage location status; receive, issue, transfer, adjust inventory; reverse inventory transaction; manage racks, projects, recipients; order Stores stock: see, raise, edit, submit, approve (within his approval limit), cancel, close and receive orders without a project (ADR-020, ADR-021), but not project orders or RFQs; receive project orders through a receiving view with no prices, into stock held for the project (ADR-027); view goods receipts; view reports; view users (lookup); check out/in tool; change a tool loan's due date |
 | PROCUREMENT | create/edit supplier; view, create, submit, cancel, close project orders (those with a project, ADR-020), whose delivery the store receives (ADR-027), and requests for quotation, recommending one supplier's quote on each for Sales to cost from (not an award); no Stores orders; receive inventory; view goods receipts; manage projects; view reports |
 | APPROVER | view project orders; view reports. Signs nothing since ADR-030 |
 | PROCUREMENT_MANAGER | sign project and Stores orders (ADR-030), and see them; view Sales RFQs and labour rates; view reports |
-| DIRECTOR | sign project orders at or above the threshold (ADR-030), and see project orders; view Sales RFQs and approve their price or send them back (`approve:sales_rfq`), never one they raised or submitted; view labour rates; view reports |
+| DIRECTOR | sign project orders at or above the threshold (ADR-030), and see project orders; stand in for the Workshop Manager approving project issues (`approve:project_issue`, ADR-043); view Sales RFQs and approve their price or send them back (`approve:sales_rfq`), never one they raised or submitted; view labour rates; view reports |
 | CEO | stand in on project orders (ADR-030), and see them; view Sales RFQs and labour rates; view reports |
-| WORKSHOP_MANAGER | stand in on project and Stores orders (ADR-030), and see them; keep the labour rates Sales prices labour at (`manage:labour_rates`); view reports |
+| WORKSHOP_MANAGER | stand in on project and Stores orders (ADR-030), and see them; approve or reject the storeman's issues of project material, possibly for less (`approve:project_issue`, ADR-043); keep the labour rates Sales prices labour at (`manage:labour_rates`); view reports |
 | SALES | view and manage Sales RFQs, whose price and margin buyers and the store can't see (`view:sales_rfq`, `manage:sales_rfq`): raise, edit, submit to the Director and cancel, choosing one supplier's quote on each of the project's sent Procurement RFQs (supplier names and quote totals only, with Procurement's recommendation; no line prices, and no Procurement RFQ to open or change) and reading the labour rates; the Procurement savings report, which needs `view:sales_rfq`; manage projects; view reports. No suppliers, purchase orders or Procurement RFQs |
 | TECHNICIAN | issue inventory; view reports; view users (lookup); check out/in tool |
 | VIEWER | view reports |
@@ -56,6 +56,10 @@ Notes on the table, against the original proposal:
   the list of closed months, `view:reports`. The waiting write-offs summary
   needs what the list does: `approve:write_off` or `adjust:inventory`
   (ADR-041).
+- Asking to issue project material needs `issue:inventory`, as does
+  cancelling one's own request; approving or rejecting one needs
+  `approve:project_issue` and the Workshop Manager or Director role, and never
+  one's own. The list and its summary need either permission (ADR-043).
 - Approvers cannot reject an order (no reject transition; they lack
   `cancel:purchase_order`) — see ADR-007.
 

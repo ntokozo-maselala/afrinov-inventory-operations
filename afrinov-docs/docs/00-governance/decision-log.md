@@ -1532,3 +1532,81 @@ keeps the later one. Frontend CI now also runs on backend changes, and takes a
 few minutes longer. Tests: `auth.routes.test.ts`, `procurement.service.test.ts`,
 `rate-age.test.ts`, `housekeeping.real-http.test.ts`, `PoDrafts.test.tsx`,
 `RateChanged.test.tsx`, `e2e/sign-out.spec.ts`.
+
+### ADR-043 — Project material is issued on the Workshop Manager's approval; Stores stock has nothing to do with projects
+**Date:** 2026-11-16 · **Status:** Accepted
+
+**Context:** Project material comes in through the store and goes straight to
+the workshop floor (ADR-027). The storeman issued it at the counter, and the
+worker collecting it confirmed the slip with a PIN or signature (ADR-034).
+The material goes to the workshop rather than to one person, so a worker's
+PIN proved little, and nobody who answers for the floor signed off on what
+reached it. The owner asked that the Workshop Manager approve project issues
+before the stock moves, and answered the questions on 16 Nov 2026: the
+Director stands in; the approval replaces the collector's confirmation on a
+project slip; less than was asked may be approved; approval is always
+required, with no bypass for urgent cases and no setting to switch it off;
+the storeman may cancel their own request. Separately, leftovers moved to
+Stores are Stores stock and nothing else, and Stores stock is not issued to
+projects at all, "to avoid confusion". This reverses ADR-041's last point
+(system audit E4), and the 3 Nov rule that a leftover kept its item's project
+and was offered on that project's issues.
+
+**Decision:**
+- **The storeman asks; the Workshop Manager approves.** On Issue stock, an
+  issue with a project is sent for approval (`POST /issue-requests`,
+  `issue:inventory`): nothing moves. It is checked as the issue will be
+  (recipient, open project, active items and locations, whole units, no
+  tools), and what other waiting requests ask for counts against the stock
+  held for the project, so two can't wait for the same stock. `POST
+  /inventory-issues` refuses a project (400).
+- **Approving posts the issue.** `POST /issue-requests/:id/approve`
+  (`approve:project_issue`) posts the slip for the quantities approved, each
+  line in full unless given less, 0 leaving a line out, at least one issued.
+  The movement is the storeman's, as an approved write-off is its asker's.
+  The issue's own checks run again, so stock that moved since is refused
+  (422) and the request keeps waiting. Only the Workshop Manager approves, or
+  the Director standing in (`stand_in`); Admin approves only by holding one of
+  those roles, as with orders (ADR-030); nobody decides their own request.
+- **The approval is the slip's confirmation.** Approving writes a
+  `receipt_confirmations` row with method `APPROVAL`, no signer, the slip's
+  fingerprint, and the approver as captured_by. The collector's PIN,
+  signature or paper slip isn't asked for on a project slip; the slip shows
+  "Approved by …". This amends ADR-034 for project slips: there, nobody
+  confirmed on another's behalf.
+- **Rejecting and cancelling post nothing.** The Workshop Manager or the
+  Director rejects with a reason; the storeman who asked cancels their own
+  with a reason. Each decision is in the audit log (`ISSUE_REQUEST`,
+  `_APPROVE`, `_REJECT`, `_CANCEL`).
+- **A project issue takes only the project's own stock.** Every line of a
+  request is stock held for its project; Stores stock is never issued to a
+  project, and stock held for a project only to that project
+  (`checkIssueStock`).
+- **A leftover is Stores stock first.** A Projects item's Stores stock (from
+  before stock was held for its project) isn't issued at all
+  (`refuseProjectsItemFromStores`); it moves to Stores from Project leftovers,
+  now at any time, as only an open project's held stock waits for it to close.
+  Nor is a Projects item received at the counter as Stores stock.
+- **A project with an issue waiting can't close**: it is a blocker, as a
+  waiting write-off is (ADR-038).
+- **Issues to approve** (`/stock/issue-approvals`) lists what waits, with
+  what is held for the project at each line now, and the decided ones; the
+  Dashboard shows how many wait and the oldest, from 2 days in a warning
+  colour (`GET /issue-requests/summary`).
+
+Migration `20260101000067_project_issue_approval` adds `issue_requests` and
+`issue_request_lines`, the `APPROVAL` receipt method (its CHECK now allows an
+approval with no signer), and `approve:project_issue` for the Workshop
+Manager, the Director and Admin.
+
+**Consequences:** Project material reaches the floor only when the Workshop
+Manager acts: when they are away, the Director must. Consumables the workshop
+uses on a job are no longer charged to it: a Stores issue carries no project,
+so a job's Stock used shows its project material only; past issues keep their
+project. A leftover from before stock was held for its project must be moved
+to Stores before it is issued. Tool loans to a project are unchanged.
+Tests: `issue-request` flows in `project-issue-approval.real-http.test.ts`,
+`inventory.service.test.ts`, `material-section.test.ts`,
+`project-leftovers.service.test.ts`, `project.service.test.ts`,
+`IssueApprovals.test.tsx`, `IssueStock.test.tsx`, `DashboardControls.test.ts`,
+`mockStoresToProject.test.ts`.

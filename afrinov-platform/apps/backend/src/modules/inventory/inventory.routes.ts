@@ -12,6 +12,7 @@ import { storedQuantity, storedCount, storedSignedQuantity } from '../../shared/
 import { StockReceiptService } from './stock-receipt.service.js';
 import { StockCountService } from './stock-count.service.js';
 import { WriteOffApprovalService } from './write-off-approval.service.js';
+import { IssueRequestService } from './issue-request.service.js';
 import { locationsWithin } from './location.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
@@ -77,6 +78,37 @@ export const issueSchema = z.object({
     // The stock the line takes: the issue's project's own, or null/left out for Stores stock.
     heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
   })).min(1).max(50),
+});
+
+/** The storeman's issue of project material, sent for approval (ADR-043). Every line takes stock held for the project. */
+export const issueRequestSchema = z.object({
+  recipientId: uuidSchema,
+  projectNumber: z.string().trim().min(1).max(64),
+  note: z.string().trim().max(500).optional(),
+  lines: z.array(z.object({
+    materialId: uuidSchema,
+    locationId: uuidSchema,
+    quantity: storedQuantity,
+  })).min(1).max(50),
+});
+
+export const issueRequestQuerySchema = z.object({
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
+  // Only the ones this person asked for.
+  mine: z.enum(['true', 'false']).optional(),
+  projectNumber: z.string().trim().min(1).max(64).optional(),
+  before: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
+/** What is approved: a line left out is approved in full; 0 leaves a line out. */
+export const issueApprovalSchema = z.object({
+  lines: z.array(z.object({ lineId: uuidSchema, quantity: storedSignedQuantity })).max(50).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const issueDecisionSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
 });
 
 export const transferSchema = z.object({
@@ -271,6 +303,79 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     return idempotentMutation(req, reply, 'POST /inventory-issues', async (tx) => ({
       statusCode: 201,
       body: await InventoryService.issue({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
+  });
+
+  // Project material waits for the Workshop Manager's approval before it is
+  // issued (ADR-043): 202, with nothing posted yet.
+  app.post('/issue-requests', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.IssueInventory);
+    const parsed = issueRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid issue payload', details: parsed.error.flatten() },
+      });
+    }
+    return idempotentMutation(req, reply, 'POST /issue-requests', async (tx) => ({
+      statusCode: 202,
+      body: await IssueRequestService.request({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
+  });
+
+  // Seen by whoever may ask for one or approve one.
+  app.get('/issue-requests/summary', { preHandler: [app.authenticate] }, async (req) => {
+    if (!(await userHasPermission(req, PermissionCode.ApproveProjectIssue))) await requirePermission(req, PermissionCode.IssueInventory);
+    return IssueRequestService.summary();
+  });
+
+  app.get('/issue-requests', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (!(await userHasPermission(req, PermissionCode.ApproveProjectIssue))) await requirePermission(req, PermissionCode.IssueInventory);
+    const parsed = issueRequestQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid filter', details: parsed.error.flatten() } });
+    }
+    const { mine, ...filter } = parsed.data;
+    return IssueRequestService.list({ ...filter, requestedById: mine === 'true' ? actorId(req) : undefined });
+  });
+
+  // Posts the issue for what is approved. The service also asks for the Workshop Manager or Director role.
+  app.post('/issue-requests/:id/approve', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ApproveProjectIssue);
+    const parsed = issueApprovalSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid approval', details: parsed.error.flatten() } });
+    }
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /issue-requests/:id/approve', async (tx) => ({
+      statusCode: 201,
+      body: await IssueRequestService.approve(id, parsed.data, actorId(req), tx),
+    }));
+  });
+
+  app.post('/issue-requests/:id/reject', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ApproveProjectIssue);
+    const parsed = issueDecisionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Say why it is rejected', details: parsed.error.flatten() } });
+    }
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /issue-requests/:id/reject', async (tx) => ({
+      statusCode: 200,
+      body: await IssueRequestService.reject(id, parsed.data.reason, actorId(req), tx),
+    }));
+  });
+
+  // Whoever asked for it withdraws it, posting nothing.
+  app.post('/issue-requests/:id/cancel', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.IssueInventory);
+    const parsed = issueDecisionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Say why it is cancelled', details: parsed.error.flatten() } });
+    }
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /issue-requests/:id/cancel', async (tx) => ({
+      statusCode: 200,
+      body: await IssueRequestService.cancel(id, parsed.data.reason, actorId(req), tx),
     }));
   });
 

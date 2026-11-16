@@ -127,19 +127,22 @@ describe('P5 reports over real HTTP', () => {
     expect((await api<Failure>('GET', `/purchase-orders/${order.body.id}/history?limit=0`)).status).toBe(400);
   });
 
-  it('issues a Stores item on a project\'s issue (E4)', async () => {
+  // ADR-043 reverses E4: Stores stock has nothing to do with projects.
+  it('keeps Stores stock off a project\'s issue (ADR-043)', async () => {
     const job = `IT-P5-JOB-${run}`;
     expect((await api('POST', '/projects', { projectNumber: job, name: `P5 job ${run}`, status: 'ACTIVE' })).status).toBe(201);
     const r = await rack('IT P5 stores');
     const tape = await item('IT-P5-TAPE');
     await found(tape, r, 4);
-    const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+    const before = await prisma.inventoryTransaction.count({ where: { materialId: tape } });
+    const direct = await api<{ error: { code: string } }>('POST', '/inventory-issues', {
       recipientId: workerId, projectNumber: job, lines: [{ materialId: tape, locationId: r, quantity: 2 }],
     }, { 'idempotency-key': `p5-e4-${run}` });
-    expect(issued.status).toBe(201);
-    const line = await prisma.inventoryTransaction.findUniqueOrThrow({ where: { id: issued.body.transactionIds[0]! } });
-    expect(line.projectNumber).toBe(job);
-    expect(line.heldForProject).toBeNull();
+    expect(direct.status).toBe(400);
+    // Asked for approval, it finds nothing held for the job.
+    const asked = await api<Failure>('POST', '/issue-requests', { recipientId: workerId, projectNumber: job, lines: [{ materialId: tape, locationId: r, quantity: 2 }] });
+    expect([asked.status, asked.body.error.code]).toEqual([422, 'INSUFFICIENT_BALANCE']);
+    expect(await prisma.inventoryTransaction.count({ where: { materialId: tape } })).toBe(before);
   });
 
   it('keeps a closed month\'s figures through a price change, values its stock used at the kept prices, and opens it again only with a reason (G1)', async () => {

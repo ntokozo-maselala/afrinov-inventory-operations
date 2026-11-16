@@ -205,6 +205,17 @@ Use these forms; the older spellings still work but are deprecated or removed.
   the confirmation's transaction, so a wrong try is counted. On the frontend,
   open `HandoverPanel` after a slip posts; it keys the retry by a payload
   without the PIN or image, so neither is kept in the browser.
+- **Project material leaves the store on the Workshop Manager's approval
+  (ADR-043).** `InventoryService.issue` refuses a project unless
+  `IssueRequestService.approve` passes `approvedRequestId`; the counter asks
+  through `POST /issue-requests`, and only the Workshop Manager, or the
+  Director standing in, approves (Admin only by holding one of those roles).
+  The approval writes the slip's `APPROVAL` receipt confirmation, so a project
+  slip asks no PIN. A project issue takes only stock held for it, and Stores
+  stock never goes to a project (`checkIssueStock`); a Projects item's Stores
+  stock is a leftover, moved to Stores before it is issued
+  (`refuseProjectsItemFromStores`). In integration tests issue to a project
+  with `issueToProject` and `workshopManager` (`integration/helpers.ts`).
 - **A setting on the page has an effect.** Add a key to `SETTING_CATALOG` only
   with the code that reads it; one nothing reads is retired with a migration
   that deletes its row (ADR-035). A changed description needs a migration too:

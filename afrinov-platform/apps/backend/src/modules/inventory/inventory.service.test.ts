@@ -339,7 +339,9 @@ async function issueOne(input: {
     recipientId: input.recipientId ?? 'user-3',
     projectNumber: input.projectNumber,
     actorId: input.actorId,
-    lines: [{ materialId: input.materialId, locationId: input.locationId, quantity: input.quantity }],
+    // ADR-043: a project issue takes the project's own stock, on an approval.
+    lines: [{ materialId: input.materialId, locationId: input.locationId, quantity: input.quantity, heldForProject: input.projectNumber ?? null }],
+    approvedRequestId: input.projectNumber ? 'req-test' : undefined,
   });
   return { transactionId: transactionIds[0]! };
 }
@@ -577,23 +579,23 @@ describe('InventoryService — ADR-002 invariants', () => {
 
   // ── Issuing several items at once ─────────────────────────────────────
   describe('issue with several lines', () => {
-    async function stock(qty: number, locationId = 'loc-1') {
-      await InventoryService.adjust({ materialId: 'mat-1', locationId, quantity: qty, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    async function stock(qty: number, locationId = 'loc-1', heldForProject?: string) {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId, quantity: qty, reasonCode: 'COUNT_VARIANCE', actorId: 'u', heldForProject });
     }
 
     it('books every line for one recipient and project', async () => {
-      await stock(10);
-      await stock(4, 'loc-2');
+      await stock(10, 'loc-1', 'AFRI-1325');
+      await stock(4, 'loc-2', 'AFRI-1325');
       const { transactionIds } = await InventoryService.issue({
-        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u',
+        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u', approvedRequestId: 'req-test',
         lines: [
-          { materialId: 'mat-1', locationId: 'loc-1', quantity: 3 },
-          { materialId: 'mat-1', locationId: 'loc-2', quantity: 4 },
+          { materialId: 'mat-1', locationId: 'loc-1', quantity: 3, heldForProject: 'AFRI-1325' },
+          { materialId: 'mat-1', locationId: 'loc-2', quantity: 4, heldForProject: 'AFRI-1325' },
         ],
       });
       expect(transactionIds).toHaveLength(2);
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('7');
-      expect(getBalance('mat-1', 'loc-2').toString()).toBe('0');
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('7');
+      expect(getBalance('mat-1', 'loc-2', 'AFRI-1325').toString()).toBe('0');
       for (const id of transactionIds) {
         expect(trxRows.find((r) => r.id === id)).toMatchObject({ type: 'ISSUE', recipientId: 'user-3', projectNumber: 'AFRI-1325' });
       }
@@ -651,7 +653,7 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(trxRows).toHaveLength(1);
     });
 
-    it('refuses a completed or cancelled project, even for Stores items', async () => {
+    it('refuses a completed or cancelled project', async () => {
       await stock(5);
       await expect(issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'DONE-1' }))
         .rejects.toThrow(/Project DONE-1 is completed, so no more stock is issued to it/);
@@ -661,37 +663,60 @@ describe('InventoryService — ADR-002 invariants', () => {
     });
   });
 
-  // ── Project material goes only to its own project (materials Phase 5) ──
+  // ── Project material goes only to its own project, on approval (ADR-043) ──
   describe('issuing project material', () => {
     beforeEach(async () => {
-      for (const materialId of ['pipe-1325', 'pipe-42', 'mat-1']) {
-        await InventoryService.adjust({ materialId, locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      for (const materialId of ['pipe-1325', 'mat-1']) {
+        await InventoryService.adjust({ materialId, locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u', heldForProject: 'AFRI-1325' });
       }
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
     });
 
-    it('issues it, with Stores items, to its own project', async () => {
+    it('issues the stock held for the project, a Stores item\'s too, to that project', async () => {
       const { transactionIds } = await InventoryService.issue({
-        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u',
-        lines: [{ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 2 }, { materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }],
+        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u', approvedRequestId: 'req-test',
+        lines: [{ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 2, heldForProject: 'AFRI-1325' }, { materialId: 'mat-1', locationId: 'loc-1', quantity: 1, heldForProject: 'AFRI-1325' }],
       });
       expect(transactionIds).toHaveLength(2);
-      expect(getBalance('pipe-1325', 'loc-1').toString()).toBe('3');
+      expect(getBalance('pipe-1325', 'loc-1', 'AFRI-1325').toString()).toBe('3');
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('4');
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('5');
     });
 
-    it('refuses it to another project, or to none, booking nothing', async () => {
+    it('refuses a project issue that comes to the counter instead of through approval, booking nothing', async () => {
       const before = trxRows.length;
-      await expect(issueOne({ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'P-42' }))
-        .rejects.toThrow(/PIPE-1325 is material for project AFRI-1325, so it can't be issued to project P-42/);
-      await expect(issueOne({ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1, actorId: 'u' }))
-        .rejects.toThrow(/PIPE-1325 is material for project AFRI-1325: issue it to that project/);
+      await expect(InventoryService.issue({
+        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u',
+        lines: [{ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1, heldForProject: 'AFRI-1325' }],
+      })).rejects.toThrow(/Project material is issued on the Workshop Manager's approval/);
       expect(trxRows).toHaveLength(before);
     });
 
-    it('refuses two projects\' material on one issue', async () => {
+    it('refuses Stores stock on a project issue, and a project\'s stock on another project\'s or on none', async () => {
+      const before = trxRows.length;
       await expect(InventoryService.issue({
-        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u',
-        lines: [{ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1 }, { materialId: 'pipe-42', locationId: 'loc-1', quantity: 1 }],
-      })).rejects.toThrow(/One issue can't hold material for two projects \(AFRI-1325 and P-42\)/);
+        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u', approvedRequestId: 'req-test',
+        lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }],
+      })).rejects.toThrow(/MAT-1 here is Stores stock, which isn't issued to a project/);
+      await expect(InventoryService.issue({
+        recipientId: 'user-3', projectNumber: 'P-42', actorId: 'u', approvedRequestId: 'req-test',
+        lines: [{ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1, heldForProject: 'AFRI-1325' }],
+      })).rejects.toThrow(/PIPE-1325 at this location is held for project AFRI-1325, so it can't be issued to project P-42/);
+      await expect(InventoryService.issue({
+        recipientId: 'user-3', actorId: 'u',
+        lines: [{ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1, heldForProject: 'AFRI-1325' }],
+      })).rejects.toThrow(/held for project AFRI-1325: it is issued to that project, on the Workshop Manager's approval/);
+      expect(trxRows).toHaveLength(before);
+    });
+
+    it('refuses a project\'s leftover from Stores stock, with its project or without', async () => {
+      await InventoryService.adjust({ materialId: 'pipe-42', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await expect(issueOne({ materialId: 'pipe-42', locationId: 'loc-1', quantity: 1, actorId: 'u' }))
+        .rejects.toThrow(/PIPE-42 is a leftover of project P-42 .* Move it to Stores from Project leftovers/);
+      await expect(InventoryService.issue({
+        recipientId: 'user-3', projectNumber: 'P-42', actorId: 'u', approvedRequestId: 'req-test',
+        lines: [{ materialId: 'pipe-42', locationId: 'loc-1', quantity: 1 }],
+      })).rejects.toThrow(/PIPE-42 here is Stores stock, which isn't issued to a project/);
     });
 
     it('still takes a return once the project is completed', async () => {
@@ -700,7 +725,7 @@ describe('InventoryService — ADR-002 invariants', () => {
       project.status = 'COMPLETED';
       try {
         await InventoryService.returnToStock({ issueTransactionId: transactionId, quantity: 1, actorId: 'u' });
-        expect(getBalance('pipe-1325', 'loc-1').toString()).toBe('4');
+        expect(getBalance('pipe-1325', 'loc-1', 'AFRI-1325').toString()).toBe('4');
       } finally {
         delete project.status;
       }
@@ -710,7 +735,7 @@ describe('InventoryService — ADR-002 invariants', () => {
   // ── Returns ───────────────────────────────────────────────────────────
   describe('return to stock', () => {
     async function issued(qty = 10) {
-      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 20, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 20, reasonCode: 'COUNT_VARIANCE', actorId: 'u', heldForProject: 'AFRI-1325' });
       return (await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: qty, actorId: 'u', recipientId: 'user-3', projectNumber: 'AFRI-1325' })).transactionId;
     }
 
@@ -722,7 +747,7 @@ describe('InventoryService — ADR-002 invariants', () => {
         type: 'RETURN', referenceType: 'Return', referenceId: issueId, recipientId: 'user-3', projectNumber: 'AFRI-1325',
         locationId: 'loc-1', reasonNote: 'Job finished early', actorId: 'storeman',
       });
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('13');
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('13');
       expect(auditLog.at(-1)).toMatchObject({ action: 'RETURN', entityId: issueId });
     });
 
@@ -738,7 +763,7 @@ describe('InventoryService — ADR-002 invariants', () => {
     it('can put the stock back into a different location', async () => {
       const issueId = await issued(5);
       await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 2, locationId: 'loc-2', actorId: 'u' });
-      expect(getBalance('mat-1', 'loc-2').toString()).toBe('2');
+      expect(getBalance('mat-1', 'loc-2', 'AFRI-1325').toString()).toBe('2');
     });
 
     // Project Material Through the Store Roadmap, Phase 1: nothing issues a
@@ -754,9 +779,13 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');
     });
 
+    // Before ADR-043 Stores stock went on a project's issue; such an issue can still come back.
     it('puts Stores stock back as Stores stock, though it was used for a project', async () => {
-      const issueId = await issued(10);
-      const { transactionId } = await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 3, actorId: 'u' });
+      trxRows.push({
+        id: 'stores-issue', materialId: 'mat-1', locationId: 'loc-1', type: 'ISSUE', quantity: new Prisma.Decimal(-10),
+        actorId: 'u', postedAt: new Date(), recipientId: 'user-3', projectNumber: 'AFRI-1325', heldForProject: null,
+      });
+      const { transactionId } = await InventoryService.returnToStock({ issueTransactionId: 'stores-issue', quantity: 3, actorId: 'u' });
       expect(trxRows.find((r) => r.id === transactionId)).toMatchObject({ projectNumber: 'AFRI-1325', heldForProject: null });
       expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('0');
     });
@@ -778,7 +807,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
       await InventoryService.reverse({ transactionId: returnId, reason: 'Return booked twice', actorId: 'u' });
       await InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' });
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('20');
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('20');
     });
 
     it('leaves out what was marked used up or broken, which is no longer out', async () => {
@@ -804,7 +833,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
       outcomes.push({ id: 'o-2', issueTransactionId: issueId, outcome: 'BROKEN', quantity: new Prisma.Decimal(1), withdrawsId: 'o-1' });
       await InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' });
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('20');
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('20');
     });
   });
 
@@ -813,7 +842,8 @@ describe('InventoryService — ADR-002 invariants', () => {
   // back, so integration/returns.real-http.test.ts covers it.
   describe('return many', () => {
     async function twoIssues() {
-      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 20, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u', heldForProject: 'AFRI-1325' });
       const a = (await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 10, actorId: 'u', projectNumber: 'AFRI-1325' })).transactionId;
       const b = (await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 4, actorId: 'u' })).transactionId;
       return { a, b };
@@ -830,7 +860,8 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(ra).toMatchObject({ type: 'RETURN', referenceId: a, projectNumber: 'AFRI-1325', locationId: 'loc-1', reasonNote: 'Job finished early' });
       expect(rb).toMatchObject({ type: 'RETURN', referenceId: b, projectNumber: null, locationId: 'loc-2', reasonNote: 'Job finished early' });
       expect(ra!.postedAt).toEqual(rb!.postedAt);
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('9');
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('6');
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('3');
       expect(getBalance('mat-1', 'loc-2').toString()).toBe('1');
     });
 
@@ -989,7 +1020,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
     it('preserves issue metadata and records a trimmed reason in the ledger and audit', async () => {
       await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+        materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', reasonCode: 'COUNT_VARIANCE', actorId: 'user-1', heldForProject: 'P-42',
       });
       const { transactionId } = await issueOne({
         materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', actorId: 'user-1',
@@ -1004,7 +1035,7 @@ describe('InventoryService — ADR-002 invariants', () => {
         type: 'ISSUE', materialId: 'mat-1', locationId: 'loc-1', actorId: 'user-2',
         recipientId: 'user-3', projectNumber: 'P-42', reasonNote: 'Wrong project', reversesId: transactionId,
       });
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('0.125');
+      expect(getBalance('mat-1', 'loc-1', 'P-42').toString()).toBe('0.125');
       expect(trxRows.find((row) => row.id === transactionId)).toEqual(original);
       expect(auditLog.at(-1)).toMatchObject({
         action: 'REVERSE', entityType: 'InventoryTransaction', entityId: transactionId,
@@ -1032,7 +1063,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
     it('posts an opposite entry of the same type and restores the balance', async () => {
       await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1', heldForProject: 'AFRI-1325',
       });
       const { transactionId } = await issueOne({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 4, actorId: 'user-1', projectNumber: 'AFRI-1325',
@@ -1040,7 +1071,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
       const { reversalIds } = await InventoryService.reverse({ transactionId, reason: 'Wrong item scanned', actorId: 'user-2' });
 
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('10');
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('10');
       const reversal = trxRows.find((r) => r.id === reversalIds[0])!;
       expect(reversal).toMatchObject({
         type: 'ISSUE',

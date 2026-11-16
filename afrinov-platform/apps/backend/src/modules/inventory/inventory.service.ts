@@ -19,7 +19,7 @@ import { mostReceivable, overDeliveryShare } from '../procurement/over-delivery.
 import { lineOfReceipt, lockOrderLine, lowerReceived, returnedOn } from '../../shared/inventory/receipt-corrections.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
+import { checkIssueStock, refuseProjectsItemFromStores } from './material-section.js';
 import { MOVE_TO_STORES_REFERENCE } from './project-leftovers.service.js';
 import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
@@ -46,7 +46,16 @@ export interface IssueInput {
   projectNumber?: string;
   lines: IssueLine[];
   actorId: string;
+  /**
+   * Set only by IssueRequestService.approve: project material is issued on the
+   * Workshop Manager's approval, never straight from the counter (ADR-043).
+   */
+  approvedRequestId?: string;
 }
+
+/** Said when a project issue comes straight to the counter instead of through approval (ADR-043). */
+export const PROJECT_ISSUE_NEEDS_APPROVAL =
+  'Project material is issued on the Workshop Manager\'s approval: send it for approval from Issue stock.';
 
 export interface TransferInput {
   materialId: string;
@@ -1312,11 +1321,12 @@ export const InventoryService = {
     if (input.lines.length === 0) throw Errors.validation('Add at least one item to issue');
     const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, heldForProject: l.heldForProject ?? null, qty: toDecimal(l.quantity) }));
     if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Issue quantity must be positive');
+    if (input.projectNumber && !input.approvedRequestId) throw Errors.validation(PROJECT_ISSUE_NEEDS_APPROVAL);
 
-    // Each line takes the stock it names: Stores stock, or the stock held for
-    // the issue's project (Project Material Through the Store Roadmap, Phase 3).
-    // Leftovers are Stores stock with their project on the item. The same stock
-    // on two lines is checked as one total.
+    // Each line takes the stock it names: Stores stock on an issue with no
+    // project, or the stock held for the issue's project (ADR-043: Stores stock
+    // isn't issued to a project). The same stock on two lines is checked as one
+    // total.
     const totals = new Map<string, { materialId: string; locationId: string; heldForProject: string | null; qty: Decimal }>();
     for (const l of lines) {
       const key = `${l.materialId}|${l.locationId}|${l.heldForProject ?? ''}`;
@@ -1338,21 +1348,16 @@ export const InventoryService = {
         materials.set(t.materialId, material);
       }
       await checkWholeUnits(lines.map((l) => ({ materialId: l.materialId, quantity: l.qty })), tx);
-      // A project's own stock goes to that project only.
+      // A project's own stock goes to that project only, and a project takes
+      // only its own stock: Stores stock has nothing to do with projects (ADR-043).
       for (const t of totals.values()) {
-        if (t.heldForProject && t.heldForProject !== (input.projectNumber ?? null)) {
-          const sku = materials.get(t.materialId)!.sku;
-          throw Errors.validation(input.projectNumber
-            ? `${sku} at this location is held for project ${t.heldForProject}, so it can't be issued to project ${input.projectNumber}.`
-            : `${sku} at this location is held for project ${t.heldForProject}: issue it to that project.`);
-        }
+        checkIssueStock(materials.get(t.materialId)!.sku, t.heldForProject, input.projectNumber ?? null);
       }
-      // Stores stock follows the item's rules: a leftover goes to its item's
-      // project, and a Projects item with no project isn't issued. Stock held
-      // for a project is that project's, whatever the item says.
+      // Stock held for a project is that project's, whatever the item says. A
+      // Projects item's Stores stock (a leftover from before stock was held for
+      // its project) isn't issued: it moves to Stores first.
       const fromStores = [...new Set([...totals.values()].filter((t) => !t.heldForProject).map((t) => t.materialId))].map((id) => materials.get(id)!);
-      for (const material of fromStores) refuseUnassigned(material);
-      checkProjectMaterial(input.projectNumber, fromStores);
+      for (const material of fromStores) refuseProjectsItemFromStores(material);
 
       for (const t of totals.values()) {
         const material = materials.get(t.materialId)!;

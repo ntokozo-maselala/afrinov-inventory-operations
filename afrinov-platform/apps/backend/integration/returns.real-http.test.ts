@@ -4,7 +4,7 @@
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ADMIN_EMAIL, client, ledgerAndBalance, login, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, issueToProject, ledgerAndBalance, login, requireAdminPassword, runId, startServer, workshopManager, type TestServer } from './helpers.js';
 
 interface Consumption { materialId: string; total: number }
 interface HistoryRow { id: string; type: string; returnedQuantity: string | null }
@@ -18,8 +18,9 @@ describe('returns over real HTTP', () => {
   let rackId: string;
   let issueId: string;
 
+  // The project's own stock: it is issued from there, and comes back there (ADR-043).
   async function onHand(): Promise<string> {
-    const { ledger, balance } = await ledgerAndBalance(materialId, rackId);
+    const { ledger, balance } = await ledgerAndBalance(materialId, rackId, projectNumber);
     expect(balance).toBe(ledger);
     return ledger;
   }
@@ -44,9 +45,9 @@ describe('returns over real HTTP', () => {
     rackId = rack.body.id;
     const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT electrician ${run}`, type: 'WORKER' });
     expect(recipient.status).toBe(201);
-    expect((await api('POST', '/inventory-adjustments', { materialId, locationId: rackId, quantity: 50, reasonCode: 'COUNT_VARIANCE' })).status).toBe(201);
+    expect((await api('POST', '/inventory-adjustments', { materialId, locationId: rackId, quantity: 50, reasonCode: 'COUNT_VARIANCE', heldForProject: projectNumber })).status).toBe(201);
 
-    const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+    const issued = await issueToProject(api, await workshopManager(server.port, api, run), {
       recipientId: recipient.body.id, projectNumber, lines: [{ materialId, locationId: rackId, quantity: 30 }],
     });
     expect(issued.status).toBe(201);

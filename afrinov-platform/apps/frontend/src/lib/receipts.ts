@@ -49,6 +49,14 @@ export function describeReceipt(r: ReceiptSummary | null | undefined, recipientN
       text: `${reasonLabel(r.reason)}${r.note ? `: “${r.note}”` : ''}. Recorded by ${r.capturedByName}, ${formatDateTime(r.confirmedAt)}.`,
     };
   }
+  // A project slip is confirmed by the Workshop Manager's approval, not by whoever collected (ADR-043).
+  if (r.method === 'APPROVAL') {
+    return {
+      badge: r.changed ? 'Changed after it was approved' : 'Approved',
+      tone: r.changed ? 'danger' : 'success',
+      text: `Approved by ${r.capturedByName} before it was issued, ${formatDateTime(r.confirmedAt)}.`,
+    };
+  }
   const how = r.method === 'PIN' ? 'with their PIN' : r.method === 'SIGNATURE' ? 'signed on screen' : 'signed paper slip attached';
   const collected = r.collectedFor && recipientName ? `, collecting for ${recipientName}` : '';
   return {

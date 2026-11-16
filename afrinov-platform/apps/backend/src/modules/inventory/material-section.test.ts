@@ -59,7 +59,7 @@ function makePrisma(): unknown {
 vi.mock('../../shared/db.js', () => ({ get prisma() { return makePrisma(); } }));
 
 const { MaterialService } = await import('./material.service.js');
-const { refuseUnassigned } = await import('./material-section.js');
+const { refuseProjectsItemFromStores, checkIssueStock } = await import('./material-section.js');
 
 const projectItem = (sku: string, projectNumber?: string, extra: Record<string, unknown> = {}) =>
   MaterialService.create({ sku, name: `Pipe ${sku}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber, ...extra }, 'admin', { canSetCost: true });
@@ -147,12 +147,29 @@ describe('changing a material', () => {
   });
 });
 
-describe('material with no project', () => {
-  it('is refused for issuing, and pointed to Stores; with a project, or in Stores, it is not', () => {
-    expect(() => refuseUnassigned({ sku: 'OLD-PLATE', category: 'PROJECT_MATERIAL', projectNumber: null }))
+describe("a Projects item's Stores stock (ADR-043)", () => {
+  it('is refused for issuing and pointed to Stores, with a project or without; a Stores item is not', () => {
+    expect(() => refuseProjectsItemFromStores({ sku: 'OLD-PLATE', category: 'PROJECT_MATERIAL', projectNumber: null }))
       .toThrow("OLD-PLATE has no project, so it isn't issued. Move it to Stores from Project leftovers.");
-    expect(() => refuseUnassigned({ sku: 'PIPE', category: 'PROJECT_MATERIAL', projectNumber: '1369' })).not.toThrow();
-    expect(() => refuseUnassigned({ sku: 'DISC', category: 'CONSUMABLES', projectNumber: null })).not.toThrow();
+    expect(() => refuseProjectsItemFromStores({ sku: 'PIPE', category: 'PROJECT_MATERIAL', projectNumber: '1369' }))
+      .toThrow(/PIPE is a leftover of project 1369 .* Move it to Stores from Project leftovers/);
+    expect(() => refuseProjectsItemFromStores({ sku: 'DISC', category: 'CONSUMABLES', projectNumber: null })).not.toThrow();
+  });
+});
+
+describe('which stock an issue line takes (ADR-043)', () => {
+  it("takes a project's own stock for that project, and Stores stock with no project", () => {
+    expect(() => checkIssueStock('PIPE', '1369', '1369')).not.toThrow();
+    expect(() => checkIssueStock('DISC', null, null)).not.toThrow();
+  });
+
+  it('refuses Stores stock on a project issue', () => {
+    expect(() => checkIssueStock('DISC', null, '1369')).toThrow(/DISC here is Stores stock, which isn't issued to a project/);
+  });
+
+  it("refuses another project's stock, and a project's stock with no project", () => {
+    expect(() => checkIssueStock('PIPE', '1400', '1369')).toThrow(/held for project 1400, so it can't be issued to project 1369/);
+    expect(() => checkIssueStock('PIPE', '1369', null)).toThrow(/held for project 1369: it is issued to that project, on the Workshop Manager's approval/);
   });
 });
 

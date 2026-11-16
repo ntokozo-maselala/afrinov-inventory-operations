@@ -46,22 +46,25 @@ describe('mock: project material with no project (Phase 3)', () => {
   });
 });
 
-describe('mock: project material goes only to its own project (Phase 5)', () => {
+// ADR-043: a project's material is its own held stock, asked for and approved;
+// Stores stock, a leftover included, is never issued to a project.
+describe('mock: project material goes only to its own project, on approval (Phase 5, ADR-043)', () => {
   const messageOf = (p: Promise<unknown>) => p.then(() => undefined, (e: { message?: string }) => e.message);
-  const issue = (lines: Array<{ materialId: string }>, projectNumber?: string) =>
-    api.post('/inventory-issues', { recipientId: 'rcp-1', projectNumber, lines: lines.map((l) => ({ ...l, locationId: 'loc-1', quantity: 1 })) });
+  const ask = (lines: Array<{ materialId: string }>, projectNumber: string) =>
+    api.post('/issue-requests', { recipientId: 'rcp-1', projectNumber, lines: lines.map((l) => ({ ...l, locationId: 'loc-1', quantity: 1 })) });
 
-  it('refuses it to another project, to none, or alongside another project\'s material', async () => {
+  it('sends a project issue for approval, keeps a leftover off any issue, and finds nothing held for another project', async () => {
     await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
-    const other = await api.post<Material>('/materials', { sku: 'AFRI-1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1402' });
-    expect(await messageOf(issue([{ materialId: 'mat-9' }], 'AFRI-1402'))).toMatch(/is material for project AFRI-1325, so it can't be issued to project AFRI-1402/);
-    expect(await messageOf(issue([{ materialId: 'mat-9' }]))).toMatch(/is material for project AFRI-1325: issue it to that project/);
-    expect(await messageOf(issue([{ materialId: 'mat-9' }, { materialId: other.id }], 'AFRI-1325'))).toMatch(/two projects/);
+    expect(await messageOf(api.post('/inventory-issues', { recipientId: 'rcp-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity: 1 }] })))
+      .toMatch(/Project material is issued on the Workshop Manager's approval/);
+    expect(await messageOf(api.post('/inventory-issues', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity: 1 }] })))
+      .toMatch(/is a leftover of project AFRI-1325 .* Move it to Stores from Project leftovers/);
+    expect(await messageOf(ask([{ materialId: 'mat-9' }], 'AFRI-1402'))).toMatch(/only 0 is held for project AFRI-1402 here/);
   });
 
-  it('refuses a completed project, even for Stores items', async () => {
+  it('refuses a completed project', async () => {
     await api.patch('/projects/AFRI-1402', { status: 'COMPLETED' });
-    expect(await messageOf(issue([{ materialId: 'mat-1' }], 'AFRI-1402'))).toMatch(/Project AFRI-1402 is completed, so no more stock is issued to it/);
+    expect(await messageOf(ask([{ materialId: 'mat-1' }], 'AFRI-1402'))).toMatch(/Project AFRI-1402 is completed, so no more stock is issued to it/);
   });
 });
 
@@ -84,7 +87,7 @@ describe('mock: project material is ordered for the order’s project', () => {
 
   it('moves a Projects item with no project to Stores instead of issuing it', async () => {
     // mat-10 is a Projects item with no project.
-    expect(await messageOf(api.post('/inventory-issues', { recipientId: 'rcp-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-10', locationId: 'loc-1', quantity: 1 }] })))
+    expect(await messageOf(api.post('/inventory-issues', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-10', locationId: 'loc-1', quantity: 1 }] })))
       .toMatch(/has no project, so it isn't issued. Move it to Stores from Project leftovers/);
     expect((await api.get<{ project: null }>('/materials/no-project/leftovers')).project).toBeNull();
     await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });

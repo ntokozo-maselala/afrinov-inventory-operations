@@ -14,7 +14,8 @@ Recipients are not user accounts.
 
 ## Steps — material issue
 1. Issue stock page (`/stock/issue`): choose the recipient (required) and
-   optionally an active project.
+   optionally an active project. Stores stock is issued with no project; a
+   project's material is sent for approval (below, ADR-043).
 2. Add one to 50 lines; find each item by name, code or location; enter
    location and quantity.
 3. `POST /api/v1/inventory-issues` → `InventoryService.issue`, all or
@@ -27,6 +28,21 @@ Recipients are not user accounts.
    handler, TD-007). No audit-log entry is written.
 
 A single-item issue is also available from the Stock page.
+
+## Steps — project material (ADR-043)
+1. Issue stock with a project: only the stock held for that project is
+   offered. **Send for approval** → `POST /api/v1/issue-requests`
+   (`issue:inventory`). Nothing moves; it is checked as the issue will be,
+   and what other waiting requests ask for counts against the held stock.
+2. **Issues to approve** (`/stock/issue-approvals`): the Workshop Manager, or
+   the Director standing in, approves (each line in full, or less, 0 leaving
+   it out) or rejects with a reason. The storeman who asked may cancel it
+   with a reason while it waits.
+3. Approving posts the issue as above, booked to the storeman who asked, and
+   records the approval as the slip's confirmation (method `APPROVAL`): the
+   person collecting is not asked for a PIN or signature. Stock that moved
+   since is refused (422) and the request keeps waiting.
+4. A project with an issue waiting can't be completed or cancelled.
 
 ## Steps — return of unused stock (implemented)
 1. Movements page → open the issue → Return: quantity, optional location
@@ -90,8 +106,12 @@ Tools are not issued: they are checked out and back in on the Tools page
   (the earlier proposal of an authorised override with a reason was not
   adopted).
 - Every issue names an active recipient (ADR-008).
-- An issue for a project can carry Stores items as well as the project's
-  material; Stores items are charged to the project as used (ADR-041).
+- An issue for a project takes only the stock held for that project, on the
+  Workshop Manager's approval; Stores stock is never issued to a project
+  (ADR-043, reversing ADR-041's Stores items on a project's issue).
+- A Projects item's Stores stock (a leftover from before stock was held for
+  its project) isn't issued: it is moved to Stores first, from Project
+  leftovers (ADR-043).
 - An issue with returns against it cannot be reversed until the returns are
   reversed; one marked used up or broken, until those are withdrawn.
 - A return booked together with used up or broken cannot be reversed until

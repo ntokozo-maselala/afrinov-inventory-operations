@@ -46,6 +46,17 @@ export function mockReceiptOf(slipId: string): ReceiptSummary | null {
   return (own.find((r) => r.summary.method !== 'NONE') ?? own.at(-1))?.summary ?? null;
 }
 
+/** A project slip, confirmed by the Workshop Manager's approval before it was issued (ADR-043). */
+export function mockRecordApproval(slipId: string, approverName: string): void {
+  rows.push({
+    slipId,
+    summary: {
+      method: 'APPROVAL', signerId: null, signerName: null, collectedFor: false, reason: null, note: null,
+      confirmedAt: new Date().toISOString(), capturedByName: approverName, hasImage: false, imageRemoved: false, changed: false,
+    },
+  });
+}
+
 export function mockGetReceiptImage(slipId: string): Blob {
   const image = images.get(slipId);
   if (!image) throw new Error('404');

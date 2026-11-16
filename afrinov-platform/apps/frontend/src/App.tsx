@@ -53,6 +53,7 @@ const StockCount = importPage(() => import('./pages/StockCount').then(m => ({ de
 const Recipients = importPage(() => import('./pages/Recipients').then(m => ({ default: m.Recipients })));
 const Tools = importPage(() => import('./pages/Tools').then(m => ({ default: m.Tools })));
 const WriteOffApprovals = importPage(() => import('./pages/WriteOffApprovals').then(m => ({ default: m.WriteOffApprovals })));
+const IssueApprovals = importPage(() => import('./pages/IssueApprovals').then(m => ({ default: m.IssueApprovals })));
 const Locations = importPage(() => import('./pages/Locations').then(m => ({ default: m.Locations })));
 const Settings = importPage(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const SettingsGeneral = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsGeneral })));
@@ -148,6 +149,7 @@ export function App() {
         <Route path="/stock/receive" element={<RouteBoundary name="Receive stock"><ReceiveStock /></RouteBoundary>} />
         <Route path="/stock/count" element={<RouteBoundary name="Count stock"><StockCount /></RouteBoundary>} />
         <Route path="/stock/write-offs" element={<RouteBoundary name="Write-offs to approve"><WriteOffApprovals /></RouteBoundary>} />
+        <Route path="/stock/issue-approvals" element={<RouteBoundary name="Issues to approve"><IssueApprovals /></RouteBoundary>} />
         <Route path="/materials" element={<RouteBoundary name="Materials"><Materials /></RouteBoundary>} />
         <Route path="/materials/:id" element={<RouteBoundary name="Material"><MaterialDetail /></RouteBoundary>} />
         <Route path="/movements" element={<RouteBoundary name="Movements"><Movements /></RouteBoundary>} />

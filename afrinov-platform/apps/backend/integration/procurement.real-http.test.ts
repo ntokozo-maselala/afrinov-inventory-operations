@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   ADMIN_EMAIL,
   client,
+  issueToProject,
   ledgerAndBalance,
   letAdminSign, login,
   prisma,
@@ -16,6 +17,7 @@ import {
   runId,
   secondAdmin,
   startServer,
+  workshopManager,
   type TestServer,
 } from './helpers.js';
 
@@ -1129,9 +1131,11 @@ describe('receiving stock over real HTTP', () => {
           if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${created.body.id}/approve`)).status).toBe(200);
           expect((await receiveOutstanding(storeman, created.body.id, locationId)).status).toBe(201);
         }
-        const issue = (projectFor: string | undefined, heldForProject: string | null, quantity: number) =>
-          storeman<{ transactionIds: string[]; error?: { message: string } }>('POST', '/inventory-issues', {
-            recipientId, projectNumber: projectFor, lines: [{ materialId: looseId, locationId, quantity, heldForProject }],
+        // To a project it goes for the Workshop Manager's approval, from the project's stock (ADR-043).
+        const issue = async (projectFor: string | undefined, heldForProject: string | null, quantity: number) => projectFor
+          ? issueToProject(storeman, await workshopManager(server.port, api, run), { recipientId, projectNumber: projectFor, lines: [{ materialId: looseId, locationId, quantity }] })
+          : storeman<{ transactionIds: string[]; error?: { message: string } }>('POST', '/inventory-issues', {
+            recipientId, lines: [{ materialId: looseId, locationId, quantity, heldForProject }],
           });
 
         it('issues it to its project only, and a return puts it back', async () => {
@@ -1140,11 +1144,11 @@ describe('receiving stock over real HTTP', () => {
 
           // Not to another project, nor to none.
           const toOther = await issue(other, projectNumber, 1);
-          expect(toOther.status).toBe(400);
-          expect(toOther.body.error!.message).toMatch(new RegExp(`held for project ${projectNumber}, so it can't be issued to project ${other}`));
+          expect(toOther.status).toBe(422);
+          expect(toOther.body.error!.message).toMatch(new RegExp(`only 0 is held for project ${other} here`));
           expect((await issue(undefined, projectNumber, 1)).status).toBe(400);
-          // Nor taken as Stores stock: an item with no project isn't issued from there.
-          expect((await issue(projectNumber, null, 1)).status).toBe(400);
+          // Nor taken as Stores stock: a Projects item isn't issued from there.
+          expect((await issue(undefined, null, 1)).status).toBe(400);
           expect(await ledgerAndBalance(looseId, locationId, projectNumber)).toEqual(before);
 
           // To its project, from its stock, though the item itself has no project.
