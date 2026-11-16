@@ -29,12 +29,9 @@ const TILE = '#FFFFFF';
 const TILE_EDGE = '#DDE1E8'; // surface-200: keeps the white tile visible on a white background
 
 const tabIcon = await readFile(at('public/favicon.svg'), 'utf8');
-const markSource = await readFile(at('src/assets/icon/afrinov-mark.svg'), 'utf8');
-const mark = markSource
-  .replace(/<!--[\s\S]*?-->/g, '')
-  .replace(/^[\s\S]*?<svg[^>]*>/, '')
-  .replace(/<\/svg>\s*$/, '')
-  .trim();
+// The mark file is embedded whole, as an image, never edited as text: its markup
+// (comments, mask ids) stays its own document.
+const markUri = `data:image/svg+xml;base64,${(await readFile(at('src/assets/icon/afrinov-mark.svg'))).toString('base64')}`;
 
 /**
  * The full mark on a white tile. `scale` sizes the mark (its box is 34 x 55 of the
@@ -45,7 +42,9 @@ function onTile({ scale, rounded }) {
   const tile = rounded
     ? `<rect x="0.25" y="0.25" width="63.5" height="63.5" rx="14" fill="${TILE}" stroke="${TILE_EDGE}" stroke-width="0.5"/>`
     : `<rect width="64" height="64" fill="${TILE}"/>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${tile}<g transform="translate(32 32) scale(${scale}) translate(-32 -30.5)">${mark}</g></svg>`;
+  const side = 64 * scale;
+  const mark = `<image href="${markUri}" x="${32 - 32 * scale}" y="${32 - 30.5 * scale}" width="${side}" height="${side}"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${tile}${mark}</svg>`;
 }
 
 const rounded = onTile({ scale: 0.8, rounded: true });
