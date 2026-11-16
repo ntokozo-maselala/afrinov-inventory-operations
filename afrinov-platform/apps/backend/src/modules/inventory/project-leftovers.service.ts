@@ -148,12 +148,10 @@ export const ProjectLeftoversService = {
     if (items.length === 0) throw Errors.validation('Choose at least one item to move to Stores');
     if (new Set(items.map((i) => i.materialId)).size !== items.length) throw Errors.validation('An item is listed twice');
     return inTransaction(outer, async (tx) => {
-      if (projectNumber !== null) {
-        const project = await findProject(projectNumber, tx);
-        if (!isClosed(project.status)) {
-          throw Errors.validation(`Project ${projectNumber} is still open, so its material stays with it. Leftovers move to Stores once it is completed or cancelled.`);
-        }
-      }
+      // An open project keeps the stock held for it. Its item's Stores stock
+      // (a leftover from before stock was held for its project) moves at any
+      // time: it isn't issued to anyone until it is Stores stock (ADR-043).
+      const open = projectNumber !== null && !isClosed((await findProject(projectNumber, tx)).status);
       // Project material on an open project order or RFQ stays project material
       // until that is finished: as a Stores item it would reach a project order,
       // and be confirmed delivered to site, as Stores stock (Qodo, PR #129).
@@ -196,6 +194,9 @@ export const ProjectLeftoversService = {
         const heldHere = ownHeld.filter((b) => b.materialId === item.materialId);
         // The project's leftover item, or any item with stock held for it.
         const ownItem = before.category === PROJECTS_CATEGORY && before.projectNumber === projectNumber;
+        if (open && heldHere.length > 0) {
+          throw Errors.validation(`Project ${projectNumber} is still open, so the stock held for it stays with it: ${before.sku} moves to Stores once the project is completed or cancelled.`);
+        }
         if (!ownItem && heldHere.length === 0) {
           throw Errors.validation(projectNumber === null
             ? `${before.sku} is not a Projects item with no project, so it isn't moved from here.`

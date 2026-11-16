@@ -5,7 +5,7 @@
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ADMIN_EMAIL, client, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, issueToProject, login, prisma, requireAdminPassword, runId, startServer, workshopManager, type TestServer } from './helpers.js';
 
 interface MaterialRow { id: string; sku: string; section: string; projectNumber: string | null; project: { projectNumber: string } | null; requiredStock: string }
 
@@ -81,7 +81,7 @@ describe('Stores and Projects materials over real HTTP', () => {
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections rack ${run}`, type: 'RACK' });
     expect((await api('POST', '/inventory-adjustments', { materialId: old.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections fitter ${run}`, type: 'WORKER' });
-    const issue = () => api<{ error?: { message: string } }>('POST', '/inventory-issues', { recipientId: rcp.body.id, projectNumber, lines: [{ materialId: old.id, locationId: loc.body.id, quantity: 1 }] });
+    const issue = () => api<{ error?: { message: string } }>('POST', '/inventory-issues', { recipientId: rcp.body.id, lines: [{ materialId: old.id, locationId: loc.body.id, quantity: 1 }] });
 
     const refused = await issue();
     expect(refused.status).toBe(400);
@@ -121,7 +121,7 @@ describe('Stores and Projects materials over real HTTP', () => {
     const after = await prisma.material.findUniqueOrThrow({ where: { id: old.id } });
     expect(after).toMatchObject({ category: 'CONSUMABLES', projectNumber: null });
     expect((await api<{ items: Array<{ materialId: string }> }>('GET', '/materials/no-project/leftovers')).body.items.map((i) => i.materialId)).not.toContain(old.id);
-    // Now Stores stock, it is issued to any project.
+    // Now Stores stock, it is issued like any other (with no project: ADR-043).
     expect((await issue()).status).toBe(201);
   });
 
@@ -145,28 +145,26 @@ describe('Stores and Projects materials over real HTTP', () => {
     }
   });
 
-  it('issues project material only to its own project, and nothing to a completed project (Phase 5)', async () => {
+  it('issues project material only to its own project, on approval, and nothing to a completed project (Phase 5, ADR-043)', async () => {
     const other = `IT-SEC2-${run}`;
     expect((await api('POST', '/projects', { projectNumber: other, name: `Other project ${run}` })).status).toBe(201);
     const pipe = await create({ sku: `IT-SEC-OWN-${run}`, category: 'PROJECT_MATERIAL', projectNumber });
-    const disc = await create({ sku: `IT-SEC-DISC2-${run}`, category: 'CONSUMABLES' });
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections shelf ${run}`, type: 'RACK' });
-    for (const m of [pipe.body, disc.body]) {
-      expect((await api('POST', '/inventory-adjustments', { materialId: m.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
-    }
+    expect((await api('POST', '/inventory-adjustments', { materialId: pipe.body.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER', reasonNote: 'Stock for the test', heldForProject: projectNumber })).status).toBe(201);
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections rigger ${run}`, type: 'WORKER' });
-    const issue = (materialId: string, to?: string) => api<{ error?: { message: string } }>('POST', '/inventory-issues', {
-      recipientId: rcp.body.id, projectNumber: to, lines: [{ materialId, locationId: loc.body.id, quantity: 1 }],
-    });
+    const manager = await workshopManager(server.port, api, run);
+    const issue = (to: string) => issueToProject(api, manager, { recipientId: rcp.body.id, projectNumber: to, lines: [{ materialId: pipe.body.id, locationId: loc.body.id, quantity: 1 }] });
 
-    const wrong = await issue(pipe.body.id, other);
-    expect(wrong.status).toBe(400);
-    expect(wrong.body.error?.message).toMatch(/is material for project .*, so it can't be issued to project/);
-    expect((await issue(pipe.body.id)).status).toBe(400);
-    expect((await issue(pipe.body.id, projectNumber)).status).toBe(201);
+    // Another project holds none of it.
+    const wrong = await issue(other);
+    expect(wrong.status).toBe(422);
+    expect(wrong.body.error?.message).toMatch(new RegExp(`only 0 is held for project ${other} here`));
+    // Nor with no project: its stock is the project's.
+    expect((await api('POST', '/inventory-issues', { recipientId: rcp.body.id, lines: [{ materialId: pipe.body.id, locationId: loc.body.id, quantity: 1, heldForProject: projectNumber }] })).status).toBe(400);
+    expect((await issue(projectNumber)).status).toBe(201);
 
     expect((await api('PATCH', `/projects/${other}`, { status: 'COMPLETED' })).status).toBe(200);
-    const closed = await issue(disc.body.id, other);
+    const closed = await issue(other);
     expect(closed.status).toBe(400);
     expect(closed.body.error?.message).toMatch(/is completed, so no more stock is issued to it/);
   });
@@ -215,21 +213,28 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect(closed.body.error?.message).toMatch(/is completed, so nothing more is ordered for it/);
   });
 
-  it('moves the leftovers of a completed project to Stores, to be issued to another job (Phase 7)', async () => {
+  it('moves the leftovers of a completed project to Stores, to be issued as Stores stock (Phase 7, ADR-043)', async () => {
     const job = `IT-SEC4-${run}`;
-    const next = `IT-SEC5-${run}`;
-    for (const p of [job, next]) expect((await api('POST', '/projects', { projectNumber: p, name: `Job ${p}` })).status).toBe(201);
+    expect((await api('POST', '/projects', { projectNumber: job, name: `Job ${job}` })).status).toBe(201);
     const pipe = await create({ sku: `IT-SEC-LEFT-${run}`, category: 'PROJECT_MATERIAL', projectNumber: job, unitCost: 25 });
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections bay ${run}`, type: 'RACK' });
-    expect((await api('POST', '/inventory-adjustments', { materialId: pipe.body.id, locationId: loc.body.id, quantity: 10, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
+    // 5 held for the job, and 5 as a leftover from before stock was held for its project.
+    for (const heldForProject of [job, undefined]) {
+      expect((await api('POST', '/inventory-adjustments', { materialId: pipe.body.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER', reasonNote: 'Stock for the test', heldForProject })).status).toBe(201);
+    }
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections welder ${run}`, type: 'WORKER' });
-    const issue = (to: string) => api('POST', '/inventory-issues', { recipientId: rcp.body.id, projectNumber: to, lines: [{ materialId: pipe.body.id, locationId: loc.body.id, quantity: 3 }] });
-    expect((await issue(job)).status).toBe(201);
+    const issue = (lines: Array<Record<string, unknown>>) => api<{ error?: { message: string } }>('POST', '/inventory-issues', { recipientId: rcp.body.id, lines });
+    const manager = await workshopManager(server.port, api, run);
+    expect((await issueToProject(api, manager, { recipientId: rcp.body.id, projectNumber: job, lines: [{ materialId: pipe.body.id, locationId: loc.body.id, quantity: 3 }] })).status).toBe(201);
+    // The leftover isn't issued until it is Stores stock (ADR-043).
+    const leftover = await issue([{ materialId: pipe.body.id, locationId: loc.body.id, quantity: 1 }]);
+    expect(leftover.status).toBe(400);
+    expect(leftover.body.error?.message).toMatch(/is a leftover of project .* Move it to Stores from Project leftovers/);
 
     const move = () => api<{ moved: number; error?: { message: string } }>('POST', `/projects/${job}/leftovers/move`, { items: [{ materialId: pipe.body.id, category: 'CONSUMABLES' }] });
     const open = await move();
     expect(open.status).toBe(400);
-    expect(open.body.error?.message).toMatch(/is still open/);
+    expect(open.body.error?.message).toMatch(/is still open, so the stock held for it stays with it/);
 
     expect((await api('PATCH', `/projects/${job}`, { status: 'COMPLETED' })).status).toBe(200);
     const listed = await api<{ project: { closed: boolean }; items: Array<{ sku: string; onHand: string; value: number | null }> }>('GET', `/projects/${job}/leftovers`);
@@ -241,7 +246,7 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect(after.body).toMatchObject({ section: 'STORES', category: 'CONSUMABLES', projectNumber: null });
     expect((await api<{ items: unknown[] }>('GET', `/projects/${job}/leftovers`)).body.items).toEqual([]);
 
-    // Now Stores material: issued to the next job, from the same stock.
-    expect((await issue(next)).status).toBe(201);
+    // Now Stores material, issued from the same stock like any other, with no project.
+    expect((await issue([{ materialId: pipe.body.id, locationId: loc.body.id, quantity: 3 }])).status).toBe(201);
   });
 });

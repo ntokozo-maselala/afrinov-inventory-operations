@@ -4,7 +4,7 @@
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ADMIN_EMAIL, client, login, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, issueToProject, login, requireAdminPassword, runId, startServer, workshopManager, type TestServer } from './helpers.js';
 
 interface Item { sku: string; issued: number; returned: number; used: number; unitCost: number | null; value: number | null }
 interface Line { type: string; sku: string; quantity: number; projectNumber: string | null; issuedBy: string }
@@ -36,11 +36,18 @@ describe('consumption report over real HTTP', () => {
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT consumption rack ${run}`, type: 'RACK' });
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT consumption fitter ${run}`, type: 'WORKER' });
     recipientId = rcp.body.id;
+    // Stores stock, and stock held for the project: a project issue takes only its own (ADR-043).
     for (const m of [disc.body.id, pipe.body.id]) {
-      expect((await api('POST', '/inventory-adjustments', { materialId: m, locationId: loc.body.id, quantity: 100, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
+      for (const heldForProject of [undefined, project]) {
+        expect((await api('POST', '/inventory-adjustments', { materialId: m, locationId: loc.body.id, quantity: 100, reasonCode: 'OTHER', reasonNote: 'Stock for the test', heldForProject })).status).toBe(201);
+      }
     }
+    const manager = await workshopManager(server.port, api, run);
     const issue = async (materialId: string, quantity: number, projectNumber?: string) => {
-      const r = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', { recipientId: rcp.body.id, projectNumber, lines: [{ materialId, locationId: loc.body.id, quantity }] });
+      const line = { materialId, locationId: loc.body.id, quantity };
+      const r = projectNumber
+        ? await issueToProject(api, manager, { recipientId: rcp.body.id, projectNumber, lines: [line] })
+        : await api<{ transactionIds: string[] }>('POST', '/inventory-issues', { recipientId: rcp.body.id, lines: [line] });
       expect(r.status).toBe(201);
       return r.body.transactionIds[0]!;
     };

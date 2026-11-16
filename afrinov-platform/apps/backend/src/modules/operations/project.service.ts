@@ -63,19 +63,20 @@ const OPEN_ORDER_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY
 
 /**
  * Orders still open, requests for quotation not yet awarded or cancelled,
- * tools still out on loan to it and write-offs of its stock waiting for
- * approval; and, to complete it, open schedules. Closing with any of these
+ * tools still out on loan to it, write-offs of its stock and issues of its
+ * material waiting for approval; and, to complete it, open schedules. Closing with any of these
  * left would land deliveries, loans or stock on a project that takes no more
  * work. Stock held for it is not in the way: once it is closed, Leftovers
  * moves that to Stores. Sales RFQs are prices asked for, never closed, so they
  * don't count.
  */
 async function closingBlockers(projectNumber: string, to: 'COMPLETED' | 'CANCELLED', db: Prisma.TransactionClient): Promise<ClosingBlocker[]> {
-  const [orders, rfqs, tools, waiting, schedules] = await Promise.all([
+  const [orders, rfqs, tools, waiting, issues, schedules] = await Promise.all([
     db.purchaseOrder.findMany({ where: { projectNumber, status: { in: [...OPEN_ORDER_STATUSES] } }, select: { id: true, number: true, status: true }, orderBy: { number: 'asc' } }),
     db.rfq.findMany({ where: { projectNumber, status: { in: ['DRAFT', 'SENT'] } }, select: { id: true, number: true, status: true }, orderBy: { number: 'asc' } }),
     toolsOutOn(db, { projectNumber }),
     db.adjustmentRequest.count({ where: { status: 'PENDING', OR: [{ projectNumber }, { heldForProject: projectNumber }] } }),
+    db.issueRequest.count({ where: { status: 'PENDING', projectNumber } }),
     to === 'COMPLETED' ? ProjectScheduleService.openCount(projectNumber, db) : Promise.resolve(0),
   ]);
   const word = (s: string) => s.toLowerCase().replace('_', ' ');
@@ -85,6 +86,8 @@ async function closingBlockers(projectNumber: string, to: 'COMPLETED' | 'CANCELL
     ...tools.map((t): ClosingBlocker => ({ kind: 'LOAN', text: `${t.out.toString()} × ${t.sku} still out on loan to it: check them in` })),
   ];
   if (waiting > 0) blockers.push({ kind: 'APPROVAL', text: `${waiting} write-off${waiting === 1 ? '' : 's'} of its stock waiting for approval` });
+  // ADR-043: approving one would issue to a project that takes no more.
+  if (issues > 0) blockers.push({ kind: 'APPROVAL', text: `${issues} issue${issues === 1 ? '' : 's'} of its material waiting for the Workshop Manager: approve, reject or cancel ${issues === 1 ? 'it' : 'them'}` });
   if (schedules > 0) blockers.push({ kind: 'SCHEDULE', text: `${schedules} open schedule${schedules === 1 ? '' : 's'}: finish or cancel ${schedules === 1 ? 'it' : 'them'}` });
   return blockers;
 }

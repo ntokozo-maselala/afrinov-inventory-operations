@@ -29,7 +29,7 @@ import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import { computeProcurementSavings } from './mockProcurementSavings';
 import { mockOpenSchedules, mockScheduleCovers, resetMockSchedules, routeSchedules } from './mockSchedules';
-import { mockPinFields, mockReceiptOf, resetMockReceipts, routeReceipts } from './mockReceipts';
+import { mockPinFields, mockReceiptOf, mockRecordApproval, resetMockReceipts, routeReceipts } from './mockReceipts';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { unitKindOf, type UnitOfMeasure } from '../lib/quantity';
 import type {
@@ -73,8 +73,17 @@ interface MockAdjustmentRequest {
   decidedById: string | null; decidedAt: string | null; decisionNote: string | null;
 }
 
+/** A project issue waiting for the Workshop Manager (ADR-043). */
+interface MockIssueRequest {
+  id: string; status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'; projectNumber: string; recipientId: string; note: string | null;
+  lines: Array<{ id: string; lineNo: number; materialId: string; locationId: string; quantity: number; approvedQuantity: number | null }>;
+  requestedById: string; requestedAt: string; decidedById: string | null; decidedAt: string | null; decisionNote: string | null;
+  standIn: boolean; issueId: string | null;
+}
+
 interface State {
   adjustmentRequests: MockAdjustmentRequest[];
+  issueRequests: MockIssueRequest[];
   /** Tools checked in damaged, held for repair (system audit B2). */
   toolRepairs: MockToolRepair[];
   materials: MockMaterial[];
@@ -134,6 +143,7 @@ function freshState(): State {
     materialStatusChanges: [],
     consumableOutcomes: [],
     adjustmentRequests: [],
+    issueRequests: [],
     toolRepairs: [],
   };
 }
@@ -142,6 +152,30 @@ function freshState(): State {
 export function mockOrderRaisedBy(orderId: string, userId: string): void {
   const po = state.purchaseOrders.find((x) => x.id === orderId);
   if (po) po.createdById = userId;
+}
+
+/**
+ * For tests: approves a waiting project issue as the Workshop Manager would
+ * (ADR-043), which the demo's one Admin user can't. Posts the issue for what is
+ * approved (each line in full unless given) and records the approval as the
+ * slip's confirmation, as IssueRequestService.approve does.
+ */
+export function mockApproveIssueRequest(id: string, lines: Record<string, number> = {}): { issueId: string; transactionIds: string[] } {
+  const r = state.issueRequests.find((x) => x.id === id);
+  if (!r) throw err('NOT_FOUND', 'Issue request not found');
+  if (r.status !== 'PENDING') throw err('INVALID_STATE', `This request was already ${STATUS_WORDS[r.status]}.`);
+  const approved = r.lines.map((l) => ({ line: l, qty: lines[l.id] ?? l.quantity }));
+  if (approved.some((a) => a.qty < 0 || a.qty > a.line.quantity)) throw err('VALIDATION_ERROR', 'Approve at most what was asked for.');
+  const issued = approved.filter((a) => a.qty > 0);
+  if (issued.length === 0) throw err('VALIDATION_ERROR', 'Approve at least one line, or reject the request.');
+  const posted = handleIssue({
+    recipientId: r.recipientId, projectNumber: r.projectNumber,
+    lines: issued.map((a) => ({ materialId: a.line.materialId, locationId: a.line.locationId, quantity: a.qty, heldForProject: r.projectNumber })),
+  });
+  mockRecordApproval(posted.issueId, 'Workshop Manager');
+  for (const a of approved) a.line.approvedQuantity = a.qty;
+  Object.assign(r, { status: 'APPROVED', decidedById: null, decidedAt: new Date().toISOString(), issueId: posted.issueId });
+  return posted;
 }
 
 // Reset (useful if we ever want a "reset mocks" button).
@@ -273,10 +307,13 @@ function poDetails(b: PoDetailsBody): Partial<MockPurchaseOrder> {
 
 // As the server (material-section.ts): a Projects item with no project isn't
 // issued; its leftovers move to Stores (Project on the Order Roadmap).
+/** As the server (ADR-043): a Projects item's Stores stock is a leftover, moved to Stores before it is issued. */
 function refuseUnassigned(materialId: string) {
   const m = state.materials.find((x) => x.id === materialId);
-  if (m && m.category === 'PROJECT_MATERIAL' && !m.projectNumber) {
-    throw err('VALIDATION_ERROR', `${m.sku} has no project, so it isn't issued. Move it to Stores from Project leftovers.`);
+  if (m && m.category === 'PROJECT_MATERIAL') {
+    throw err('VALIDATION_ERROR', m.projectNumber
+      ? `${m.sku} is a leftover of project ${m.projectNumber} from before stock was held for its project, so it isn't issued. Move it to Stores from Project leftovers.`
+      : `${m.sku} has no project, so it isn't issued. Move it to Stores from Project leftovers.`);
   }
 }
 
@@ -288,24 +325,6 @@ function assertProjectOpen(projectNumber: string) {
     throw err('VALIDATION_ERROR', `Project ${projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so nothing more is ordered for it.`);
   }
   if (project.active === false) throw err('VALIDATION_ERROR', `Project ${projectNumber} is inactive`);
-}
-
-// As the server (checkProjectMaterial): a project's leftovers go only to that
-// project, so one issue can't hold two projects' material. Orders and RFQs take
-// their project from the order (Project on the Order Roadmap).
-function checkProjectMaterial(projectNumber: string | null | undefined, materialIds: string[]) {
-  const own = [...new Set(materialIds)].map(findMaterial)
-    .filter((m): m is NonNullable<typeof m> => !!m && m.category === 'PROJECT_MATERIAL' && !!m.projectNumber);
-  const projects = [...new Set(own.map((m) => m.projectNumber))];
-  if (projects.length > 1) {
-    throw err('VALIDATION_ERROR', `One issue can't hold material for two projects (${projects.join(' and ')}). Issue each project's material separately.`);
-  }
-  const wrong = own.find((m) => m.projectNumber !== (projectNumber || null));
-  if (wrong) {
-    throw err('VALIDATION_ERROR', projectNumber
-      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be issued to project ${projectNumber}.`
-      : `${wrong.sku} is material for project ${wrong.projectNumber}: issue it to that project.`);
-  }
 }
 
 // As the server (Stores ordering roadmap): a project order holds Projects
@@ -2097,11 +2116,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     const deliveryRef = b.deliveryRef?.trim();
     if (!deliveryRef) throw err('VALIDATION_ERROR', 'Enter the delivery note or invoice number');
     const receivedAt = mockReceivedAt(b.receivedAt);
-    // As the server: a Projects item with no project isn't received, as it couldn't be issued.
+    // As the server (ADR-043): a Projects item isn't received as Stores stock, as it couldn't be issued.
     for (const l of b.lines ?? []) {
       const m = findMaterial(l.materialId);
-      if (m && m.category === 'PROJECT_MATERIAL' && !m.projectNumber) {
-        throw err('VALIDATION_ERROR', `${m.sku} is project material with no project, so it isn't received into the store: stock with no project can't be issued.`);
+      if (m && m.category === 'PROJECT_MATERIAL') {
+        throw err('VALIDATION_ERROR', m.projectNumber
+          ? `${m.sku} is project material, so it isn't received into the store as Stores stock: it comes in on its project's order, held for the project.`
+          : `${m.sku} is project material with no project, so it isn't received into the store: stock with no project can't be issued.`);
       }
     }
     const lines = b.lines ?? [];
@@ -2135,10 +2156,20 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
 
   if (method === 'POST' && p === '/inventory-issues') {
-    // As the server: a Projects item with no project isn't issued from Stores stock.
+    // As the server (ADR-043): project material goes for approval, and a Projects item's Stores stock isn't issued.
+    if ((body as IssueBody)?.projectNumber) throw err('VALIDATION_ERROR', 'Project material is issued on the Workshop Manager\'s approval: send it for approval from Issue stock.');
     for (const l of (body as IssueBody)?.lines ?? []) if (!l.heldForProject) refuseUnassigned(l.materialId);
     return handleIssue((body as IssueBody) ?? {});
   }
+  // Project issues waiting for the Workshop Manager (ADR-043).
+  if (method === 'POST' && p === '/issue-requests') return handleIssueRequest((body as IssueBody & { note?: string }) ?? {});
+  if (method === 'GET' && p === '/issue-requests/summary') {
+    const waiting = state.issueRequests.filter((r) => r.status === 'PENDING').sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
+    return { waiting: waiting.length, oldestRequestedAt: waiting[0]?.requestedAt ?? null, oldestDays: waiting[0] ? mockDaysBetween(waiting[0].requestedAt, new Date().toISOString()) : null };
+  }
+  if (method === 'GET' && p === '/issue-requests') return listIssueRequests(qs);
+  const issueDecision = /^\/issue-requests\/([^/]+)\/(approve|reject|cancel)$/.exec(p);
+  if (method === 'POST' && issueDecision) return decideIssueRequest(decodeURIComponent(issueDecision[1]!), issueDecision[2] as 'approve' | 'reject' | 'cancel', (body as { reason?: string }) ?? {});
   if (method === 'GET' && p === '/tools') return listTools();
   // Adjustments waiting for approval (switched off in the demo by default; see the settings below).
   if (method === 'GET' && p === '/adjustment-requests/summary') {
@@ -2953,17 +2984,19 @@ function handleIssue(b: IssueBody): { issueId: string; transactionIds: string[] 
     }
     if (project.active === false) throw err('VALIDATION_ERROR', 'Project is inactive');
   }
-  // As the server: a project's own stock goes to that project only; Stores
-  // stock follows the item's rules (Project Material Through the Store Roadmap, Phase 3).
+  // As the server (ADR-043): a project issue takes only the project's own stock,
+  // and an issue with no project only Stores stock.
   for (const l of lines) {
-    if (l.heldForProject && l.heldForProject !== (b.projectNumber ?? null)) {
-      const sku = findMaterial(l.materialId)?.sku;
-      throw err('VALIDATION_ERROR', b.projectNumber
+    const sku = findMaterial(l.materialId)?.sku;
+    if (b.projectNumber && l.heldForProject !== b.projectNumber) {
+      throw err('VALIDATION_ERROR', l.heldForProject
         ? `${sku} at this location is held for project ${l.heldForProject}, so it can't be issued to project ${b.projectNumber}.`
-        : `${sku} at this location is held for project ${l.heldForProject}: issue it to that project.`);
+        : `${sku} here is Stores stock, which isn't issued to a project. Issue it on its own, with no project.`);
+    }
+    if (!b.projectNumber && l.heldForProject) {
+      throw err('VALIDATION_ERROR', `${sku} at this location is held for project ${l.heldForProject}: it is issued to that project, on the Workshop Manager's approval.`);
     }
   }
-  checkProjectMaterial(b.projectNumber, lines.filter((l) => !l.heldForProject).map((l) => l.materialId));
   const totals = new Map<string, { materialId: string; locationId: string; heldForProject: string | null; quantity: number }>();
   for (const l of lines) {
     const key = `${l.materialId}|${l.locationId}|${l.heldForProject ?? ''}`;
@@ -3711,6 +3744,99 @@ function mockDaysBetween(from: string, to: string): number {
   const day = (iso: string) => Date.parse(new Date(Date.parse(iso) + 7_200_000).toISOString().slice(0, 10));
   return Math.max(0, Math.round((day(to) - day(from)) / 86_400_000));
 }
+
+/** As IssueRequestService.request: checked as the issue will be; what waits counts against the stock. */
+function handleIssueRequest(b: IssueBody & { note?: string }) {
+  if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the stock is issued to');
+  if (!b.projectNumber) throw err('VALIDATION_ERROR', 'Invalid issue payload');
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to issue');
+  if (lines.some((l) => !l.materialId || !l.locationId || !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Invalid issue payload');
+  const recipient = state.recipients.find((x) => x.id === b.recipientId);
+  if (!recipient) throw err('NOT_FOUND', 'Recipient not found');
+  if (!recipient.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
+  const project = state.projects.find((x) => x.projectNumber === b.projectNumber);
+  if (!project) throw err('NOT_FOUND', 'Project not found');
+  if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
+    throw err('VALIDATION_ERROR', `Project ${b.projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
+  }
+  checkMockWholeUnits(lines);
+  const projectNumber = b.projectNumber;
+  const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
+  for (const l of lines) {
+    const key = `${l.materialId}|${l.locationId}`;
+    const t = totals.get(key);
+    if (t) t.quantity += l.quantity;
+    else totals.set(key, { materialId: l.materialId, locationId: l.locationId, quantity: l.quantity });
+  }
+  for (const t of totals.values()) {
+    const material = findMaterial(t.materialId);
+    if (!material) throw err('NOT_FOUND', 'Material not found');
+    if (material.category === 'TOOLS') throw err('VALIDATION_ERROR', `${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
+    const held = getBalance(t.materialId, t.locationId, projectNumber);
+    const asked = state.issueRequests.filter((r) => r.status === 'PENDING' && r.projectNumber === projectNumber)
+      .flatMap((r) => r.lines).filter((l) => l.materialId === t.materialId && l.locationId === t.locationId).reduce((n, l) => n + l.quantity, 0);
+    if (held - asked < t.quantity) {
+      throw err('INSUFFICIENT_BALANCE', asked > 0
+        ? `Cannot ask for ${t.quantity} × ${material.sku}: ${held} is held for project ${projectNumber} here and ${asked} of it is already waiting for approval.`
+        : `Cannot ask for ${t.quantity} × ${material.sku}: only ${held} is held for project ${projectNumber} here.`, { requested: t.quantity, available: Math.max(held - asked, 0) });
+    }
+  }
+  const id = nextId('ir');
+  state.issueRequests.push({
+    id, status: 'PENDING', projectNumber, recipientId: b.recipientId, note: b.note?.trim() || null,
+    lines: lines.map((l, i) => ({ id: nextId('irl'), lineNo: i + 1, materialId: l.materialId, locationId: l.locationId, quantity: l.quantity, approvedQuantity: null })),
+    requestedById: 'user-1', requestedAt: new Date().toISOString(), decidedById: null, decidedAt: null, decisionNote: null, standIn: false, issueId: null,
+  });
+  return { status: 'PENDING_APPROVAL', requestId: id };
+}
+
+function listIssueRequests(qs: Record<string, string>) {
+  const status = qs.status ?? 'PENDING';
+  const userName = (id: string | null) => (id ? mockUsers.find((u) => u.id === id)?.name ?? 'Unknown user' : null);
+  const limit = Math.min(Number(qs.limit) || 50, 200);
+  const sorted = state.issueRequests
+    .filter((r) => r.status === status && (qs.mine !== 'true' || r.requestedById === 'user-1') && (!qs.projectNumber || r.projectNumber === qs.projectNumber))
+    .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id));
+  return olderThan(sorted, qs.before, (r) => r.requestedAt).slice(0, limit).map((r) => {
+    const recipient = state.recipients.find((x) => x.id === r.recipientId);
+    return {
+      ...r,
+      projectName: state.projects.find((p) => p.projectNumber === r.projectNumber)?.name ?? null,
+      recipient: { id: r.recipientId, name: recipient?.name ?? 'Unknown', type: recipient?.type ?? 'WORKER' },
+      requestedBy: { id: r.requestedById, name: userName(r.requestedById)! },
+      decidedBy: r.decidedById ? { id: r.decidedById, name: userName(r.decidedById)! } : null,
+      cursor: `${r.requestedAt}_${r.id}`,
+      daysWaiting: mockDaysBetween(r.requestedAt, r.decidedAt ?? new Date().toISOString()),
+      lines: r.lines.map((l) => {
+        const m = findMaterial(l.materialId);
+        return {
+          id: l.id, lineNo: l.lineNo,
+          material: { id: l.materialId, sku: m?.sku ?? l.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '' },
+          location: { id: l.locationId, name: findLocation(l.locationId)?.name ?? l.locationId },
+          quantity: String(l.quantity),
+          approvedQuantity: l.approvedQuantity === null ? null : String(l.approvedQuantity),
+          onHand: r.status === 'PENDING' ? String(getBalance(l.materialId, l.locationId, r.projectNumber)) : null,
+        };
+      }),
+    };
+  });
+}
+
+// The demo's one user is an Admin, who asked for every request: as the server,
+// Admin alone doesn't approve (the Workshop Manager or the Director does), and
+// nobody decides their own, so in the demo a request is only cancelled.
+function decideIssueRequest(id: string, decision: 'approve' | 'reject' | 'cancel', b: { reason?: string }) {
+  const r = state.issueRequests.find((x) => x.id === id);
+  if (!r) throw err('NOT_FOUND', 'Issue request not found');
+  if (decision !== 'approve' && !b.reason?.trim()) throw err('VALIDATION_ERROR', decision === 'cancel' ? 'Say why it is cancelled' : 'Say why it is rejected');
+  if (r.status !== 'PENDING') throw err('INVALID_STATE', `This request was already ${STATUS_WORDS[r.status]}.`);
+  if (decision !== 'cancel') throw err('FORBIDDEN', 'Project issues are approved by the Workshop Manager, or the Director standing in.');
+  if (r.requestedById !== 'user-1') throw err('FORBIDDEN', 'Only whoever asked for this issue can cancel it.');
+  Object.assign(r, { status: 'CANCELLED', decidedById: 'user-1', decidedAt: new Date().toISOString(), decisionNote: b.reason!.trim() });
+  return { id };
+}
+const STATUS_WORDS: Record<MockIssueRequest['status'], string> = { PENDING: 'waiting', APPROVED: 'approved', REJECTED: 'rejected', CANCELLED: 'cancelled' };
 
 function listAdjustmentRequests(qs: Record<string, string>) {
   const status = qs.status ?? 'PENDING';

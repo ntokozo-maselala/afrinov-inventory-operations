@@ -141,11 +141,14 @@ export const StockReceiptService = {
           // Holds the item's row, as every path that moves stock does after its
           // balance lock (ADR-033; system audit A5): a deactivation can't slip in.
           const m = await checkMaterialActive(l.materialId, tx);
-          // A Projects item with no project isn't issued (refuseUnassigned), so
-          // it isn't received into the store either (Project on the Order
-          // Roadmap; Qodo, PR #131).
-          if (sectionOf(m.category) === 'PROJECTS' && !m.projectNumber) {
-            throw Errors.validation(`${m.sku} is project material with no project, so it isn't received into the store: stock with no project can't be issued.`);
+          // A Projects item's Stores stock isn't issued (refuseProjectsItemFromStores,
+          // ADR-043), so it isn't received into the store as Stores stock either:
+          // project material comes in on its project's order, held for the
+          // project (Project on the Order Roadmap; Qodo, PR #131).
+          if (sectionOf(m.category) === 'PROJECTS') {
+            throw Errors.validation(m.projectNumber
+              ? `${m.sku} is project material, so it isn't received into the store as Stores stock: it comes in on its project's order, held for the project.`
+              : `${m.sku} is project material with no project, so it isn't received into the store: stock with no project can't be issued.`);
           }
           checked.add(`m:${l.materialId}`);
         }

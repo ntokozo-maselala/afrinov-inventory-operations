@@ -193,7 +193,10 @@ describe('stock movements over real HTTP', () => {
     const noRecipient = await api('POST', '/inventory-issues', { lines: [{ materialId, locationId: storeA, quantity: 1 }] });
     expect(noRecipient.status).toBe(400);
 
-    const unknownProject = await api('POST', '/inventory-issues', issueBody(storeA, 1, { projectNumber: `NOPE-${run}` }));
+    // Project material goes for approval instead (ADR-043); an unknown project is refused there.
+    const projectIssue = await api('POST', '/inventory-issues', issueBody(storeA, 1, { projectNumber: `NOPE-${run}` }));
+    expect(projectIssue.status).toBe(400);
+    const unknownProject = await api('POST', '/issue-requests', issueBody(storeA, 1, { projectNumber: `NOPE-${run}` }));
     expect(unknownProject.status).toBe(404);
 
     expect(await transactionCount()).toBe(before);

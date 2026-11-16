@@ -29,6 +29,7 @@ const db = {
   rfqs: [] as Array<{ id: string; number: string; status: string; projectNumber: string }>,
   loans: [] as Array<{ id: string; materialId: string; sku: string; projectNumber: string; lent: number; back: number }>,
   waiting: new Map<string, number>(),
+  waitingIssues: new Map<string, number>(),
   locks: 0,
 };
 
@@ -118,6 +119,9 @@ function makePrisma(): unknown {
       count: async ({ where }: { where: { OR: Array<{ projectNumber?: string; heldForProject?: string }> } }) =>
         db.waiting.get(where.OR[0]!.projectNumber ?? '') ?? 0,
     },
+    issueRequest: {
+      count: async ({ where }: { where: { projectNumber: string } }) => db.waitingIssues.get(where.projectNumber) ?? 0,
+    },
     projectSchedule: {
       count: async ({ where }: { where: { projectNumber: string; status: { in: string[] } } }) =>
         db.schedules.filter((s) => s.projectNumber === where.projectNumber && where.status.in.includes(s.status)).length,
@@ -143,6 +147,7 @@ beforeEach(() => {
   db.rfqs.length = 0;
   db.loans.length = 0;
   db.waiting.clear();
+  db.waitingIssues.clear();
   db.locks = 0;
   db.users.set('user-1', { id: 'user-1', name: 'Alice', email: 'alice@example.com' });
   db.users.set('user-2', { id: 'user-2', name: 'Bob', email: 'bob@example.com' });
@@ -214,8 +219,11 @@ describe('ProjectService', () => {
     db.rfqs.push({ id: 'rfq-1', number: 'AFRI-02A-0008-01', status: 'SENT', projectNumber: 'P-8' });
     db.loans.push({ id: 'loan-1', materialId: 't1', sku: 'GRINDER-01', projectNumber: 'P-8', lent: 1, back: 0 });
     db.waiting.set('P-8', 2);
+    db.waitingIssues.set('P-8', 1);
     const { blockers } = await ProjectService.closingCheck('P-8', 'CANCELLED');
-    expect(blockers.map((b) => b.kind)).toEqual(['ORDER', 'RFQ', 'LOAN', 'APPROVAL']);
+    expect(blockers.map((b) => b.kind)).toEqual(['ORDER', 'RFQ', 'LOAN', 'APPROVAL', 'APPROVAL']);
+    // ADR-043: an issue waiting for the Workshop Manager would issue to a closed project.
+    expect(blockers[4]!.text).toMatch(/1 issue of its material waiting for the Workshop Manager/);
     expect(blockers[0]).toMatchObject({ id: 'po-1', text: expect.stringMatching(/AFRI-0101 is approved/) });
     await expect(ProjectService.update({ projectNumber: 'P-8', status: 'CANCELLED' }, 'user-1', ADMIN)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/can't be cancelled yet/) });
     await expect(ProjectService.archive('P-8', 'user-1', ADMIN)).rejects.toMatchObject({ code: 'INVALID_STATE' });
@@ -225,6 +233,7 @@ describe('ProjectService', () => {
     db.rfqs[0]!.status = 'AWARDED';
     db.loans[0]!.back = 1;
     db.waiting.clear();
+    db.waitingIssues.clear();
     expect((await ProjectService.update({ projectNumber: 'P-8', status: 'CANCELLED' }, 'user-1', ADMIN))).toMatchObject({ status: 'CANCELLED', active: false });
   });
 

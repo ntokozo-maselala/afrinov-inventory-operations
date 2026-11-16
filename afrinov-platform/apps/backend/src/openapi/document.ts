@@ -20,6 +20,7 @@ import { createUserSchema, signInQuerySchema, temporaryPasswordSchema, updateUse
 import {
   issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema, countSheetQuerySchema,
   consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema,
+  issueRequestSchema, issueRequestQuerySchema, issueApprovalSchema, issueDecisionSchema,
 } from '../modules/inventory/inventory.routes.js';
 import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema, toolRepairedSchema, toolRepairWriteOffSchema } from '../modules/inventory/tool.routes.js';
 import {
@@ -355,9 +356,9 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/inventory-issues', tag: 'Stock movements', summary: 'Issue stock to a recipient',
-    description: 'One recipient (required), an optional project, and up to 50 lines, booked all-or-nothing. '
-      + 'Each line takes Stores stock, or, with heldForProject, the stock held for the issue\'s project: a project\'s own stock '
-      + 'goes to that project only (400 otherwise), while Stores stock follows its item (a leftover goes to its item\'s project). '
+    description: 'One recipient (required) and up to 50 lines of Stores stock, booked all-or-nothing. '
+      + 'Project material is not issued here (ADR-043): an issue with a projectNumber is refused (400), and goes to POST /issue-requests '
+      + 'for the Workshop Manager\'s approval. A line with heldForProject, or a Projects item\'s leftover Stores stock, is refused (400). '
       + 'Lines for the same stock are checked against it as one total. '
       + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
       + 'material or location, and 400 for an inactive one. Tools are refused (400): they are checked out, not issued. '
@@ -509,6 +510,48 @@ export const OPERATIONS: Operation[] = [
       + 'nothing is posted: 202 with status PENDING_APPROVAL, the requestId, value and limit, until someone else approves it. '
       + 'Otherwise 201 with status POSTED and the transactionId.',
     permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [202, 404, 422],
+  },
+  {
+    method: 'post', path: '/issue-requests', tag: 'Stock movements', summary: 'Ask the Workshop Manager to approve issuing project material',
+    description: 'The storeman\'s issue of project material (ADR-043): one recipient, the project, and up to 50 lines, each taking stock held for the '
+      + 'project. Nothing is posted: 202 with status PENDING_APPROVAL and the requestId. Checked as the issue will be, so one that could never post is '
+      + 'refused at once: 422 INSUFFICIENT_BALANCE when less is held for the project than this and the other waiting requests ask for, 400 for a '
+      + 'closed or inactive project, an inactive item, recipient or location, a tool, or a part-unit of a counted item, and 404 for an unknown one. '
+      + 'Retry-safe with an Idempotency-Key header.',
+    permissions: [P.IssueInventory], body: issueRequestSchema, success: 202, errors: [404, 422],
+  },
+  {
+    method: 'get', path: '/issue-requests', tag: 'Stock movements', summary: 'Project issues waiting for approval, or decided',
+    description: 'Newest first, a page at a time (?limit up to 200, default 50; ?before the last row\'s cursor): PENDING unless another status is asked for; '
+      + '?mine=true for your own; ?projectNumber for one project. Each has its project, recipient, lines (asked, approvedQuantity once approved, and for a '
+      + 'waiting one onHand: what is held for the project there now), who asked and who decided, standIn when the Director approved or rejected in the '
+      + 'Workshop Manager\'s place, the issueId of an approved one, and daysWaiting. Needs approve:project_issue or issue:inventory.',
+    query: issueRequestQuerySchema, errors: [403],
+  },
+  {
+    method: 'get', path: '/issue-requests/summary', tag: 'Stock movements', summary: 'How many project issues wait, and the oldest',
+    description: '{ waiting, oldestRequestedAt, oldestDays }, for the Dashboard. Needs approve:project_issue or issue:inventory.',
+    errors: [403],
+  },
+  {
+    method: 'post', path: '/issue-requests/:id/approve', tag: 'Stock movements', summary: 'Approve a project issue, possibly for less',
+    description: 'Posts the issue for what is approved, booked to the storeman who asked, and records the approval as the slip\'s confirmation '
+      + '(method APPROVAL): no PIN or signature is asked for. Each line is approved in full unless given; a line may be given less, or 0 to leave it out, '
+      + 'but at least one must be issued. Only the Workshop Manager, or the Director standing in (standIn), and never whoever asked: 403 otherwise. '
+      + '409 INVALID_STATE once decided, 422 when the stock has moved since. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ApproveProjectIssue], body: issueApprovalSchema, success: 201, errors: [403, 404, 409, 422],
+  },
+  {
+    method: 'post', path: '/issue-requests/:id/reject', tag: 'Stock movements', summary: 'Reject a project issue waiting for approval',
+    description: 'Posts nothing; a reason is required. Only the Workshop Manager, or the Director standing in. 409 INVALID_STATE once decided. '
+      + 'Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ApproveProjectIssue], body: issueDecisionSchema, success: 200, errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/issue-requests/:id/cancel', tag: 'Stock movements', summary: 'Cancel your own project issue waiting for approval',
+    description: 'Posts nothing; a reason is required. Only whoever asked for it (403 otherwise). 409 INVALID_STATE once decided. '
+      + 'Retry-safe with an Idempotency-Key header.',
+    permissions: [P.IssueInventory], body: issueDecisionSchema, success: 200, errors: [403, 404, 409],
   },
   {
     method: 'get', path: '/adjustment-requests', tag: 'Stock movements', summary: 'Adjustments waiting for approval, or decided',

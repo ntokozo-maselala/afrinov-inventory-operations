@@ -60,6 +60,10 @@ export const PERMISSION_ROLES = {
   'inventory:count': ['STORE_CONTROLLER'], // adjust:inventory (a count posts its differences as adjustments)
   'writeoffs:approve': ['STORE_CONTROLLER'], // approve:write_off (someone else's, over the limit; never their own)
   'writeoffs:view': ['STORE_CONTROLLER'], // approve:write_off or adjust:inventory (the Write-offs to approve page)
+  // ADR-043: project material is issued on the Workshop Manager's approval; the Director stands in.
+  // The server also asks for one of those roles, so an Admin sees the page but approves only by holding one.
+  'issues:approve': ['WORKSHOP_MANAGER', 'DIRECTOR'], // approve:project_issue
+  'issues:view': ['STORE_CONTROLLER', 'TECHNICIAN', 'WORKSHOP_MANAGER', 'DIRECTOR'], // approve:project_issue or issue:inventory (the Issues to approve page)
   'inventory:reverse': ['STORE_CONTROLLER'], // reverse:inventory_transaction
   'tools:lend': ['STORE_CONTROLLER', 'TECHNICIAN'], // checkout:tool, checkin:tool
   'tools:extend': ['STORE_CONTROLLER'], // extend:tool_loan
@@ -95,6 +99,7 @@ export type Permission = keyof typeof PERMISSION_ROLES;
 const SERVER_GRANTS: Partial<Record<Permission, readonly string[]>> = {
   'writeoffs:approve': ['approve:write_off'],
   'writeoffs:view': ['approve:write_off', 'adjust:inventory'],
+  'issues:view': ['approve:project_issue', 'issue:inventory'],
   'materials:cost': ['edit:unit_cost'],
   'projects:close': ['close:project'],
 };

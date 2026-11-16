@@ -117,8 +117,9 @@ to only; it holds no stock, so it is never in a ledger sum.
 
 `receipt_confirmations` (ReceiptConfirmation, ADR-034): id, slip_id (the
 issue's or tool loan's issue_id), slip_kind (`ReceiptSlipKind` ISSUE, LOAN),
-method (`ReceiptMethod` PIN, SIGNATURE, PAPER, NONE), signer_id (the recipient
-who confirmed, or who collected for a machine or site), reason
+method (`ReceiptMethod` PIN, SIGNATURE, PAPER, NONE, and APPROVAL for a
+project slip the Workshop Manager approved, ADR-043), signer_id (the recipient
+who confirmed, or who collected for a machine or site; none on APPROVAL), reason
 (`ReceiptSkipReason` LEFT, CANNOT, NO_SCREEN, DISPUTED, OTHER; NONE only), note,
 lines_fingerprint (SHA-256 of the slip's unreversed lines when confirmed),
 captured_by_id, confirmed_at, image_removed_at. A partial unique index allows one
@@ -129,6 +130,18 @@ no stock. `receipt_images` holds a confirmation's signature or photo (content
 type, size, bytes), removed on its own when its time is up.
 `recipients` gained pin_hash (bcrypt, never returned), pin_set_at,
 pin_failed_tries and pin_locked_at.
+
+`issue_requests` (IssueRequest, ADR-043): id, project_number, recipient_id, note,
+status (`IssueRequestStatus` PENDING, APPROVED, REJECTED, CANCELLED),
+requested_by_id, requested_at, decided_by_id, decided_at, decision_note,
+stand_in (the Director decided in the Workshop Manager's place), issue_id (the
+slip approving posted, unique). CHECKs: decided_at is set exactly when it is no
+longer PENDING, and issue_id exactly when APPROVED. FKs to the project,
+recipient and both users; indexes on (status, requested_at) and (project_number,
+status). `issue_request_lines`: id, request_id (cascade), line_no (unique per
+request), material_id, location_id, quantity (> 0), approved_quantity (set on
+approval, 0 to quantity). Every line takes stock held for the request's
+project. Nothing here is a ledger row: approving posts the ISSUE.
 
 `reference_type` values written by the code: `GoodsReceipt` (receipts),
 `PurchaseOrder` (receive-all on an order), `Project` (issues with a

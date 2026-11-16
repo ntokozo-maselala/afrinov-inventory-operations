@@ -248,7 +248,8 @@ export interface IssueSlip {
   receipt?: ReceiptSummary | null;
 }
 
-export type ReceiptMethod = 'PIN' | 'SIGNATURE' | 'PAPER' | 'NONE';
+// APPROVAL: a project slip, confirmed by the Workshop Manager's approval before it was issued (ADR-043).
+export type ReceiptMethod = 'PIN' | 'SIGNATURE' | 'PAPER' | 'NONE' | 'APPROVAL';
 export type ReceiptSkipReason = 'LEFT' | 'CANNOT' | 'NO_SCREEN' | 'DISPUTED' | 'OTHER';
 
 /** A slip's receipt (POST /slips/:slipId/confirmation, and on each slip and open loan). */

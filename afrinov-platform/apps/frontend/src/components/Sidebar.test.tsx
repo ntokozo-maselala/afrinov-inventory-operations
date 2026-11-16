@@ -47,7 +47,7 @@ describe('useNavGroups', () => {
   });
 
   it('puts the counter actions in Store, after Stock', () => {
-    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Write-offs to approve', 'Order stock', 'Tools']);
+    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Write-offs to approve', 'Issues to approve', 'Order stock', 'Tools']);
   });
 
   it('offers Order stock only with procurement on, as the orders it raises are purchase orders', () => {
@@ -140,16 +140,17 @@ describe('useNavGroups', () => {
   });
 
   it.each([
-    ['TECHNICIAN', ['Stock', 'Issue stock', 'Return stock', 'Tools']],
+    ['TECHNICIAN', ['Stock', 'Issue stock', 'Return stock', 'Issues to approve', 'Tools']],
     // With procurement on, a delivery is against one of the store's orders, which Procurement doesn't receive.
     ['PROCUREMENT', ['Stock', 'Tools']],
     ['VIEWER', ['Stock', 'Tools']],
     // The storeman orders stock for the shelf (Stores ordering roadmap); Procurement doesn't.
-    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Write-offs to approve', 'Order stock', 'Tools']],
+    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Write-offs to approve', 'Issues to approve', 'Order stock', 'Tools']],
     // Those who sign Stores orders open them in Order stock; the Director signs project orders only.
     ['PROCUREMENT_MANAGER', ['Stock', 'Order stock', 'Tools']],
-    ['WORKSHOP_MANAGER', ['Stock', 'Order stock', 'Tools']],
-    ['DIRECTOR', ['Stock', 'Tools']],
+    // Project issues wait for the Workshop Manager, and the Director stands in (ADR-043).
+    ['WORKSHOP_MANAGER', ['Stock', 'Issues to approve', 'Order stock', 'Tools']],
+    ['DIRECTOR', ['Stock', 'Issues to approve', 'Tools']],
   ])('shows a %s only the Store actions the server lets them do', (role, expected) => {
     signedIn.roles = [role];
     expect(useLabelsIn('Store')).toEqual(expected);

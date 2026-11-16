@@ -144,3 +144,35 @@ export async function receiveOutstanding(
     .map((l) => ({ materialId: l.materialId, locationId, quantity: Number(l.orderedQty.minus(l.receivedQty)), purchaseOrderLineId: l.id }));
   return call('POST', '/goods-receipts', { purchaseOrderId: orderId, supplierId: order.supplierId, deliveryRef: `DN-${orderId.slice(0, 8)}`, lines, post: true });
 }
+
+/**
+ * Signs in a Workshop Manager made for the run, who approves project issues
+ * (ADR-043). Made once per run and reused.
+ */
+const workshopManagers = new Map<string, ReturnType<typeof client>>();
+export async function workshopManager(port: number, api: ReturnType<typeof client>, run: string): Promise<ReturnType<typeof client>> {
+  const known = workshopManagers.get(`${port}:${run}`);
+  if (known) return known;
+  const email = `it-workshop-${run}@afrinov.local`;
+  const password = `It-${run}-workshop`;
+  const made = await api('POST', '/users', { email, name: `IT Workshop Manager ${run}`, password, roleNames: ['WORKSHOP_MANAGER'], mustChangePassword: false });
+  if (made.status !== 201) throw new Error(`Creating the Workshop Manager failed with ${made.status}: ${JSON.stringify(made.body)}`);
+  const wm = client(port, await login(port, email, password));
+  workshopManagers.set(`${port}:${run}`, wm);
+  return wm;
+}
+
+/**
+ * Issues project material as the counter now does (ADR-043): the storeman
+ * asks, and the Workshop Manager approves in full. Each line takes the stock
+ * held for the project. Returns the approval's response (issueId and
+ * transactionIds), or the request's when it is refused.
+ */
+export async function issueToProject(
+  storeman: ReturnType<typeof client>, approver: ReturnType<typeof client>,
+  body: { recipientId: string; projectNumber: string; lines: Array<{ materialId: string; locationId: string; quantity: number | string }> },
+): Promise<ApiResponse<{ id?: string; issueId: string; transactionIds: string[]; error?: { code: string; message: string } }>> {
+  const asked = await storeman<{ requestId: string; error?: { code: string; message: string } }>('POST', '/issue-requests', body);
+  if (asked.status !== 202) return asked as unknown as ApiResponse<{ issueId: string; transactionIds: string[]; error?: { code: string; message: string } }>;
+  return approver('POST', `/issue-requests/${asked.body.requestId}/approve`, {});
+}

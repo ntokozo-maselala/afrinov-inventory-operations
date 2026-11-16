@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Counter receipts, as with procurement off; receiving against orders needs no switch in the mock.
 vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: false }));
-import { createMockApi, resetMockState, mockOrderRaisedBy } from './mockApi';
+import { createMockApi, resetMockState, mockApproveIssueRequest, mockOrderRaisedBy } from './mockApi';
 
 const api = createMockApi();
 beforeEach(() => resetMockState());
@@ -125,13 +125,20 @@ describe('mock: delivery of a project order', () => {
     const po = await approvedProjectOrder();
     await receiveRest(po.id);
     const before = await heldFor('AFRI-1325');
-    const issue = (projectNumber: string | undefined, quantity: number) => api.post('/inventory-issues', {
-      recipientId: 'rcp-1', projectNumber, lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity, heldForProject: 'AFRI-1325' }],
+    // To a project it is asked for, and issued once the Workshop Manager approves (ADR-043).
+    const ask = (projectNumber: string, quantity: number) => api.post<{ requestId: string }>('/issue-requests', {
+      recipientId: 'rcp-1', projectNumber, lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity }],
     });
-    expect(await messageOf(issue(undefined, 1))).toMatch(/held for project AFRI-1325: issue it to that project/);
-    expect(await messageOf(issue('AFRI-1402', 1))).toMatch(/held for project AFRI-1325, so it can.t be issued to project AFRI-1402/);
-    await issue('AFRI-1325', 1);
+    expect(await messageOf(api.post('/inventory-issues', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity: 1, heldForProject: 'AFRI-1325' }] })))
+      .toMatch(/held for project AFRI-1325: it is issued to that project, on the Workshop Manager's approval/);
+    expect(await messageOf(ask('AFRI-1402', 1))).toMatch(/only 0 is held for project AFRI-1402 here/);
+    const asked = await ask('AFRI-1325', 1);
+    expect(await heldFor('AFRI-1325')).toBe(before);
+    const approved = mockApproveIssueRequest(asked.requestId);
     expect(await heldFor('AFRI-1325')).toBe(before - 1);
+    // The approval is the slip's confirmation.
+    const slips = await api.get<Array<{ id: string; receipt: { method: string } | null }>>('/inventory-issues?projectNumber=AFRI-1325');
+    expect(slips.find((s) => s.id === approved.issueId)?.receipt?.method).toBe('APPROVAL');
     // A transfer keeps the project; Stores stock is untouched.
     await api.post('/inventory-transfers', { materialId: 'mat-9', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 1, heldForProject: 'AFRI-1325' });
     expect(await heldFor('AFRI-1325')).toBe(before - 1);

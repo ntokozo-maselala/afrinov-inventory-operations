@@ -666,7 +666,10 @@ describe('mock API mutation flows', () => {
     it('requires a recipient and refuses an unknown project', async () => {
       await expect(api.post('/inventory-issues', { lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] }))
         .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      // A project issue goes for approval (ADR-043), where an unknown project is refused.
       await expect(api.post('/inventory-issues', { recipientId: 'rcp-1', projectNumber: 'NOPE', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(api.post('/issue-requests', { recipientId: 'rcp-1', projectNumber: 'NOPE', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] }))
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });

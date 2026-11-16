@@ -182,10 +182,17 @@ describe('moving leftovers to Stores', () => {
     });
   });
 
-  it('refuses while the project is open', async () => {
-    await expect(ProjectLeftoversService.moveToStores('1402', [{ materialId: 'p4', category: 'CONSUMABLES' }], 'user-1'))
-      .rejects.toMatchObject({ message: expect.stringMatching(/Project 1402 is still open, so its material stays with it/) });
-    expect(db.materials.get('p4')!.category).toBe('PROJECT_MATERIAL');
+  // ADR-043: a leftover isn't issued to its project any more, so it moves to
+  // Stores at once; stock held for an open project stays with it.
+  it('moves an open project\'s leftover Stores stock, but not stock held for it', async () => {
+    await ProjectLeftoversService.moveToStores('1402', [{ materialId: 'p4', category: 'CONSUMABLES' }], 'user-1');
+    expect(db.materials.get('p4')).toMatchObject({ category: 'CONSUMABLES', projectNumber: null });
+
+    db.materials.set('p5', pipe('p5', '1402'));
+    db.balances.push({ materialId: 'p5', location: { name: 'A-1', active: true }, quantity: new Prisma.Decimal(3), heldForProject: '1402' });
+    await expect(ProjectLeftoversService.moveToStores('1402', [{ materialId: 'p5', category: 'CONSUMABLES' }], 'user-1'))
+      .rejects.toMatchObject({ message: expect.stringMatching(/Project 1402 is still open, so the stock held for it stays with it: 1402-P5 moves to Stores once/) });
+    expect(db.materials.get('p5')!.category).toBe('PROJECT_MATERIAL');
   });
 
   it('refuses another project\'s material, an empty list and an item listed twice', async () => {

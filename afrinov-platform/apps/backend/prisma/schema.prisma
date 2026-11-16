@@ -86,6 +86,8 @@ model User {
   materialStatusChanges   MaterialStatusChange[]
   requestedAdjustments    AdjustmentRequest[]      @relation("AdjustmentRequestedBy")
   decidedAdjustments      AdjustmentRequest[]      @relation("AdjustmentDecidedBy")
+  requestedIssues         IssueRequest[]           @relation("IssueRequestedBy")
+  decidedIssues           IssueRequest[]           @relation("IssueDecidedBy")
   createdProjectSchedules ProjectSchedule[]        @relation("ProjectScheduleCreatedBy")
   assignedProjectSteps    ProjectStep[]            @relation("ProjectStepAssignee")
   capturedReceipts        ReceiptConfirmation[]    @relation("ReceiptCapturedBy")
@@ -209,6 +211,7 @@ model Material {
   stockCountLines       StockCountLine[]
   rfqLines              RfqLine[]
   adjustmentRequests    AdjustmentRequest[]
+  issueRequestLines     IssueRequestLine[]
   statusChanges         MaterialStatusChange[]
   costChanges           MaterialCostChange[]
   project               Project?               @relation(fields: [projectNumber], references: [projectNumber])
@@ -259,6 +262,7 @@ model Location {
   inventoryBalances     InventoryBalance[]
   toolRepairs           ToolRepair[]
   adjustmentRequests    AdjustmentRequest[]
+  issueRequestLines     IssueRequestLine[]
   parent                Location?              @relation("LocationParent", fields: [parentId], references: [id], onDelete: Restrict)
   children              Location[]             @relation("LocationParent")
 
@@ -328,6 +332,7 @@ model Project {
   rfqs                  Rfq[]
   salesRfqs             SalesRfq[]
   schedules             ProjectSchedule[]
+  issueRequests         IssueRequest[]
 
   @@index([status])
   @@index([active])
@@ -436,6 +441,7 @@ model Recipient {
 
   inventoryTransactions InventoryTransaction[]
   adjustmentRequests    AdjustmentRequest[]
+  issueRequests         IssueRequest[]
   receiptsSigned        ReceiptConfirmation[]
 
   @@index([type])
@@ -459,6 +465,9 @@ enum ReceiptMethod {
   SIGNATURE
   PAPER
   NONE
+  // A project slip: the Workshop Manager approved it before it was issued
+  // (ADR-043). Names nobody who collected; capturedBy is the approver.
+  APPROVAL
 }
 
 enum ReceiptSkipReason {
@@ -1260,6 +1269,65 @@ model AdjustmentRequest {
   @@index([status, requestedAt])
   @@index([referenceType, referenceId])
   @@map("adjustment_requests")
+}
+
+enum IssueRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// Project material leaves the store only when the Workshop Manager approves
+// it, or the Director standing in (ADR-043). The storeman asks; nothing moves
+// while it waits. Approving posts the issue (issueId, the slip) for the
+// quantities approved, which may be less than asked, and stands as the slip's
+// confirmation. Rejecting, or the storeman cancelling their own, posts
+// nothing. Every line takes stock held for the request's project.
+model IssueRequest {
+  id            String             @id @default(uuid())
+  projectNumber String             @map("project_number")
+  recipientId   String             @map("recipient_id")
+  note          String?
+  status        IssueRequestStatus @default(PENDING)
+  requestedById String             @map("requested_by_id")
+  requestedAt   DateTime           @default(now()) @map("requested_at")
+  decidedById   String?            @map("decided_by_id")
+  decidedAt     DateTime?          @map("decided_at")
+  decisionNote  String?            @map("decision_note")
+  // The Director approved in the Workshop Manager's place.
+  standIn       Boolean            @default(false) @map("stand_in")
+  // The slip approving posted.
+  issueId       String?            @unique @map("issue_id")
+
+  project     Project            @relation(fields: [projectNumber], references: [projectNumber])
+  recipient   Recipient          @relation(fields: [recipientId], references: [id])
+  requestedBy User               @relation("IssueRequestedBy", fields: [requestedById], references: [id])
+  decidedBy   User?              @relation("IssueDecidedBy", fields: [decidedById], references: [id])
+  lines       IssueRequestLine[]
+
+  @@index([status, requestedAt])
+  @@index([projectNumber, status])
+  @@map("issue_requests")
+}
+
+model IssueRequestLine {
+  id               String   @id @default(uuid())
+  requestId        String   @map("request_id")
+  lineNo           Int      @map("line_no")
+  materialId       String   @map("material_id")
+  locationId       String   @map("location_id")
+  quantity         Decimal  @db.Decimal(18, 4)
+  // Set on approval: at most quantity; 0 for a line left out.
+  approvedQuantity Decimal? @map("approved_quantity") @db.Decimal(18, 4)
+
+  request  IssueRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  material Material     @relation(fields: [materialId], references: [id])
+  location Location     @relation(fields: [locationId], references: [id])
+
+  @@unique([requestId, lineNo])
+  @@index([materialId, locationId])
+  @@map("issue_request_lines")
 }
 
 // A tool loan's due date changed, later or earlier, and why. Only ever added

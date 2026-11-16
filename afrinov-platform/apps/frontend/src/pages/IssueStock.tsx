@@ -1,5 +1,8 @@
 // Issue stock at the store counter: one recipient, an optional project, and
-// any number of items, booked all-or-nothing (POST /inventory-issues).
+// any number of items, booked all-or-nothing. Stores stock posts at once (POST
+// /inventory-issues). Project material is the project's own stock, and goes to
+// the Workshop Manager for approval before it leaves the store (POST
+// /issue-requests, ADR-043); Stores stock is never issued to a project.
 import { useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -18,7 +21,7 @@ import { api, type ApiError } from '../api/client';
 import { today } from '../lib/dates';
 import { useIdempotencyKey } from '../lib/idempotency';
 import type { CurrentStockRow } from '../api/types';
-import { needsProject, sectionOf } from '../lib/categories';
+import { sectionOf } from '../lib/categories';
 import { isStoresStock, balanceKey } from '../lib/heldFor';
 import { useLocationLabel } from '../hooks/useLocationLabel';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -39,21 +42,15 @@ const stockKey = balanceKey;
 // A completed or cancelled project takes no more stock: its leftovers go to Stores.
 const isClosed = (status: string | undefined) => status === 'COMPLETED' || status === 'CANCELLED';
 
-/**
- * The project a row's stock goes to: the one it is held for, or, for a
- * leftover (Stores stock of a Projects item), the item's project. Null for
- * Stores stock anyone may take (Project Material Through the Store Roadmap, Phase 3).
- */
-const projectOf = (r: CurrentStockRow): string | null =>
-  r.heldForProject || (sectionOf(r.category) === 'PROJECTS' ? r.projectNumber ?? null : null);
-
-const isProjectMaterial = (r: CurrentStockRow, projectNumber: string) => projectOf(r) === projectNumber;
+/** The project a row's stock goes to: the one it is held for. Null for Stores stock. */
+const projectOf = (r: CurrentStockRow): string | null => r.heldForProject || null;
 
 /**
- * What an issue to a project may take: that project's material, and Stores
- * stock anyone may take, which is then charged to the job (system audit E4).
+ * What an issue to a project may take: only the stock held for that project
+ * (ADR-043). Stores stock has nothing to do with projects, so it is issued on
+ * its own, with no project.
  */
-const fitsProject = (r: CurrentStockRow, projectNumber: string) => isProjectMaterial(r, projectNumber) || projectOf(r) === null;
+const fitsProject = (r: CurrentStockRow, projectNumber: string) => projectOf(r) === projectNumber;
 
 let nextKey = 1;
 const emptyLine = (): Line => ({ key: nextKey++, stockKey: '', quantity: '' });
@@ -70,45 +67,46 @@ export function IssueStock() {
   const [error, setError] = useState<string | null>(null);
   // The issue just posted, kept on the page (a toast fades) with a way to its slip.
   const [last, setLast] = useState<{ who: string; recipientId: string; count: number; receipt?: ReceiptSummary | null } | null>(null);
+  // The project issue just sent for approval (ADR-043): nothing has left the store yet.
+  const [sent, setSent] = useState<{ who: string; projectNumber: string; count: number } | null>(null);
   // The slip just posted, while the person collecting confirms it (ADR-034).
   const [handover, setHandover] = useState<HandoverSlip | null>(null);
   const receiptMode = useReceiptMode();
   const toast = useToast();
   const locationName = useLocationLabel();
   const idem = useIdempotencyKey('issue-stock');
+  const requestKey = useIdempotencyKey('issue-request');
   const { kindOf } = useUnits();
 
   // Only items with stock can be issued, and tools are lent on the Tools page
   // instead. Nor from a deactivated item or location, which the server refuses
-  // (Qodo, PR #132). Stores stock follows its item: a closed project's leftovers
-  // wait to move to Stores, and a Projects item with no project isn't issued.
-  // Stock held for a project is that project's, whatever its item says, and is
-  // offered while that project takes issues: active, and neither completed nor
-  // cancelled (Qodo, PR #145).
+  // (Qodo, PR #132). A Projects item's Stores stock is a leftover, which moves to
+  // Stores before it is issued (ADR-043). Stock held for a project is that
+  // project's, whatever its item says, and is offered while that project takes
+  // issues: active, and neither completed nor cancelled (Qodo, PR #145).
   const takesIssues = useMemo(() => new Set(projects.filter((p) => !isClosed(p.status)).map((p) => p.projectNumber)), [projects]);
   const available = useMemo(
     () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS'
       && r.materialActive !== false && r.locationActive !== false
       && (isStoresStock(r)
-        ? !needsProject(r) && !(sectionOf(r.category) === 'PROJECTS' && isClosed(r.project?.status))
+        ? sectionOf(r.category) !== 'PROJECTS'
         : takesIssues.has(r.heldForProject!)))
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),
     [stock.data, takesIssues],
   );
   const byKey = useMemo(() => new Map(available.map((r) => [stockKey(r), r])), [available]);
 
-  // Project material goes only to its own project: a line holding some (held
-  // for the project, or a leftover) sets the issue's project, which can't change
-  // while it is there. Once the issue has a project, that project's material and
-  // Stores items are offered, the Stores items charged to the job (system audit
-  // E4); never another project's material.
+  // Project material goes only to its own project: a line holding some sets the
+  // issue's project, which can't change while it is there. Once the issue has a
+  // project, only that project's stock is offered; with none, only Stores stock
+  // (ADR-043).
   const lockedBy = lines.map((l) => byKey.get(l.stockKey)).find((r) => r && projectOf(r));
   const issueProject = (lockedBy && projectOf(lockedBy)) || projectNumber;
   const itemOptions = useMemo<SearchOption[]>(() => available
     .filter((r) => !issueProject || fitsProject(r, issueProject))
     .map((r) => ({
       value: stockKey(r),
-      label: `${r.materialName} (${r.materialSku}) · ${locationName(r.locationId, r.locationName)}${r.heldForProject ? ` · held for ${r.heldForProject}` : issueProject && !projectOf(r) ? ' · Stores' : ''}`,
+      label: `${r.materialName} (${r.materialSku}) · ${locationName(r.locationId, r.locationName)}${r.heldForProject ? ` · held for ${r.heldForProject}` : ''}`,
       detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
     })), [available, issueProject, locationName]);
   const projectOptions = useMemo(() => {
@@ -122,8 +120,8 @@ export function IssueStock() {
   // An item's page links here with ?materialId=: once stock has loaded, the
   // first line starts on that item, at the location that holds the most.
   const [params] = useSearchParams();
-  // With ?project=, only that project's stock of it (held, or its leftover), not
-  // another project's larger balance (Qodo, PR #149). That waits for the projects too.
+  // With ?project=, only the stock of it held for that project, not another
+  // project's larger balance (Qodo, PR #149). That waits for the projects too.
   const [preset, setPreset] = useState(() => params.get('materialId'));
   const presetProject = params.get('project');
   if (preset && stock.data && (!presetProject || !loading)) {
@@ -166,8 +164,9 @@ export function IssueStock() {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
-  // Picking a project drops the Stores lines already chosen, which it no longer
-  // offers. (The project can't change while a line holds project material.)
+  // Picking a project drops the Stores lines already chosen: Stores stock isn't
+  // issued to a project (ADR-043). (The project can't change while a line holds
+  // project material.)
   function chooseProject(next: string) {
     setProjectNumber(next);
     if (!next) return;
@@ -192,19 +191,46 @@ export function IssueStock() {
     if (overIssued.size > 0) { setError('Some lines ask for more than is in stock.'); return; }
 
     setBusy(true);
+    // Project material waits for the Workshop Manager's approval (ADR-043): nothing posts yet.
+    if (issueProject) {
+      try {
+        const requestBody = {
+          recipientId,
+          projectNumber: issueProject,
+          lines: filled.map((l) => {
+            const r = byKey.get(l.stockKey)!;
+            return { materialId: r.materialId, locationId: r.locationId, quantity: readQuantity(l.quantity) };
+          }),
+        };
+        await api.post('/issue-requests', requestBody, { idempotencyKey: requestKey.keyFor(requestBody) });
+        const who = recipients.find((r) => r.id === recipientId)?.name ?? 'recipient';
+        setLast(null);
+        setSent({ who, projectNumber: issueProject, count: filled.length });
+        toast.success(`Sent to the Workshop Manager: ${filled.length} item${filled.length === 1 ? '' : 's'} for ${issueProject}`);
+        setLines([emptyLine()]);
+        setProjectNumber('');
+        setNotFilled(0);
+        requestKey.confirm();
+      } catch (err) {
+        requestKey.resolve(err);
+        setError((err as ApiError).message);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const issueBody = {
         recipientId,
-        projectNumber: issueProject || undefined,
         lines: filled.map((l) => {
           const r = byKey.get(l.stockKey)!;
-          // The stock the line takes: the project's own, or Stores stock.
-          return { materialId: r.materialId, locationId: r.locationId, quantity: readQuantity(l.quantity), heldForProject: r.heldForProject ?? null };
+          return { materialId: r.materialId, locationId: r.locationId, quantity: readQuantity(l.quantity) };
         }),
       };
       const posted = await api.post<{ issueId?: string }>('/inventory-issues', issueBody, { idempotencyKey: idem.keyFor(issueBody) });
       const recipient = recipients.find((r) => r.id === recipientId);
       const who = recipient?.name ?? 'recipient';
+      setSent(null);
       setLast({ who, recipientId, count: filled.length });
       // The slip has posted; now the person collecting confirms it, unless the setting is Off.
       // The panel says it was issued, so no toast covers its buttons on a small screen.
@@ -217,7 +243,7 @@ export function IssueStock() {
           recipientId,
           recipientName: who,
           recipientType: recipient?.type ?? null,
-          note: issueProject ? `For ${issueProject}` : 'No project',
+          note: 'No project',
           lines: filled.map((l) => {
             const r = byKey.get(l.stockKey)!;
             return { key: String(l.key), sku: r.materialSku, name: r.materialName, quantity: l.quantity.trim(), unit: r.unitOfMeasure };
@@ -250,7 +276,7 @@ export function IssueStock() {
     <div>
       <PageHeader
         title="Issue stock"
-        description={<>Record stock leaving the store: who took it, for which project, and which items. Tools are checked out, not issued: do that on <Link to="/tools" className="btn-link">Tools</Link>.</>}
+        description={<>Record stock leaving the store: who took it, for which project, and which items. Stores stock is issued at once; a project’s material goes to the Workshop Manager for approval first. Tools are checked out, not issued: do that on <Link to="/tools" className="btn-link">Tools</Link>.</>}
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Issue stock' }]}
       />
 
@@ -267,6 +293,13 @@ export function IssueStock() {
             See the issue slip in Movements
           </Link>
           {' '}to check or print it. The form below is ready for the next issue.
+        </Alert>
+      )}
+
+      {sent && (
+        <Alert tone="info" title={`Sent for approval: ${sent.count} item${sent.count === 1 ? '' : 's'} for ${sent.projectNumber}, to ${sent.who}`} className="mb-4 max-w-4xl">
+          Nothing has left the store yet. It is issued once the Workshop Manager approves it, and their approval stands as the slip’s confirmation.
+          {' '}<Link to="/stock/issue-approvals" className="btn-link">See it in Issues to approve</Link>, where you can cancel it while it waits.
         </Alert>
       )}
 
@@ -288,8 +321,8 @@ export function IssueStock() {
               projects={projectOptions}
               disabled={loading || !!lockedBy}
               help={lockedBy
-                ? `Set by ${lockedBy.materialSku}: project material is issued only to its own project.`
-                : issueProject ? `${issueProject}'s material and Stores items are listed. Stores items issued here are charged to ${issueProject}.` : undefined}
+                ? `Set by ${lockedBy.materialSku}: project material is issued only to its own project, on the Workshop Manager’s approval.`
+                : issueProject ? `Only stock held for ${issueProject} is listed. It goes to the Workshop Manager for approval before it is issued.` : 'Leave empty for Stores stock. Choose a project to send its material for approval.'}
             />
           </div>
           {optionsError && (
@@ -346,7 +379,7 @@ export function IssueStock() {
 
           <div className="entry-actions flex justify-end gap-2 py-3 border-t border-surface-200">
             <Link to="/stock"><Button type="button" variant="ghost" disabled={busy}>Back to stock</Button></Link>
-            <Button type="submit" variant="primary" loading={busy}>Issue stock</Button>
+            <Button type="submit" variant="primary" loading={busy}>{issueProject ? 'Send for approval' : 'Issue stock'}</Button>
           </div>
         </form>
       )}

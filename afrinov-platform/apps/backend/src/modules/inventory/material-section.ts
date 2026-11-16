@@ -89,28 +89,34 @@ export async function checkMaterialChange(
 
 
 /**
- * A project's leftovers go only to that project (Phases 5 and 6): an issue
- * holding a Projects item still in the store is for that item's project, so
- * one can't hold two projects' material. Stores items can go to any project,
- * or none. Orders and RFQs take their project from the order instead (Project
- * on the Order Roadmap): project material isn't stock, so only leftovers
- * received before carry a project of their own.
+ * Which stock an issue line may take (ADR-043): an issue to a project takes
+ * only the stock held for that project, and an issue with no project only
+ * Stores stock. Stores stock has nothing to do with projects, so it is never
+ * issued to one; a project's stock goes to that project, on approval.
  */
-export function checkProjectMaterial(
-  projectNumber: string | null | undefined,
-  materials: Array<{ sku: string; category: string; projectNumber: string | null }>,
-): void {
-  const own = materials.filter((m) => sectionOf(m.category) === 'PROJECTS' && m.projectNumber);
-  const projects = [...new Set(own.map((m) => m.projectNumber))];
-  if (projects.length > 1) {
-    throw Errors.validation(`One issue can't hold material for two projects (${projects.join(' and ')}). Issue each project's material separately.`);
+export function checkIssueStock(sku: string, heldForProject: string | null, projectNumber: string | null): void {
+  if (projectNumber) {
+    if (heldForProject === projectNumber) return;
+    throw Errors.validation(heldForProject
+      ? `${sku} at this location is held for project ${heldForProject}, so it can't be issued to project ${projectNumber}.`
+      : `${sku} here is Stores stock, which isn't issued to a project. Issue it on its own, with no project.`);
   }
-  const wrong = own.find((m) => m.projectNumber !== (projectNumber || null));
-  if (wrong) {
-    throw Errors.validation(projectNumber
-      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be issued to project ${projectNumber}.`
-      : `${wrong.sku} is material for project ${wrong.projectNumber}: issue it to that project.`);
+  if (heldForProject) {
+    throw Errors.validation(`${sku} at this location is held for project ${heldForProject}: it is issued to that project, on the Workshop Manager's approval.`);
   }
+}
+
+/**
+ * Refuses to issue a Projects item's Stores stock. No one gives items a
+ * project any more (Project on the Order Roadmap), and a project's stock is
+ * held for it, so this is a leftover from before: it moves to Stores from
+ * Project leftovers, where it becomes Stores stock like any other (ADR-043).
+ */
+export function refuseProjectsItemFromStores(m: { sku: string; category: string; projectNumber: string | null }): void {
+  if (sectionOf(m.category) !== 'PROJECTS') return;
+  throw Errors.validation(m.projectNumber
+    ? `${m.sku} is a leftover of project ${m.projectNumber} from before stock was held for its project, so it isn't issued. Move it to Stores from Project leftovers.`
+    : `${m.sku} has no project, so it isn't issued. Move it to Stores from Project leftovers.`);
 }
 
 /**
@@ -146,13 +152,3 @@ export function refuseProjectMaterialOnStoresOrder(
   }
 }
 
-/**
- * Refuses to issue a Projects item still in the store with no project: no one
- * gives items a project any more (Project on the Order Roadmap), so its
- * leftovers move to Stores, as a closed project's do.
- */
-export function refuseUnassigned(m: { sku: string; category: string; projectNumber: string | null }): void {
-  if (sectionOf(m.category) === 'PROJECTS' && !m.projectNumber) {
-    throw Errors.validation(`${m.sku} has no project, so it isn't issued. Move it to Stores from Project leftovers.`);
-  }
-}

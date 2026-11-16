@@ -27,6 +27,11 @@ export const PermissionCode = {
   ViewGoodsReceipt: 'view:goods_receipt',
   ReceiveInventory: 'receive:inventory',
   IssueInventory: 'issue:inventory',
+  // Approving the storeman's issue of project material before it leaves the
+  // store (ADR-043): the Workshop Manager, and the Director standing in. The
+  // service also asks for one of those roles, so Admin sees the list but
+  // approves only by holding one, as with orders.
+  ApproveProjectIssue: 'approve:project_issue',
   TransferInventory: 'transfer:inventory',
   AdjustInventory: 'adjust:inventory',
   // Approving an adjustment worth more than inventory.writeOffApprovalAbove
@@ -123,9 +128,9 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
   APPROVER: [PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
   // These open the orders they sign. Who signs which order is decided in po-approval.ts.
   PROCUREMENT_MANAGER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveStoresOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewSalesRfq, PermissionCode.ViewReports],
-  DIRECTOR: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewSalesRfq, PermissionCode.ApproveSalesRfq, PermissionCode.ViewReports],
+  DIRECTOR: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveProjectIssue, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewSalesRfq, PermissionCode.ApproveSalesRfq, PermissionCode.ViewReports],
   CEO: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewSalesRfq, PermissionCode.ViewReports],
-  WORKSHOP_MANAGER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveStoresOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ManageLabourRates, PermissionCode.ViewReports],
+  WORKSHOP_MANAGER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveProjectIssue, PermissionCode.ApproveStoresOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ManageLabourRates, PermissionCode.ViewReports],
   // Sales prices jobs for clients, so the project has to exist first. No
   // suppliers, purchase orders or Procurement RFQs.
   SALES: [

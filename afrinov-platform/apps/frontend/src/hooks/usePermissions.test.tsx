@@ -187,6 +187,8 @@ describe('usePermissions — the role check sheet', () => {
       'tools:extend',
       // Another store controller's write-offs over the limit, never their own.
       'writeoffs:approve', 'writeoffs:view',
+      // Sees the project issues they asked for, waiting for the Workshop Manager (ADR-043).
+      'issues:view',
     ],
     // Buyers add client-specific material from an order line, but don't edit the catalogue.
     PROCUREMENT: ['materials:create', 'materials:cost', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
@@ -196,11 +198,12 @@ describe('usePermissions — the role check sheet', () => {
     APPROVER: ['orders:view'],
     PROCUREMENT_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view', 'sales:view', 'labourRates:view'],
     // The Director approves a Sales RFQ's price.
-    DIRECTOR: ['orders:approve', 'orders:view', 'sales:view', 'sales:approve', 'labourRates:view'],
+    // The Director stands in for the Workshop Manager on project issues (ADR-043).
+    DIRECTOR: ['orders:approve', 'orders:view', 'sales:view', 'sales:approve', 'labourRates:view', 'issues:approve', 'issues:view'],
     CEO: ['orders:approve', 'orders:view', 'sales:view', 'labourRates:view'],
     // The Workshop Manager keeps the labour rates.
-    WORKSHOP_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view', 'labourRates:manage', 'labourRates:view'],
-    TECHNICIAN: ['inventory:issue', 'inventory:return', 'tools:lend'],
+    WORKSHOP_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view', 'labourRates:manage', 'labourRates:view', 'issues:approve', 'issues:view'],
+    TECHNICIAN: ['inventory:issue', 'inventory:return', 'tools:lend', 'issues:view'],
     VIEWER: [],
   };
   const ALL = Object.keys(PERMISSION_ROLES);
