@@ -479,12 +479,13 @@ function projectCell(m: Material) {
 }
 
 function projectsColumns(orderedFor: Map<string, OrderedFor['projects']> | null, waiting: Map<string, Waiting[]> | null): DataTableColumn<Material>[] {
+  // Narrower than on the other tabs, so the name keeps its room beside the Project column.
   return [
-    skuColumn,
+    { ...skuColumn, width: '10rem' },
     nameColumn,
-    { key: 'project', header: 'Project', render: projectCell, width: '9rem' },
-    ...(orderedFor ? [{ key: 'orderedFor', header: 'Ordered for', render: (m: Material) => orderedForCell(orderedFor.get(m.id)), width: '12rem' }] : []),
-    ...(waiting ? [{ key: 'waiting', header: 'Waiting to issue', render: (m: Material) => waitingCell(m, waiting.get(m.id)), width: '13rem' }] : []),
+    { key: 'project', header: 'Project', render: projectCell, width: '7.5rem' },
+    ...(orderedFor ? [{ key: 'orderedFor', header: 'Ordered for', render: (m: Material) => orderedForCell(orderedFor.get(m.id)), width: '10rem' }] : []),
+    ...(waiting ? [{ key: 'waiting', header: 'Waiting to issue', render: (m: Material) => waitingCell(m, waiting.get(m.id)), width: '11rem' }] : []),
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     ...tailColumns,
   ];
