@@ -298,7 +298,7 @@ export const StockCountService = {
       // A difference is a movement; an inactive item counted as it stands is not.
       for (const materialId of differing) await checkMaterialActive(materialId, tx);
       const waiting = differing.length === 0 ? [] : await tx.adjustmentRequest.findMany({
-        where: { status: 'PENDING', locationId: input.locationId, heldForProject, materialId: { in: differing } },
+        where: { status: { in: ['PENDING', 'CHANGES_REQUESTED'] }, locationId: input.locationId, heldForProject, materialId: { in: differing } },
         select: { materialId: true },
       });
       if (waiting.length > 0) {

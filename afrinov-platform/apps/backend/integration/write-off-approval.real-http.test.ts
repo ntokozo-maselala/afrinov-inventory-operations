@@ -115,6 +115,7 @@ describe('write-off approval over real HTTP', () => {
     expect(asked.body.value).toBeNull();
     expect((await storeman('POST', `/adjustment-requests/${asked.body.requestId}/reject`, { reason: 'Booked on the wrong item' })).status).toBe(200);
     expect(await onHand(unpricedId)).toBe('20');
+    expect((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: asked.body.requestId! } })).status).toBe('WITHDRAWN');
   });
 
   it('checks the stock again when approving, and refuses what is no longer there', async () => {
@@ -295,6 +296,83 @@ describe('write-off approval over real HTTP', () => {
     expect(refused.body.error.message).toMatch(/is inactive\. Ask a Store Controller to reactivate it first\.$/);
     expect((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: requestId! } })).status).toBe('PENDING');
     expect(await prisma.inventoryTransaction.count({ where: { type: 'LOAN_RETURN', referenceId: loanId } })).toBe(0);
+  });
+
+  // ADR-044 (FR-INV-WF-001): an approver sends one back, whoever asked amends
+  // it and sends it again, and every step is kept.
+  it('sends one back for changes, takes the amended one for approval again, and keeps its history', async () => {
+    interface Event { kind: string; quantity: string; note: string | null; actor: { name: string } }
+    const item = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-CHG-${run}`, name: `Valve ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', unitCost: 500 });
+    await setting('inventory.requireWriteOffApproval', false);
+    expect((await adjust(api, { materialId: item.body.id, quantity: 10, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
+    await setting('inventory.requireWriteOffApproval', true);
+
+    const asked = await adjust(storeman, { materialId: item.body.id, quantity: -6, reasonCode: 'LOSS', reasonNote: 'Missing' }); // R 3 000
+    expect(asked.status).toBe(202);
+    const id = asked.body.requestId!;
+    expect((await storeman('POST', `/adjustment-requests/${id}/request-changes`, { reason: 'Recount' })).status).toBe(403);
+    expect((await api('POST', `/adjustment-requests/${id}/request-changes`, { reason: ' ' })).status).toBe(400);
+    expect((await api('POST', `/adjustment-requests/${id}/request-changes`, { reason: 'Recount the bin: I make it 4 missing' })).status).toBe(200);
+
+    // Nothing moved, and it still holds its stock: not approved as it stands, not adjusted round it.
+    expect(await onHand(item.body.id)).toBe('10');
+    expect((await api('POST', `/adjustment-requests/${id}/approve`)).status).toBe(409);
+    expect((await adjust(storeman, { materialId: item.body.id, quantity: -1, reasonCode: 'LOSS', reasonNote: 'Another' })).status).toBe(409);
+    const sentBack = (await storeman<Array<Request & { events: Event[] }>>('GET', '/adjustment-requests?status=CHANGES_REQUESTED&mine=true')).body.find((r) => r.id === id);
+    expect(sentBack).toMatchObject({ status: 'CHANGES_REQUESTED', decisionNote: 'Recount the bin: I make it 4 missing' });
+    expect((await storeman<{ sentBackToMe: number }>('GET', '/adjustment-requests/summary')).body.sentBackToMe).toBeGreaterThanOrEqual(1);
+    expect((await api<{ sentBackToMe: number }>('GET', '/adjustment-requests/summary')).body.sentBackToMe).toBe(0);
+
+    // Only whoever asked amends it, and the amended one is checked as a new one is.
+    expect((await api('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -4 })).status).toBe(403);
+    expect((await storeman('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -40 })).status).toBe(422);
+    const again = await storeman<{ status: string; value: string }>('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -4, reasonNote: 'Recounted: 4 missing', comment: 'Recounted with Sipho' });
+    expect([again.status, again.body.status, again.body.value]).toEqual([202, 'PENDING_APPROVAL', '2000.00']);
+    expect((await storeman('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -3 })).status).toBe(409);
+    expect(await onHand(item.body.id)).toBe('10');
+
+    const waiting = (await api<Array<Request & { events: Event[] }>>('GET', '/adjustment-requests')).body.find((r) => r.id === id)!;
+    expect(waiting).toMatchObject({ status: 'PENDING', quantity: '-4', value: '2000.00', decisionNote: null, decidedBy: null });
+    expect(waiting.events.map((e) => [e.kind, e.quantity, e.note])).toEqual([
+      ['SUBMITTED', '-6', null],
+      ['CHANGES_REQUESTED', '-6', 'Recount the bin: I make it 4 missing'],
+      ['RESUBMITTED', '-4', 'Recounted with Sipho'],
+    ]);
+
+    const approved = await api<{ transactionId: string }>('POST', `/adjustment-requests/${id}/approve`);
+    expect(approved.status).toBe(201);
+    expect(await onHand(item.body.id)).toBe('6');
+    expect((await prisma.inventoryTransaction.findUniqueOrThrow({ where: { id: approved.body.transactionId } })).quantity.toString()).toBe('-4');
+    expect((await prisma.adjustmentRequestEvent.findMany({ where: { requestId: id }, orderBy: { at: 'asc' } })).map((e) => e.kind))
+      .toEqual(['SUBMITTED', 'CHANGES_REQUESTED', 'RESUBMITTED', 'APPROVED']);
+
+    // A count's difference sent back takes a new note only: its quantity is the count's.
+    const count = await storeman<{ lines: Array<{ requestId: string | null }> }>('POST', '/stock-counts', {
+      locationId, lines: [{ materialId: item.body.id, expectedQuantity: 6, countedQuantity: 0 }],
+    });
+    const countRequest = count.body.lines[0]!.requestId!;
+    expect((await api('POST', `/adjustment-requests/${countRequest}/request-changes`, { reason: 'Who counted, and when?' })).status).toBe(200);
+    const changed = await storeman<{ error: { message: string } }>('POST', `/adjustment-requests/${countRequest}/resubmit`, { quantity: -5 });
+    expect(changed.status).toBe(400);
+    expect(changed.body.error.message).toMatch(/comes from a stock count.*Only its note can be changed here\.$/);
+    expect((await storeman('POST', `/adjustment-requests/${countRequest}/resubmit`, { reasonNote: 'Stock count: Thandi and Sipho, Tuesday' })).status).toBe(202);
+    // Withdrawn while sent back, too.
+    expect((await api('POST', `/adjustment-requests/${countRequest}/request-changes`, { reason: 'Still unclear' })).status).toBe(200);
+    expect((await storeman('POST', `/adjustment-requests/${countRequest}/reject`, { reason: 'Will count again' })).status).toBe(200);
+    // A withdrawal is its own status, audit action and history step, by whoever withdrew: never a rejection.
+    const withdrawn = (await storeman<Array<Request & { events: Event[] }>>('GET', '/adjustment-requests?status=WITHDRAWN')).body.find((r) => r.id === countRequest)!;
+    expect(withdrawn).toMatchObject({ status: 'WITHDRAWN', decisionNote: 'Will count again' });
+    expect(withdrawn.decidedBy?.name).toBe(withdrawn.requestedBy.name);
+    expect(withdrawn.events.at(-1)).toMatchObject({ kind: 'WITHDRAWN', note: 'Will count again', actor: { name: withdrawn.requestedBy.name } });
+    expect((await storeman<Request[]>('GET', '/adjustment-requests?status=REJECTED')).body.some((r) => r.id === countRequest)).toBe(false);
+    const audit = await prisma.auditLogEntry.findMany({ where: { entityType: 'AdjustmentRequest', entityId: countRequest }, orderBy: { createdAt: 'asc' } });
+    expect(audit.map((a) => a.action)).toEqual(['WRITE_OFF_REQUEST', 'WRITE_OFF_CHANGES_REQUESTED', 'WRITE_OFF_RESUBMIT', 'WRITE_OFF_CHANGES_REQUESTED', 'WRITE_OFF_WITHDRAW']);
+    expect(audit.at(-1)).toMatchObject({ before: { status: 'CHANGES_REQUESTED' }, after: { status: 'WITHDRAWN', reason: 'Will count again' } });
+    expect(audit.at(-1)!.actorId).toBe((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: countRequest } })).requestedById);
+    expect(audit.some((a) => a.action === 'WRITE_OFF_REJECT')).toBe(false);
+    expect((await prisma.adjustmentRequestEvent.findMany({ where: { requestId: countRequest }, orderBy: { at: 'asc' } })).map((e) => e.kind))
+      .toEqual(['SUBMITTED', 'CHANGES_REQUESTED', 'RESUBMITTED', 'CHANGES_REQUESTED', 'WITHDRAWN']);
+    expect(await onHand(item.body.id)).toBe('6');
   });
 
   // Qodo, PR #151: a count is no way round the write-off limit.

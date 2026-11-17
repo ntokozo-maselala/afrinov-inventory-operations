@@ -135,7 +135,9 @@ export const adjustmentSchema = z.object({
 });
 
 export const adjustmentRequestQuerySchema = z.object({
-  status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED', 'WITHDRAWN']).optional(),
+  // Only those the person asking asked for (ADR-044).
+  mine: z.enum(['true', 'false']).optional(),
   // A page at a time, newest first (system audit C8).
   before: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -143,6 +145,16 @@ export const adjustmentRequestQuerySchema = z.object({
 
 export const adjustmentRejectionSchema = z.object({
   reason: z.string().trim().min(1).max(500),
+});
+
+// What whoever asked may amend before sending it again (ADR-044); a field
+// left out stays as it is.
+export const adjustmentResubmitSchema = z.object({
+  quantity: storedSignedQuantity.optional(),
+  reasonCode: z.enum(['DAMAGE', 'LOSS', 'SCRAP', 'OTHER', 'FOUND']).optional(),
+  reasonNote: z.string().max(2000).nullable().optional(),
+  recipientId: uuidSchema.nullable().optional(),
+  comment: z.string().trim().max(500).optional(),
 });
 
 export const stockReceiptSchema = z.object({
@@ -414,7 +426,7 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
   // How many wait, and the oldest, for the Dashboard (system audit C8).
   app.get('/adjustment-requests/summary', { preHandler: [app.authenticate] }, async (req) => {
     if (!(await userHasPermission(req, PermissionCode.ApproveWriteOff))) await requirePermission(req, PermissionCode.AdjustInventory);
-    return WriteOffApprovalService.summary();
+    return WriteOffApprovalService.summary(actorId(req));
   });
 
   app.get('/adjustment-requests', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -423,7 +435,36 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid status', details: parsed.error.flatten() } });
     }
-    return WriteOffApprovalService.list(parsed.data);
+    const { mine, ...filter } = parsed.data;
+    return WriteOffApprovalService.list({ ...filter, requestedById: mine === 'true' ? actorId(req) : undefined });
+  });
+
+  // Sends it back to whoever asked, saying what to change: nothing is posted (ADR-044).
+  app.post('/adjustment-requests/:id/request-changes', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ApproveWriteOff);
+    const parsed = adjustmentRejectionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Say what needs to change', details: parsed.error.flatten() } });
+    }
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /adjustment-requests/:id/request-changes', async (tx) => ({
+      statusCode: 200,
+      body: await WriteOffApprovalService.requestChanges(id, parsed.data.reason, actorId(req), tx),
+    }));
+  });
+
+  // Whoever asked amends the one sent back to them and sends it again (ADR-044).
+  app.post('/adjustment-requests/:id/resubmit', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.AdjustInventory);
+    const parsed = adjustmentResubmitSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid adjustment payload', details: parsed.error.flatten() } });
+    }
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /adjustment-requests/:id/resubmit', async (tx) => ({
+      statusCode: 202,
+      body: await WriteOffApprovalService.resubmit(id, parsed.data, actorId(req), tx),
+    }));
   });
 
   // Posts it. Never by whoever asked for it.

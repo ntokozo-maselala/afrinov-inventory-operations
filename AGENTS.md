@@ -192,6 +192,16 @@ Use these forms; the older spellings still work but are deprecated or removed.
   stock count, takes the balance lock and is refused while any adjustment of
   that material, location and project stock is waiting for approval; approving
   both would correct the same difference twice.
+- **An adjustment sent back for changes is still open (ADR-044).** An approver
+  approves, rejects or sends a waiting adjustment back
+  (`CHANGES_REQUESTED`); whoever asked amends it and sends it again
+  (`WriteOffApprovalService.resubmit`), and it always waits for approval again.
+  A check for a waiting adjustment uses `OPEN_ADJUSTMENT_STATUSES`
+  (`write-off-requests.ts`), never `PENDING` alone, and every step of a
+  request goes through `recordRequestEvent`, which keeps the request as it
+  stood: the rows of `adjustment_request_events` are only added. Whoever
+  asked withdraws their own (`WITHDRAWN`); `REJECTED` is only someone else's
+  decision, so never show a withdrawal as a rejection.
 - **A slip posts first; the person collecting confirms it beside the ledger.**
   An issue or tool loan slip (one `issueId`) is confirmed in
   `receipt_confirmations` by counter PIN, signature or a photo of the signed

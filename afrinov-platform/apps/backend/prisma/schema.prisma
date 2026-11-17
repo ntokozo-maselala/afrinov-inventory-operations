@@ -86,6 +86,7 @@ model User {
   materialStatusChanges   MaterialStatusChange[]
   requestedAdjustments    AdjustmentRequest[]      @relation("AdjustmentRequestedBy")
   decidedAdjustments      AdjustmentRequest[]      @relation("AdjustmentDecidedBy")
+  adjustmentRequestEvents AdjustmentRequestEvent[] @relation("AdjustmentRequestEventActor")
   requestedIssues         IssueRequest[]           @relation("IssueRequestedBy")
   decidedIssues           IssueRequest[]           @relation("IssueDecidedBy")
   createdProjectSchedules ProjectSchedule[]        @relation("ProjectScheduleCreatedBy")
@@ -1227,6 +1228,21 @@ enum AdjustmentRequestStatus {
   PENDING
   APPROVED
   REJECTED
+  // Sent back by an approver for whoever asked to amend and send again
+  // (ADR-044). Still open: it holds its stock as a PENDING one does.
+  CHANGES_REQUESTED
+  // Taken back by whoever asked for it, while it waited or after it was sent
+  // back: never shown as a rejection (ADR-044).
+  WITHDRAWN
+}
+
+enum AdjustmentRequestEventKind {
+  SUBMITTED
+  CHANGES_REQUESTED
+  RESUBMITTED
+  APPROVED
+  REJECTED
+  WITHDRAWN
 }
 
 // An adjustment worth more than inventory.writeOffApprovalAbove, waiting for
@@ -1265,10 +1281,37 @@ model AdjustmentRequest {
   requestedBy User                  @relation("AdjustmentRequestedBy", fields: [requestedById], references: [id])
   decidedBy   User?                 @relation("AdjustmentDecidedBy", fields: [decidedById], references: [id])
   transaction InventoryTransaction? @relation(fields: [transactionId], references: [id])
+  events      AdjustmentRequestEvent[]
 
   @@index([status, requestedAt])
   @@index([referenceType, referenceId])
   @@map("adjustment_requests")
+}
+
+// What happened to an adjustment request, in order: asked for, sent back,
+// sent again, approved, rejected or withdrawn (ADR-044). Each row keeps the
+// request as it stood then, so every revision can be read back. Written only
+// through recordRequestEvent, never changed.
+model AdjustmentRequestEvent {
+  id          String                     @id @default(uuid())
+  requestId   String                     @map("request_id")
+  kind        AdjustmentRequestEventKind
+  actorId     String                     @map("actor_id")
+  at          DateTime                   @default(now())
+  // The approver's comment, the reason for a rejection or withdrawal, or what
+  // whoever asked said on sending it again.
+  note        String?
+  quantity    Decimal                    @db.Decimal(18, 4)
+  reasonCode  AdjustmentReasonCode       @map("reason_code")
+  reasonNote  String?                    @map("reason_note")
+  recipientId String?                    @map("recipient_id")
+  value       Decimal?                   @db.Decimal(18, 2)
+
+  request AdjustmentRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor   User              @relation("AdjustmentRequestEventActor", fields: [actorId], references: [id])
+
+  @@index([requestId, at])
+  @@map("adjustment_request_events")
 }
 
 enum IssueRequestStatus {

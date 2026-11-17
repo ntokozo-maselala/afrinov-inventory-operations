@@ -19,7 +19,7 @@ import { changePasswordSchema, loginSchema } from '../modules/identity/auth.rout
 import { createUserSchema, signInQuerySchema, temporaryPasswordSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import {
   issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema, countSheetQuerySchema,
-  consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema,
+  consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema, adjustmentResubmitSchema,
   issueRequestSchema, issueRequestQuerySchema, issueApprovalSchema, issueDecisionSchema,
 } from '../modules/inventory/inventory.routes.js';
 import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema, toolRepairedSchema, toolRepairWriteOffSchema } from '../modules/inventory/tool.routes.js';
@@ -556,12 +556,15 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/adjustment-requests', tag: 'Stock movements', summary: 'Adjustments waiting for approval, or decided',
     description: 'Newest first, a page at a time (?limit up to 200, ?before the last row\'s cursor): PENDING unless another status is asked for, each with its item, location, '
-      + 'who asked and who decided, and daysWaiting: South African days waited, or waited before it was decided (system audit C8). Needs approve:write_off or adjust:inventory.',
+      + 'who asked and who decided, and daysWaiting: South African days waited, or waited before it was decided (system audit C8). ?mine=true keeps the caller\'s own. '
+      + 'Each carries events, its history in order (SUBMITTED, CHANGES_REQUESTED, RESUBMITTED, APPROVED, REJECTED, WITHDRAWN) with the request as it stood then (ADR-044). '
+      + 'Needs approve:write_off or adjust:inventory.',
     query: adjustmentRequestQuerySchema, errors: [403],
   },
   {
     method: 'get', path: '/adjustment-requests/summary', tag: 'Stock movements', summary: 'How many adjustments wait, and the oldest',
-    description: '{ waiting, oldestRequestedAt, oldestDays }, for the Dashboard (system audit C8). Needs approve:write_off or adjust:inventory.',
+    description: '{ waiting, oldestRequestedAt, oldestDays, sentBackToMe, rejectedForMe }, for the Dashboard (system audit C8): the last two are the caller\'s own, '
+      + 'sent back for changes, or rejected by someone else in the last 7 days (ADR-044). Needs approve:write_off or adjust:inventory.',
     errors: [403],
   },
   {
@@ -572,9 +575,22 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/adjustment-requests/:id/reject', tag: 'Stock movements', summary: 'Reject or withdraw an adjustment waiting for approval',
-    description: 'Posts nothing. Whoever asked for it may withdraw it with adjust:inventory; anyone else needs approve:write_off. '
+    description: 'Posts nothing. Whoever asked for it may withdraw it with adjust:inventory, which makes it WITHDRAWN; anyone else needs approve:write_off and makes it REJECTED. '
       + '409 INVALID_STATE once decided. Retry-safe with an Idempotency-Key header.',
     body: adjustmentRejectionSchema, success: 200, errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/adjustment-requests/:id/request-changes', tag: 'Stock movements', summary: 'Send an adjustment back to whoever asked, for changes',
+    description: 'Posts nothing: the request becomes CHANGES_REQUESTED and stays open, holding its stock, until whoever asked sends it again or withdraws it (ADR-044). '
+      + 'reason says what to change. 403 for your own request, 409 INVALID_STATE unless it is waiting. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ApproveWriteOff], body: adjustmentRejectionSchema, success: 200, errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/adjustment-requests/:id/resubmit', tag: 'Stock movements', summary: 'Amend an adjustment sent back to you and send it again',
+    description: 'Only whoever asked for it (403 otherwise), and only while it is CHANGES_REQUESTED (409 INVALID_STATE otherwise). A field left out stays as it is. '
+      + 'An adjustment made by hand is checked as a new one is (422 with too little stock); one from a stock count or a tool takes a new reasonNote only. '
+      + 'It always waits for approval again: 202 { id, status: PENDING_APPROVAL, value }. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.AdjustInventory], body: adjustmentResubmitSchema, success: 202, errors: [403, 404, 409, 422],
   },
   {
     method: 'post', path: '/inventory-transactions/:id/returns', tag: 'Stock movements',

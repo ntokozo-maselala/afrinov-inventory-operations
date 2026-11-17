@@ -179,6 +179,16 @@ export function writeOffsWaitingCard(s: { waiting: number; oldestDays: number | 
   };
 }
 
+/** The person's own adjustments an approver sent back to them for changes (ADR-044): nothing is posted until they send them again. */
+export function writeOffsSentBackCard(s: { sentBackToMe?: number } | null | undefined) {
+  if (!s || !((s.sentBackToMe ?? 0) > 0)) return null;
+  return {
+    label: 'Sent back to you', value: formatNumber(s.sentBackToMe!), tone: 'warning' as const,
+    note: s.sentBackToMe === 1 ? 'adjustment to change and send again' : 'adjustments to change and send again',
+    to: '/stock/write-offs',
+  };
+}
+
 /** Project issues waiting for the Workshop Manager (ADR-043): material stays in the store until then. */
 export function issuesWaitingCard(s: { waiting: number; oldestDays: number | null } | null | undefined) {
   if (!s || !(s.waiting > 0)) return null;
@@ -254,8 +264,9 @@ export function Dashboard() {
   const { data: selfIssued } = useApi<SelfIssued>(hasPermission('activity:view') ? '/reports/self-issued' : null);
   const selfIssuedWarning = selfIssuedCard(selfIssued);
   // Write-offs waiting, for those who decide or ask for them (system audit C8).
-  const { data: writeOffSummary } = useApi<{ waiting: number; oldestDays: number | null }>(hasPermission('writeoffs:view') ? '/adjustment-requests/summary' : null);
+  const { data: writeOffSummary } = useApi<{ waiting: number; oldestDays: number | null; sentBackToMe?: number }>(hasPermission('writeoffs:view') ? '/adjustment-requests/summary' : null);
   const writeOffsWaiting = writeOffsWaitingCard(writeOffSummary);
+  const writeOffsSentBack = writeOffsSentBackCard(writeOffSummary);
   // Project issues waiting, for the Workshop Manager and the storeman who asked (ADR-043).
   const { data: issueSummary } = useApi<{ waiting: number; oldestDays: number | null }>(hasPermission('issues:view') ? '/issue-requests/summary' : null);
   const issuesWaiting = issuesWaitingCard(issueSummary);
@@ -287,6 +298,7 @@ export function Dashboard() {
       ...(backupWarning ? [backupWarning] : []),
       ...(checksOff ? [checksOff] : []),
       ...(selfIssuedWarning ? [selfIssuedWarning] : []),
+      ...(writeOffsSentBack ? [writeOffsSentBack] : []),
       ...(writeOffsWaiting ? [writeOffsWaiting] : []),
       ...(issuesWaiting ? [issuesWaiting] : []),
       ...(!canApprove ? [] : mineError
@@ -296,7 +308,7 @@ export function Dashboard() {
           ? [approvalCard(Array.isArray(mine) ? mine : [], Array.isArray(pending) ? pending : null, { projects: approvesProjects, stores: approvesStores })]
           : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning, checksOff, selfIssuedWarning, writeOffsWaiting, issuesWaiting]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning, checksOff, selfIssuedWarning, writeOffsWaiting, writeOffsSentBack, issuesWaiting]);
 
   const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [

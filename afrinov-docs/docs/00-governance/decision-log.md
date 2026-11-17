@@ -1610,3 +1610,71 @@ Tests: `issue-request` flows in `project-issue-approval.real-http.test.ts`,
 `project-leftovers.service.test.ts`, `project.service.test.ts`,
 `IssueApprovals.test.tsx`, `IssueStock.test.tsx`, `DashboardControls.test.ts`,
 `mockStoresToProject.test.ts`.
+
+### ADR-044 — An adjustment waiting for approval can be sent back for changes, amended and sent again, with its history kept
+**Date:** 2026-11-17 · **Status:** Accepted
+
+**Context:** An adjustment over the write-off limit waits for someone other
+than whoever asked (ADR-028). The approver could only approve or reject it:
+one that was nearly right (the wrong quantity, a thin note) had to be rejected
+and asked for from scratch, and what linked the two was in nobody's records.
+Whoever asked learned of a rejection only by looking under "Rejected or
+withdrawn". FR-INV-WF-001 asks for a third decision, request changes; that the
+initiator is told the decision and its comments; that they can amend and
+resubmit; and for a complete history of submissions, revisions and decisions.
+It also restates what ADR-028 already holds: the balance changes only on
+approval.
+
+**Decision:**
+- **A third decision: request changes.** `POST /adjustment-requests/:id/request-changes`
+  (approve:write_off, never on one's own request, a comment required) sets the
+  request to `CHANGES_REQUESTED`. Nothing is posted.
+- **A request sent back is still open.** It holds its stock as a waiting one
+  does: no other adjustment or count of that stock, its item, location and
+  project can't be closed, and a lost tool stays on loan
+  (`OPEN_ADJUSTMENT_STATUSES`). Otherwise the same difference could be
+  corrected twice, once round the request and once when it is sent again.
+  Whoever asked may withdraw it; an approver may reject it.
+- **Whoever asked amends it and sends it again.** `POST /adjustment-requests/:id/resubmit`
+  (only the person who asked) takes a new quantity, reason, note and person
+  responsible for an adjustment made by hand, checked as a new one is. One
+  from a stock count or a tool takes a new note only: its quantity is the
+  count's or the tool's, so to change it the request is withdrawn and the
+  count or check-in done again.
+- **A request sent again always waits for approval**, even if it is now worth
+  less than the limit: an approver asked about it.
+- **Every step is kept.** `adjustment_request_events` has a row for each time
+  a request is asked for, sent back, sent again, approved, rejected or
+  withdrawn, with who, when, their comment, and the request as it stood
+  (quantity, reason, note, value). Rows are only added
+  (`recordRequestEvent`). The list returns them, and Write-offs to approve
+  shows them under History. The audit log still records each step too.
+- **Whoever asked is told in the app.** The Dashboard shows "Sent back to
+  you", and Write-offs to approve says how many of the person's own were sent
+  back, and how many were rejected by someone else in the last 7 days
+  (`sentBackToMe`, `rejectedForMe` on `GET /adjustment-requests/summary`).
+  There is no email or other message outside the app: the platform sends
+  none.
+- **A withdrawal is not a rejection.** A request its own asker takes back,
+  while it waits or after it was sent back, becomes `WITHDRAWN`, with the
+  `WRITE_OFF_WITHDRAW` audit action (the status before, `WITHDRAWN` after,
+  and the reason) and a `WITHDRAWN` history step by that person. `REJECTED`
+  is only ever someone else's decision. Before this a withdrawal was stored
+  as `REJECTED`, and the list showed "Rejected" beside the name of the person
+  who had withdrawn it.
+- **No saved draft.** The adjustment form is the draft; it is recorded when it
+  is submitted.
+
+Migration `20260101000068_adjustment_changes_requested` adds the status, the
+events table, and an event for each request already there (asked for, and
+approved, rejected or withdrawn where decided).
+`20260101000069_adjustment_withdrawn_status` adds `WITHDRAWN` and
+`20260101000070_adjustment_withdrawn_backfill` moves to it the requests their
+own asker had turned down.
+
+**Consequences:** A request sent back and then forgotten blocks counting and
+adjusting that stock until it is sent again, withdrawn or rejected; the
+Dashboard card is there so it isn't forgotten. A rejection is pointed out for
+7 days only, with no "seen" mark. Days waited are still counted from when the
+request was first asked for.
+Tests: `write-off-approval.real-http.test.ts`, `WriteOffApprovals.test.tsx`.
