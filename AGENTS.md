@@ -202,6 +202,13 @@ Use these forms; the older spellings still work but are deprecated or removed.
   stood: the rows of `adjustment_request_events` are only added. Whoever
   asked withdraws their own (`WITHDRAWN`); `REJECTED` is only someone else's
   decision, so never show a withdrawal as a rejection.
+- **A tool's write-off is an adjustment request like any other (ADR-045).**
+  Lost on loan (`ToolLoan`) or held for repair (`ToolRepair`), it goes
+  through the same steps; what may change when it is sent back is
+  `amendableOf` (a lost tool's quantity is checked by
+  `ToolLoanService.checkLostAmendment`). Approving writes `APPROVED` then
+  `COMPLETED` with the posted movement; read history ordered by `at`, then
+  `seq`, as steps of one transaction share a time.
 - **A slip posts first; the person collecting confirms it beside the ledger.**
   An issue or tool loan slip (one `issueId`) is confirmed in
   `receipt_confirmations` by counter PIN, signature or a photo of the signed

@@ -24,7 +24,7 @@ import { StaleDataNotice } from '../components/StaleDataNotice';
 import { Badge } from '../components/Badge';
 import { HandoverPanel, type HandoverSlip } from '../components/HandoverPanel';
 import { describeReceipt, isConfirmed, useReceiptMode } from '../lib/receipts';
-import { formatDay } from '../lib/toolLoans';
+import { formatDay, lostWriteOffStates, repairWriteOffState, type ToolWriteOffState } from '../lib/toolLoans';
 
 const VIEWS: Array<{ value: string; label: string; loans?: (l: OpenLoan) => boolean }> = [
   { value: 'all', label: 'All tools' },
@@ -115,8 +115,8 @@ export function Tools() {
             <div key={r.id} className="mt-1 text-xs">
               <Badge tone="warning" title={r.note ?? undefined}>{formatNumber(Number(r.quantity))} held for repair</Badge>
               <span className="text-surface-500"> · {r.locationName}{r.note ? ` · ${r.note}` : ''}</span>
-              {r.writeOffWaiting
-                ? <div className="text-surface-500">Write-off waiting for approval</div>
+              {repairWriteOffState(r)
+                ? <WriteOffStateLink state={repairWriteOffState(r)!} label={`${t.name} at ${r.locationName}`} />
                 : canRepair && (
                   <div className="flex gap-1 mt-0.5">
                     <Button size="sm" variant="ghost" onClick={() => setRepairing({ tool: t, repair: r, mode: 'repaired' })} aria-label={`Mark ${t.name} at ${r.locationName} repaired`}>Repaired</Button>
@@ -140,6 +140,7 @@ export function Tools() {
               <li key={l.loanId}>
                 <span className="font-medium">{l.recipientName ?? 'Not recorded'}</span>
                 <span className="text-surface-500"> · {formatNumber(Number(l.out))} since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
+                {lostWriteOffStates(l).map((s) => <WriteOffStateLink key={s.to} state={s} label={`${t.name} with ${l.recipientName ?? 'its borrower'}`} />)}
                 <div className="flex flex-wrap items-center gap-2">
                   <LoanDue loan={l} />
                   <LoanReceipt loan={l} canConfirm={canLend} onConfirm={() => setHandover({ slip: loanSlip(all, l), later: true })} />
@@ -254,6 +255,21 @@ function loanSlip(tools: ToolRow[], loan: OpenLoan): HandoverSlip {
     id: loan.slipId!, kind: 'LOAN', recipientId: loan.recipientId, recipientName: loan.recipientName,
     recipientType: loan.recipientType ?? null, note: `Due back ${formatDay(loan.dueOn)}`, lines,
   };
+}
+
+/**
+ * A tool write-off that is open (ADR-045): waiting for approval, or sent back
+ * for changes. Nothing about the tool changes until it is decided, so it is
+ * dealt with on Write-offs to approve.
+ */
+function WriteOffStateLink({ state, label }: { state: ToolWriteOffState; label: string }) {
+  return (
+    <div className="text-xs mt-0.5">
+      <Link to={state.to} className={state.tone === 'warning' ? 'text-warning-700 font-medium underline' : 'text-surface-500 underline'} aria-label={`${state.text}: ${label}`}>
+        {state.text}
+      </Link>
+    </div>
+  );
 }
 
 /** Whether the borrower confirmed the check-out (ADR-034), and a way to do it now. */

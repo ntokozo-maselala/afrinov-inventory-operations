@@ -3,8 +3,11 @@
 // (segregation of duties). Nothing moves until one is approved: approving
 // posts it, rejecting posts nothing, and whoever asked may withdraw their own.
 // An approver may also send one back for changes: whoever asked amends it and
-// sends it again, and every step is kept in its history (ADR-044).
+// sends it again, and every step is kept in its history (ADR-044). A tool's
+// write-off (lost on loan, or held for repair) goes through the same steps,
+// and its posting is a step of its own, COMPLETED (ADR-045).
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { usePagedList } from '../hooks/usePagedList';
 import { useApi } from '../hooks/useApi';
 import { useUnits } from '../hooks/useUnits';
@@ -29,7 +32,8 @@ import { formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney } from '../lib/poMoney';
 
 type Status = 'PENDING' | 'CHANGES_REQUESTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
-type EventKind = 'SUBMITTED' | 'CHANGES_REQUESTED' | 'RESUBMITTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+type EventKind = 'SUBMITTED' | 'CHANGES_REQUESTED' | 'RESUBMITTED' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
+const STATUSES: Status[] = ['PENDING', 'CHANGES_REQUESTED', 'APPROVED', 'REJECTED', 'WITHDRAWN'];
 
 /** One step in a request's history, with the request as it stood then. */
 export interface AdjustmentRequestEvent {
@@ -42,6 +46,8 @@ export interface AdjustmentRequestEvent {
   reasonCode: string;
   reasonNote: string | null;
   value: string | null;
+  /** COMPLETED: the movement it posted (ADR-045). */
+  transactionId?: string | null;
 }
 
 export interface AdjustmentRequest {
@@ -63,8 +69,14 @@ export interface AdjustmentRequest {
   recipient: { id: string; name: string } | null;
   requestedBy: { id: string; name: string };
   decidedBy: { id: string; name: string } | null;
-  /** NOTE: it comes from a stock count or a tool, so only its note can be amended. */
-  amendable?: 'ALL' | 'NOTE';
+  /**
+   * What whoever asked may change once it is sent back (ADR-045): ALL for one
+   * made by hand; QUANTITY and the note for a tool lost on loan; NOTE only for
+   * a stock count's difference or a tool held for repair.
+   */
+  amendable?: 'ALL' | 'QUANTITY' | 'NOTE';
+  /** What it comes from: StockCount, ToolLoan (lost on loan) or ToolRepair (held for repair); null when made by hand. */
+  referenceType?: string | null;
   events?: AdjustmentRequestEvent[];
 }
 
@@ -84,8 +96,18 @@ export function decidedText(r: AdjustmentRequest): string {
 }
 const EVENT_LABELS: Record<EventKind, string> = {
   SUBMITTED: 'Asked for', CHANGES_REQUESTED: 'Sent back for changes', RESUBMITTED: 'Changed and sent again',
-  APPROVED: 'Approved and posted', REJECTED: 'Rejected', WITHDRAWN: 'Withdrawn',
+  APPROVED: 'Approved', COMPLETED: 'Completed', REJECTED: 'Rejected', WITHDRAWN: 'Withdrawn',
 };
+
+/** Where a request came from, when not made by hand. */
+const SOURCE_LABELS: Record<string, string> = { StockCount: 'Stock count', ToolLoan: 'Tool lost on loan', ToolRepair: 'Tool held for repair' };
+
+/** Why only the note of one sent back can change, and how to change the rest. */
+function noteOnlyText(r: AdjustmentRequest): string {
+  if (r.referenceType === 'ToolRepair') return `${signed(r)} writes off the whole repair, so only the note can be changed here. To deal with the tool another way, withdraw it.`;
+  if (r.referenceType === 'StockCount' || r.reasonCode === 'COUNT_VARIANCE') return `${signed(r)} comes from a stock count, so only the note can be changed here. To change the quantity, withdraw it and count again.`;
+  return `${signed(r)} comes from another record, so only the note can be changed here. To change the quantity, withdraw it and start again.`;
+}
 const REMOVE_REASONS = ['DAMAGE', 'LOSS', 'SCRAP', 'OTHER'];
 const ADD_REASONS = ['FOUND', 'OTHER'];
 const RESPONSIBLE_REASONS = ['DAMAGE', 'LOSS', 'SCRAP'];
@@ -137,6 +159,8 @@ function ResubmitDialog({ request, onClose, onDone }: { request: AdjustmentReque
   const unit = request.material.unitOfMeasure;
   const removes = Number(request.quantity) < 0;
   const noteOnly = request.amendable === 'NOTE';
+  // A tool lost on loan: how many, not why or by whom (ADR-045).
+  const quantityOnly = request.amendable === 'QUANTITY';
   const reasons = removes ? REMOVE_REASONS : ADD_REASONS;
   const [reasonCode, setReasonCode] = useState(request.reasonCode);
   const [quantity, setQuantity] = useState(String(Math.abs(Number(request.quantity))).replace('.', ','));
@@ -146,19 +170,21 @@ function ResubmitDialog({ request, onClose, onDone }: { request: AdjustmentReque
   const [busy, setBusy] = useState(false);
   const idem = useIdempotencyKey('resubmit-write-off');
   const parsed = parseQuantity(quantity, kindOf(unit), unit);
-  const keepsResponsible = !!request.recipient && RESPONSIBLE_REASONS.includes(reasonCode);
-  const noteRequired = NOTE_REASONS.includes(reasonCode) || keepsResponsible;
+  const keepsResponsible = !quantityOnly && !!request.recipient && RESPONSIBLE_REASONS.includes(reasonCode);
+  const noteRequired = NOTE_REASONS.includes(reasonCode) || keepsResponsible || quantityOnly;
 
   async function send() {
     if (!noteOnly && !parsed.ok) { setValidation(parsed.error); return; }
-    if (noteRequired && !note.trim()) { setValidation(keepsResponsible ? 'Say what happened when naming who was responsible.' : reasonCode === 'FOUND' ? 'Say where the stock was found.' : 'Say why the stock is adjusted.'); return; }
+    if (noteRequired && !note.trim()) { setValidation(quantityOnly ? 'Say what happened to the tool.' : keepsResponsible ? 'Say what happened when naming who was responsible.' : reasonCode === 'FOUND' ? 'Say where the stock was found.' : 'Say why the stock is adjusted.'); return; }
     const body: Record<string, unknown> = {};
     if (!noteOnly && parsed.ok) {
       const amended = removes ? -parsed.value : parsed.value;
       if (amended !== Number(request.quantity)) body.quantity = amended;
-      if (reasonCode !== request.reasonCode) body.reasonCode = reasonCode;
-      // Only damage, loss and scrap record who was responsible.
-      if (request.recipient && !RESPONSIBLE_REASONS.includes(reasonCode)) body.recipientId = null;
+      if (!quantityOnly) {
+        if (reasonCode !== request.reasonCode) body.reasonCode = reasonCode;
+        // Only damage, loss and scrap record who was responsible.
+        if (request.recipient && !RESPONSIBLE_REASONS.includes(reasonCode)) body.recipientId = null;
+      }
     }
     if (note.trim() !== (request.reasonNote ?? '')) body.reasonNote = note.trim() || null;
     if (comment.trim()) body.comment = comment.trim();
@@ -194,9 +220,18 @@ function ResubmitDialog({ request, onClose, onDone }: { request: AdjustmentReque
       <p className="text-sm text-surface-700 mb-3">
         {request.material.sku} {request.material.name} at {request.location.name}{request.heldForProject ? `, held for ${request.heldForProject}` : ''}. Nothing is posted until it is approved.
       </p>
-      {noteOnly
-        ? <p className="text-sm text-surface-700 mb-3">{signed(request)} comes from {request.reasonCode === 'COUNT_VARIANCE' ? 'a stock count' : 'a tool'}, so only the note can be changed here. To change the quantity, withdraw it and {request.reasonCode === 'COUNT_VARIANCE' ? 'count again' : 'start again'}.</p>
-        : (
+      {noteOnly && <p className="text-sm text-surface-700 mb-3">{noteOnlyText(request)}</p>}
+      {quantityOnly && (
+        <div className="mb-3">
+          <p className="text-sm text-surface-700 mb-3">
+            Lost while checked out{request.recipient ? ` to ${request.recipient.name}` : ''}. The tool stays on loan until this is approved; if some turned up, write off fewer and check the rest in.
+          </p>
+          <Field label="How many were lost" htmlFor="rs-qty" required>
+            <QuantityInput id="rs-qty" kind={kindOf(unit)} unit={unit} required value={quantity} onChange={(e) => { setQuantity(e.target.value); setValidation(null); }} invalid={!!validation && !parsed.ok} />
+          </Field>
+        </div>
+      )}
+      {!noteOnly && !quantityOnly && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <Field label="What happened" htmlFor="rs-reason" required>
               <Select id="rs-reason" value={reasonCode} onChange={(e) => { setReasonCode(e.target.value); setValidation(null); }}>
@@ -207,7 +242,7 @@ function ResubmitDialog({ request, onClose, onDone }: { request: AdjustmentReque
               <QuantityInput id="rs-qty" kind={kindOf(unit)} unit={unit} required value={quantity} onChange={(e) => { setQuantity(e.target.value); setValidation(null); }} invalid={!!validation && !parsed.ok} />
             </Field>
           </div>
-        )}
+      )}
       <Field label={noteRequired ? 'Note' : 'Note (optional)'} htmlFor="rs-note" required={noteRequired} className="mb-3">
         <Textarea id="rs-note" value={note} onChange={(e) => { setNote(e.target.value); setValidation(null); }} invalid={!!validation && noteRequired && !note.trim()} />
       </Field>
@@ -219,11 +254,13 @@ function ResubmitDialog({ request, onClose, onDone }: { request: AdjustmentReque
 }
 
 export function WriteOffApprovals() {
-  const [status, setStatus] = useState<Status>('PENDING');
+  // Tools links here with ?status= to show a tool's write-off where it stands (ADR-045).
+  const [params] = useSearchParams();
+  const [status, setStatus] = useState<Status>(() => STATUSES.find((s) => s === params.get('status')) ?? 'PENDING');
   // A page at a time, so none is out of sight however many wait (system audit C8).
   const requests = usePagedList<AdjustmentRequest>(`/adjustment-requests?status=${status}`, 50);
-  // What came back to the person looking: theirs sent back for changes, or rejected lately (ADR-044).
-  const summary = useApi<{ sentBackToMe?: number; rejectedForMe?: number }>('/adjustment-requests/summary');
+  // What came back to the person looking: theirs sent back for changes, or rejected or approved lately (ADR-044, ADR-045).
+  const summary = useApi<{ sentBackToMe?: number; rejectedForMe?: number; approvedForMe?: number }>('/adjustment-requests/summary');
   const { hasPermission } = usePermissions();
   const canApprove = hasPermission('writeoffs:approve');
   const me = useAuth().user?.id;
@@ -241,6 +278,7 @@ export function WriteOffApprovals() {
   const rejectKey = useIdempotencyKey('reject-write-off');
   const sentBackToMe = summary.data?.sentBackToMe ?? 0;
   const rejectedForMe = summary.data?.rejectedForMe ?? 0;
+  const approvedForMe = summary.data?.approvedForMe ?? 0;
 
   function reload() { requests.reload(); summary.reload(); }
 
@@ -322,6 +360,7 @@ export function WriteOffApprovals() {
       render: (r) => (
         <>
           <div>{REASON_LABELS[r.reasonCode] ?? r.reasonCode}{r.recipient ? ` · ${r.recipient.name}` : ''}</div>
+          {r.referenceType && SOURCE_LABELS[r.referenceType] && <div className="text-xs"><Badge tone="neutral">{SOURCE_LABELS[r.referenceType]}</Badge></div>}
           {r.reasonNote && <div className="text-meta text-xs">{r.reasonNote}</div>}
         </>
       ),
@@ -418,6 +457,12 @@ export function WriteOffApprovals() {
         <Alert tone="info" title={`${formatNumber(rejectedForMe)} of your adjustments ${rejectedForMe === 1 ? 'was' : 'were'} rejected in the last 7 days`} className="mb-4">
           Nothing was posted.{' '}
           <button type="button" className="underline font-medium" onClick={() => setStatus('REJECTED')}>See why</button>
+        </Alert>
+      )}
+      {approvedForMe > 0 && status !== 'APPROVED' && (
+        <Alert tone="success" title={`${formatNumber(approvedForMe)} of your adjustments ${approvedForMe === 1 ? 'was' : 'were'} approved in the last 7 days`} className="mb-4">
+          {approvedForMe === 1 ? 'It was' : 'They were'} posted to stock.{' '}
+          <button type="button" className="underline font-medium" onClick={() => setStatus('APPROVED')}>Show {approvedForMe === 1 ? 'it' : 'them'}</button>
         </Alert>
       )}
       {requests.error

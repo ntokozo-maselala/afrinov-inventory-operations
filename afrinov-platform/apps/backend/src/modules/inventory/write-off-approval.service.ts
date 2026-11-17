@@ -54,6 +54,14 @@ async function lockRequest(id: string, tx: Prisma.TransactionClient, allowed: Ad
   return request;
 }
 
+/** What the COMPLETED step says was done, for whoever reads the history. */
+function completedNote(referenceType: string | null): string {
+  if (referenceType === TOOL_LOAN_REFERENCE) return 'Posted: the tool\'s return and its write-off, against its loan.';
+  if (referenceType === TOOL_REPAIR_REFERENCE) return 'Posted: the tool written off, and its repair closed.';
+  if (referenceType === 'StockCount') return 'Posted as part of the stock count.';
+  return 'Posted to stock.';
+}
+
 /** What whoever asked may change before sending it again; a field left out stays as it is. */
 export interface ResubmitInput {
   quantity?: number | string | Prisma.Decimal;
@@ -67,9 +75,19 @@ export interface ResubmitInput {
 
 const REFERENCE_SOURCE: Record<string, string> = {
   StockCount: 'a stock count: to change it, withdraw it and count again',
-  [TOOL_LOAN_REFERENCE]: 'a tool checked in as lost: to change it, withdraw it and check the tool in again',
-  [TOOL_REPAIR_REFERENCE]: 'a tool held for repair: to change it, withdraw it and write the tool off again',
+  [TOOL_LOAN_REFERENCE]: 'a tool checked in as lost: its reason and borrower stay as they were',
+  [TOOL_REPAIR_REFERENCE]: 'a tool held for repair, written off whole: to change it, withdraw it and deal with the repair again',
 };
+
+/**
+ * What whoever asked may change on one sent back (ADR-044, ADR-045): ALL for
+ * one made by hand; QUANTITY (and the note) for a tool lost on loan, whose
+ * reason and borrower come from the loan; NOTE only for a stock count's
+ * difference or a tool held for repair, written off whole.
+ */
+export type Amendable = 'ALL' | 'QUANTITY' | 'NOTE';
+export const amendableOf = (referenceType: string | null): Amendable =>
+  !referenceType ? 'ALL' : referenceType === TOOL_LOAN_REFERENCE ? 'QUANTITY' : 'NOTE';
 
 const listed = {
   material: { select: { id: true, sku: true, name: true, unitOfMeasure: true } },
@@ -77,7 +95,7 @@ const listed = {
   recipient: { select: { id: true, name: true } },
   requestedBy: { select: { id: true, name: true } },
   decidedBy: { select: { id: true, name: true } },
-  events: { orderBy: [{ at: 'asc' }, { id: 'asc' }], include: { actor: { select: { id: true, name: true } } } },
+  events: { orderBy: [{ at: 'asc' }, { seq: 'asc' }], include: { actor: { select: { id: true, name: true } } } },
 } satisfies Prisma.AdjustmentRequestInclude;
 
 export const WriteOffApprovalService = {
@@ -142,30 +160,38 @@ export const WriteOffApprovalService = {
       value: r.value?.toFixed(2) ?? null,
       requestedAt: r.requestedAt.toISOString(),
       decidedAt: r.decidedAt?.toISOString() ?? null,
-      // Its quantity comes from a count or a tool: only the note can be amended.
-      amendable: r.referenceType ? 'NOTE' as const : 'ALL' as const,
+      amendable: amendableOf(r.referenceType),
       events: r.events.map((e) => ({
         id: e.id, kind: e.kind, at: e.at.toISOString(), actor: e.actor, note: e.note,
         quantity: e.quantity.toString(), reasonCode: e.reasonCode, reasonNote: e.reasonNote, value: e.value?.toFixed(2) ?? null,
+        transactionId: e.transactionId,
       })),
     }));
   },
 
   /**
    * How many wait for approval, and since when the oldest has (system audit
-   * C8), for the Dashboard. For whoever is asking (ADR-044): how many of their
-   * own were sent back to them for changes, and how many someone else rejected
-   * in the last 7 days.
+   * C8), for the Dashboard. For whoever is asking (ADR-044, ADR-045): how
+   * many of their own were sent back to them for changes, and how many someone
+   * else rejected, or approved and posted, in the last 7 days. Every decision
+   * on a person's request is pointed out to them, write-off or tool alike.
    */
-  async summary(actorId?: string, now = new Date()): Promise<{ waiting: number; oldestRequestedAt: string | null; oldestDays: number | null; sentBackToMe: number; rejectedForMe: number }> {
+  async summary(actorId?: string, now = new Date()): Promise<{ waiting: number; oldestRequestedAt: string | null; oldestDays: number | null; sentBackToMe: number; rejectedForMe: number; approvedForMe: number }> {
     const since = new Date(now.getTime() - REJECTED_NOTICE_DAYS * 86_400_000);
-    const [waiting, oldest, sentBackToMe, rejectedForMe] = await Promise.all([
+    const decidedForMe = (status: AdjustmentRequestStatus) => (actorId
+      ? prisma.adjustmentRequest.count({ where: { status, requestedById: actorId, decidedById: { not: actorId }, decidedAt: { gte: since } } })
+      : Promise.resolve(0));
+    const [waiting, oldest, sentBackToMe, rejectedForMe, approvedForMe] = await Promise.all([
       prisma.adjustmentRequest.count({ where: { status: AdjustmentRequestStatus.PENDING } }),
       prisma.adjustmentRequest.findFirst({ where: { status: AdjustmentRequestStatus.PENDING }, orderBy: [{ requestedAt: 'asc' }, { id: 'asc' }], select: { requestedAt: true } }),
       actorId ? prisma.adjustmentRequest.count({ where: { status: AdjustmentRequestStatus.CHANGES_REQUESTED, requestedById: actorId } }) : 0,
-      actorId ? prisma.adjustmentRequest.count({ where: { status: AdjustmentRequestStatus.REJECTED, requestedById: actorId, decidedById: { not: actorId }, decidedAt: { gte: since } } }) : 0,
+      decidedForMe(AdjustmentRequestStatus.REJECTED),
+      decidedForMe(AdjustmentRequestStatus.APPROVED),
     ]);
-    return { waiting, oldestRequestedAt: oldest?.requestedAt.toISOString() ?? null, oldestDays: oldest ? daysBetweenDays(oldest.requestedAt, now) : null, sentBackToMe, rejectedForMe };
+    return {
+      waiting, oldestRequestedAt: oldest?.requestedAt.toISOString() ?? null, oldestDays: oldest ? daysBetweenDays(oldest.requestedAt, now) : null,
+      sentBackToMe, rejectedForMe, approvedForMe,
+    };
   },
 
   /** Posts the adjustment someone else asked for, if it still can be. */
@@ -201,7 +227,10 @@ export const WriteOffApprovalService = {
         where: { id },
         data: { status: AdjustmentRequestStatus.APPROVED, decidedById: actorId, decidedAt: now, transactionId },
       });
+      // The decision, then what it did (ADR-045): the authorisation and the
+      // posting are separate steps, in this order, in one transaction.
       await recordRequestEvent(request, 'APPROVED', actorId, null, tx);
+      await recordRequestEvent(request, 'COMPLETED', actorId, completedNote(request.referenceType), tx, transactionId);
       await tx.auditLogEntry.create({
         data: {
           actorId, action: 'WRITE_OFF_APPROVE', entityType: 'AdjustmentRequest', entityId: id,
@@ -272,9 +301,11 @@ export const WriteOffApprovalService = {
   /**
    * Whoever asked amends the adjustment sent back to them and sends it again
    * (ADR-044). It always waits for approval again, whatever it is worth now:
-   * an approver asked about it. One made by hand is checked as a new one is;
-   * one from a stock count or a tool keeps its quantity and reason, which come
-   * from the count or the tool, and takes a new note only.
+   * an approver asked about it. One made by hand is checked as a new one is.
+   * A tool lost on loan takes a new quantity and note, checked against what is
+   * still out on the loan (ADR-045); its reason and borrower are the loan's.
+   * A stock count's difference, or a tool held for repair written off whole,
+   * takes a new note only (amendableOf).
    */
   async resubmit(id: string, input: ResubmitInput, actorId: string, within?: Prisma.TransactionClient): Promise<{ id: string; status: 'PENDING_APPROVAL'; value: string | null }> {
     return inTx(within, async (tx) => {
@@ -287,9 +318,20 @@ export const WriteOffApprovalService = {
       const reasonNote = input.reasonNote === undefined ? request.reasonNote : input.reasonNote?.trim() || null;
 
       let value = request.value;
-      if (request.referenceType) {
+      const amendable = amendableOf(request.referenceType);
+      if (amendable === 'QUANTITY') {
+        if (reasonCode !== request.reasonCode || recipientId !== request.recipientId) {
+          throw Errors.validation(`This adjustment comes from ${REFERENCE_SOURCE[request.referenceType!]}. Only its quantity and note can be changed here.`);
+        }
+        // Still a write-off: a lost tool is never added back this way.
+        if (!quantity.isNegative()) throw Errors.validation('A lost tool\'s write-off removes stock: give how many were lost.');
+        await ToolLoanService.checkLostAmendment({ requestId: id, loanId: request.referenceId!, quantity: quantity.negated() }, tx);
+        const material = await tx.material.findUnique({ where: { id: request.materialId }, select: { unitCost: true } });
+        if (!material) throw Errors.notFound('Material');
+        value = (await checkWriteOff(quantity, material.unitCost, tx)).value;
+      } else if (amendable === 'NOTE') {
         if (!quantity.equals(request.quantity) || reasonCode !== request.reasonCode || recipientId !== request.recipientId) {
-          throw Errors.validation(`This adjustment comes from ${REFERENCE_SOURCE[request.referenceType] ?? 'another record: to change it, withdraw it and start again'}. Only its note can be changed here.`);
+          throw Errors.validation(`This adjustment comes from ${REFERENCE_SOURCE[request.referenceType!] ?? 'another record: to change it, withdraw it and start again'}. Only its note can be changed here.`);
         }
       } else {
         const amended: AdjustmentInput = {

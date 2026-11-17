@@ -199,6 +199,48 @@ describe('Write-offs to approve', () => {
     expect(decidedText({ ...old, status: 'APPROVED', decidedBy: SIPHO })).toBe('Approved by Sipho Dlamini');
   });
 
+  // ADR-045: a tool lost on loan, sent back, takes a new quantity but keeps its reason and borrower.
+  it('lets whoever asked change how many tools were lost, and nothing else but the note', async () => {
+    lists = {
+      CHANGES_REQUESTED: [request('r-8', THANDI, {
+        status: 'CHANGES_REQUESTED', quantity: '-2', reasonCode: 'LOSS', reasonNote: 'Lost while checked out to Bukho: left on site',
+        recipient: { id: 'rec-1', name: 'Bukho' }, referenceType: 'ToolLoan', amendable: 'QUANTITY',
+        material: { id: 'm-2', sku: 'TL-0002', name: 'Hand drill', unitOfMeasure: 'each' }, decidedBy: SIPHO, decisionNote: 'Are both gone?',
+      })],
+    };
+    render(<MemoryRouter initialEntries={['/stock/write-offs?status=CHANGES_REQUESTED']}><ToastProvider><WriteOffApprovals /></ToastProvider></MemoryRouter>);
+    const row = (await screen.findByText('Tool lost on loan')).closest('tr')!;
+    expect(listCalls()[0]).toBe('/adjustment-requests?status=CHANGES_REQUESTED&limit=50');
+    fireEvent.click(within(row).getByRole('button', { name: 'Change and send again' }));
+    expect(screen.queryByLabelText(/What happened/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Lost while checked out to Bukho\. The tool stays on loan until this is approved/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/How many were lost/), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText(/What you changed/), { target: { value: 'One turned up' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send for approval' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/adjustment-requests/r-8/resubmit', { quantity: -1, comment: 'One turned up' }, expect.anything()));
+  });
+
+  it('shows approval and its posting as separate steps, and tells whoever asked it was approved', async () => {
+    summary = { waiting: 0, oldestDays: null, sentBackToMe: 0, rejectedForMe: 0, approvedForMe: 1 };
+    lists = {
+      PENDING: [],
+      APPROVED: [request('r-9', THANDI, {
+        status: 'APPROVED', decidedBy: SIPHO, decidedAt: '2026-11-05T08:00:00.000Z', referenceType: 'ToolRepair',
+        events: [event('SUBMITTED', THANDI, '-8'), event('APPROVED', SIPHO, '-8'), { ...event('COMPLETED', SIPHO, '-8', 'Posted: the tool written off, and its repair closed.'), transactionId: 't-9' }],
+      })],
+    };
+    renderPage();
+    expect(await screen.findByText('1 of your adjustments was approved in the last 7 days')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show it' }));
+    const row = (await screen.findByText('Approved by Sipho Dlamini')).closest('tr')!;
+    expect(within(row).getByText('Tool held for repair')).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: 'History of CBL-1' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Approved by Sipho Dlamini')).toBeInTheDocument();
+    expect(within(dialog).getByText('Completed by Sipho Dlamini')).toBeInTheDocument();
+    expect(within(dialog).getByText('“Posted: the tool written off, and its repair closed.”')).toBeInTheDocument();
+  });
+
   it('puts what was sent back to you on the Dashboard', () => {
     expect(writeOffsSentBackCard({ sentBackToMe: 0 })).toBeNull();
     expect(writeOffsSentBackCard({ sentBackToMe: 2 })).toMatchObject({ label: 'Sent back to you', value: '2', tone: 'warning', to: '/stock/write-offs' });

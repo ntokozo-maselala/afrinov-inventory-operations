@@ -72,7 +72,7 @@ interface MockAdjustmentRequest {
   referenceType: string | null; referenceId: string | null; value: string | null; requestedById: string; requestedAt: string;
   decidedById: string | null; decidedAt: string | null; decisionNote: string | null;
   /** Its history, as adjustment_request_events on the server (ADR-044). */
-  events: Array<{ id: string; kind: 'SUBMITTED' | 'CHANGES_REQUESTED' | 'RESUBMITTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'; at: string; actorId: string; note: string | null; quantity: string; reasonCode: AdjustmentReasonCode; reasonNote: string | null; value: string | null }>;
+  events: Array<{ id: string; kind: 'SUBMITTED' | 'CHANGES_REQUESTED' | 'RESUBMITTED' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN'; at: string; actorId: string; note: string | null; quantity: string; reasonCode: AdjustmentReasonCode; reasonNote: string | null; value: string | null }>;
 }
 
 /** A project issue waiting for the Workshop Manager (ADR-043). */
@@ -2180,7 +2180,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     // The demo's one user asked for every request and nobody else decides them, so none comes back.
     return {
       waiting: waiting.length, oldestRequestedAt: waiting[0]?.requestedAt ?? null, oldestDays: waiting[0] ? mockDaysBetween(waiting[0].requestedAt, new Date().toISOString()) : null,
-      sentBackToMe: state.adjustmentRequests.filter((r) => r.status === 'CHANGES_REQUESTED' && r.requestedById === 'user-1').length, rejectedForMe: 0,
+      sentBackToMe: state.adjustmentRequests.filter((r) => r.status === 'CHANGES_REQUESTED' && r.requestedById === 'user-1').length, rejectedForMe: 0, approvedForMe: 0,
     };
   }
   if (method === 'GET' && p === '/adjustment-requests') return listAdjustmentRequests(qs);
@@ -3123,7 +3123,7 @@ function openMockRepair(id: string): MockToolRepair {
   const r = state.toolRepairs.find((x) => x.id === id);
   if (!r) throw err('NOT_FOUND', 'Tool repair not found');
   if (r.resolvedAt) throw err('INVALID_STATE', 'This repair was dealt with already. Refresh the page.');
-  if (state.adjustmentRequests.some((q) => q.status === 'PENDING' && q.referenceType === 'ToolRepair' && q.referenceId === id)) {
+  if (state.adjustmentRequests.some((q) => OPEN_MOCK_REQUEST(q) && q.referenceType === 'ToolRepair' && q.referenceId === id)) {
     throw err('INVALID_STATE', 'Writing it off waits for approval under Write-offs to approve. Approve or reject it there first.');
   }
   return r;
@@ -3181,8 +3181,9 @@ function listTools() {
             receipt: t.issueId ? mockReceiptOf(t.issueId) : null,
             projectNumber: t.projectNumber ?? null, locationId: t.locationId, locationName: findLocation(t.locationId)?.name ?? '—',
             quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
-            // As the server: of those out, how many are waiting to be written off as lost.
-            lostWaiting: String(state.adjustmentRequests.filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && r.referenceId === t.id).reduce((n, r) => n - Number(r.quantity), 0)),
+            // As the server: of those out, how many are waiting to be written off as lost, and of them sent back (ADR-045).
+            lostWaiting: String(state.adjustmentRequests.filter((r) => OPEN_MOCK_REQUEST(r) && r.referenceType === 'ToolLoan' && r.referenceId === t.id).reduce((n, r) => n - Number(r.quantity), 0)),
+            lostSentBack: String(state.adjustmentRequests.filter((r) => r.status === 'CHANGES_REQUESTED' && r.referenceType === 'ToolLoan' && r.referenceId === t.id).reduce((n, r) => n - Number(r.quantity), 0)),
             checkedOutBy: mockUsers.find((u) => u.id === t.actorId)?.name ?? 'Unknown', note: t.reasonNote ?? null,
             daysOut, dueOn, ...loanState(dueOn, utcDay(new Date())),
             extensions: loanChanges(t.id).map((e) => ({
@@ -3196,7 +3197,8 @@ function listTools() {
       const repairs = state.toolRepairs.filter((r) => !r.resolvedAt && r.materialId === m.id).map((r) => ({
         id: r.id, locationId: r.locationId, locationName: findLocation(r.locationId)?.name ?? '—', quantity: String(r.quantity), note: r.note,
         reportedAt: r.reportedAt, reportedBy: 'You (admin)',
-        writeOffWaiting: state.adjustmentRequests.some((q) => q.status === 'PENDING' && q.referenceType === 'ToolRepair' && q.referenceId === r.id),
+        writeOffWaiting: state.adjustmentRequests.some((q) => OPEN_MOCK_REQUEST(q) && q.referenceType === 'ToolRepair' && q.referenceId === r.id),
+        writeOffStatus: (state.adjustmentRequests.find((q) => OPEN_MOCK_REQUEST(q) && q.referenceType === 'ToolRepair' && q.referenceId === r.id)?.status ?? null) as 'PENDING' | 'CHANGES_REQUESTED' | null,
       }));
       return {
         materialId: m.id, sku: m.sku, name: m.name, serialNumber: m.serialNumber ?? null, unitOfMeasure: m.unitOfMeasure,
@@ -3348,7 +3350,7 @@ function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffI
   for (const [loanId, quantity] of asked) {
     const loan = state.transactions.find((t) => t.id === loanId)!;
     // As the server: a lost tool waiting for its write-off to be approved is still out, but not checked in again.
-    const pending = state.adjustmentRequests.filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && r.referenceId === loanId)
+    const pending = state.adjustmentRequests.filter((r) => OPEN_MOCK_REQUEST(r) && r.referenceType === 'ToolLoan' && r.referenceId === loanId)
       .reduce((n, r) => n - Number(r.quantity), 0);
     const out = -Number(loan.quantity) - returnedOnLoan(loanId) - pending;
     if (quantity > out) throw err('VALIDATION_ERROR', `Cannot check in ${quantity} × ${findMaterial(loan.materialId)?.sku}: only ${out} still checked out.`);
@@ -3747,6 +3749,9 @@ function requestMockAdjustment(r: Omit<MockAdjustmentRequest, 'id' | 'status' | 
   return id;
 }
 
+/** As OPEN_ADJUSTMENT_STATUSES on the server: waiting, or sent back for changes. */
+const OPEN_MOCK_REQUEST = (r: { status: string }) => r.status === 'PENDING' || r.status === 'CHANGES_REQUESTED';
+
 /** As recordRequestEvent on the server: one step, with the request as it stands. */
 function recordMockRequestEvent(r: MockAdjustmentRequest, kind: MockAdjustmentRequest['events'][number]['kind'], note: string | null) {
   r.events.push({ id: nextId('rev'), kind, at: new Date().toISOString(), actorId: 'user-1', note, quantity: r.quantity, reasonCode: r.reasonCode, reasonNote: r.reasonNote, value: r.value });
@@ -3872,7 +3877,8 @@ function listAdjustmentRequests(qs: Record<string, string>) {
         decidedBy: r.decidedById ? { id: r.decidedById, name: userName(r.decidedById)! } : null,
         cursor: `${r.requestedAt}_${r.id}`,
         daysWaiting: mockDaysBetween(r.requestedAt, r.decidedAt ?? new Date().toISOString()),
-        amendable: r.referenceType ? 'NOTE' : 'ALL',
+        // As amendableOf on the server (ADR-045).
+        amendable: !r.referenceType ? 'ALL' : r.referenceType === 'ToolLoan' ? 'QUANTITY' : 'NOTE',
         events: r.events.map(({ actorId, ...e }) => ({ ...e, actor: { id: actorId, name: userName(actorId)! } })),
       };
     });

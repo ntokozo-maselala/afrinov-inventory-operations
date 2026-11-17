@@ -43,6 +43,8 @@ export interface OpenLoan {
   quantity: string; out: string;
   /** Of those out, how many are waiting to be written off as lost: not to be checked in again (ADR-028). */
   lostWaiting?: string;
+  /** Of lostWaiting, how many were sent back to whoever asked, for changes (ADR-045). */
+  lostSentBack?: string;
   checkedOutAt: string; checkedOutBy: string; note: string | null;
   /** Whole days since it went out. */
   daysOut: number;
@@ -100,8 +102,10 @@ export interface ToolRow {
 export interface ToolRepairRow {
   id: string; locationId: string; locationName: string; quantity: string; note: string | null;
   reportedAt: string; reportedBy: string;
-  /** A write-off of it waits for someone else's approval. */
+  /** A write-off of it is open: waiting for someone else's approval, or sent back for changes. */
   writeOffWaiting: boolean;
+  /** Where that write-off stands (ADR-045); null with none open. */
+  writeOffStatus?: 'PENDING' | 'CHANGES_REQUESTED' | null;
 }
 
 /** What can be lent from a tool's location: on the shelf, less what is held for repair. */

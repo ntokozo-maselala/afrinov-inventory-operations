@@ -1243,6 +1243,10 @@ enum AdjustmentRequestEventKind {
   APPROVED
   REJECTED
   WITHDRAWN
+  // The approved adjustment posted: its movement in transactionId, and for a
+  // tool, the loan's return or the repair closed (ADR-045). Written in the
+  // same transaction as APPROVED, straight after it.
+  COMPLETED
 }
 
 // An adjustment worth more than inventory.writeOffApprovalAbove, waiting for
@@ -1306,6 +1310,10 @@ model AdjustmentRequestEvent {
   reasonNote  String?                    @map("reason_note")
   recipientId String?                    @map("recipient_id")
   value       Decimal?                   @db.Decimal(18, 2)
+  // COMPLETED: the movement it posted (ADR-045).
+  transactionId String?                  @map("transaction_id")
+  // Order of writing: steps written in one transaction share a time (ADR-045).
+  seq         Int                        @default(autoincrement())
 
   request AdjustmentRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   actor   User              @relation("AdjustmentRequestEventActor", fields: [actorId], references: [id])
