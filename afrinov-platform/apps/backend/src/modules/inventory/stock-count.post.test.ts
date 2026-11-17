@@ -18,6 +18,7 @@ const { tx, settings } = vi.hoisted(() => ({
     stockCountLine: { createMany: vi.fn() },
     auditLogEntry: { create: vi.fn() },
     adjustmentRequest: { findMany: vi.fn(), create: vi.fn() },
+    adjustmentRequestEvent: { create: vi.fn() },
     // No rows: the write-off settings at their defaults (approval on, R 1 000).
     setting: { findMany: vi.fn(async () => []) },
   },

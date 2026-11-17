@@ -127,6 +127,7 @@ const client = {
       .map((r) => ({ ...r, location: { name: names[r.locationId] }, reportedBy: { name: 'Store' } })),
   },
   auditLogEntry: { create: async ({ data }: { data: { action: string } }) => { db.audit.push(data); return data; } },
+  adjustmentRequestEvent: { create: async () => ({}) },
   adjustmentRequest: {
     create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `req-${db.requests.length + 1}`, status: 'PENDING', ...data }; db.requests.push(row); return row; },
     // Lost tools waiting for their write-off, by loan.

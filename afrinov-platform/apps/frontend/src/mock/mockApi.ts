@@ -67,10 +67,12 @@ interface Balance {
 
 /** An adjustment waiting for someone else's approval, as adjustment_requests on the server. */
 interface MockAdjustmentRequest {
-  id: string; status: 'PENDING' | 'APPROVED' | 'REJECTED'; materialId: string; locationId: string; heldForProject: string | null;
+  id: string; status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED' | 'WITHDRAWN'; materialId: string; locationId: string; heldForProject: string | null;
   quantity: string; reasonCode: AdjustmentReasonCode; reasonNote: string | null; recipientId: string | null; projectNumber: string | null;
   referenceType: string | null; referenceId: string | null; value: string | null; requestedById: string; requestedAt: string;
   decidedById: string | null; decidedAt: string | null; decisionNote: string | null;
+  /** Its history, as adjustment_request_events on the server (ADR-044). */
+  events: Array<{ id: string; kind: 'SUBMITTED' | 'CHANGES_REQUESTED' | 'RESUBMITTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'; at: string; actorId: string; note: string | null; quantity: string; reasonCode: AdjustmentReasonCode; reasonNote: string | null; value: string | null }>;
 }
 
 /** A project issue waiting for the Workshop Manager (ADR-043). */
@@ -2175,11 +2177,15 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/adjustment-requests/summary') {
     // As the server (system audit C8): how many wait, and the oldest.
     const waiting = state.adjustmentRequests.filter((r) => r.status === 'PENDING').sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
-    return { waiting: waiting.length, oldestRequestedAt: waiting[0]?.requestedAt ?? null, oldestDays: waiting[0] ? mockDaysBetween(waiting[0].requestedAt, new Date().toISOString()) : null };
+    // The demo's one user asked for every request and nobody else decides them, so none comes back.
+    return {
+      waiting: waiting.length, oldestRequestedAt: waiting[0]?.requestedAt ?? null, oldestDays: waiting[0] ? mockDaysBetween(waiting[0].requestedAt, new Date().toISOString()) : null,
+      sentBackToMe: state.adjustmentRequests.filter((r) => r.status === 'CHANGES_REQUESTED' && r.requestedById === 'user-1').length, rejectedForMe: 0,
+    };
   }
   if (method === 'GET' && p === '/adjustment-requests') return listAdjustmentRequests(qs);
-  const requestDecision = /^\/adjustment-requests\/([^/]+)\/(approve|reject)$/.exec(p);
-  if (method === 'POST' && requestDecision) return decideAdjustmentRequest(decodeURIComponent(requestDecision[1]!), requestDecision[2] as 'approve' | 'reject', (body as { reason?: string }) ?? {});
+  const requestDecision = /^\/adjustment-requests\/([^/]+)\/(approve|reject|request-changes|resubmit)$/.exec(p);
+  if (method === 'POST' && requestDecision) return decideAdjustmentRequest(decodeURIComponent(requestDecision[1]!), requestDecision[2] as 'approve' | 'reject' | 'request-changes' | 'resubmit', (body as { reason?: string }) ?? {});
   if (method === 'POST' && p === '/tools/check-out') return handleToolCheckOut((body as ToolCheckOutBody) ?? {});
   if (method === 'POST' && p === '/tools/check-in') return handleToolCheckIn((body as ToolCheckInBody) ?? {});
   const repairMatch = method === 'POST' ? /^\/tools\/repairs\/([^/]+)\/(repaired|write-off)$/.exec(p) : null;
@@ -3733,10 +3739,17 @@ function mockWriteOffCheck(materialId: string, quantity: number): { needsApprova
   };
 }
 
-function requestMockAdjustment(r: Omit<MockAdjustmentRequest, 'id' | 'status' | 'requestedById' | 'requestedAt' | 'decidedById' | 'decidedAt' | 'decisionNote'>): string {
+function requestMockAdjustment(r: Omit<MockAdjustmentRequest, 'id' | 'status' | 'requestedById' | 'requestedAt' | 'decidedById' | 'decidedAt' | 'decisionNote' | 'events'>): string {
   const id = nextId('req');
-  state.adjustmentRequests.push({ ...r, id, status: 'PENDING', requestedById: 'user-1', requestedAt: new Date().toISOString(), decidedById: null, decidedAt: null, decisionNote: null });
+  const request: MockAdjustmentRequest = { ...r, id, status: 'PENDING', requestedById: 'user-1', requestedAt: new Date().toISOString(), decidedById: null, decidedAt: null, decisionNote: null, events: [] };
+  state.adjustmentRequests.push(request);
+  recordMockRequestEvent(request, 'SUBMITTED', null);
   return id;
+}
+
+/** As recordRequestEvent on the server: one step, with the request as it stands. */
+function recordMockRequestEvent(r: MockAdjustmentRequest, kind: MockAdjustmentRequest['events'][number]['kind'], note: string | null) {
+  r.events.push({ id: nextId('rev'), kind, at: new Date().toISOString(), actorId: 'user-1', note, quantity: r.quantity, reasonCode: r.reasonCode, reasonNote: r.reasonNote, value: r.value });
 }
 
 /** Whole South African days from one moment to another, as the server counts them. */
@@ -3844,7 +3857,7 @@ function listAdjustmentRequests(qs: Record<string, string>) {
   // As the server (system audit C8): a page at a time, each with the days it waited.
   const limit = Math.min(Number(qs.limit) || 100, 200);
   const sorted = state.adjustmentRequests
-    .filter((r) => r.status === status)
+    .filter((r) => r.status === status && (qs.mine !== 'true' || r.requestedById === 'user-1'))
     .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id));
   return olderThan(sorted, qs.before, (r) => r.requestedAt).slice(0, limit)
     .map((r) => {
@@ -3859,20 +3872,30 @@ function listAdjustmentRequests(qs: Record<string, string>) {
         decidedBy: r.decidedById ? { id: r.decidedById, name: userName(r.decidedById)! } : null,
         cursor: `${r.requestedAt}_${r.id}`,
         daysWaiting: mockDaysBetween(r.requestedAt, r.decidedAt ?? new Date().toISOString()),
+        amendable: r.referenceType ? 'NOTE' : 'ALL',
+        events: r.events.map(({ actorId, ...e }) => ({ ...e, actor: { id: actorId, name: userName(actorId)! } })),
       };
     });
 }
 
 // The demo has one user, who asked for every request, so a request is only
-// ever withdrawn in the demo: as the server, nobody approves their own.
-function decideAdjustmentRequest(id: string, decision: 'approve' | 'reject', b: { reason?: string }) {
+// ever withdrawn in the demo: as the server, nobody approves their own or
+// sends it back for changes (ADR-044), so none is ever there to send again.
+function decideAdjustmentRequest(id: string, decision: 'approve' | 'reject' | 'request-changes' | 'resubmit', b: { reason?: string }) {
   const r = state.adjustmentRequests.find((x) => x.id === id);
   if (!r) throw err('NOT_FOUND', 'Adjustment request not found');
-  if (r.status !== 'PENDING') throw err('INVALID_STATE', `This adjustment was already ${r.status === 'APPROVED' ? 'approved' : 'rejected'}.`);
+  if (r.status !== 'PENDING') throw err('INVALID_STATE', `This adjustment was already ${r.status === 'APPROVED' ? 'approved' : r.status === 'WITHDRAWN' ? 'withdrawn' : 'rejected'}.`);
   if (decision === 'approve') throw err('FORBIDDEN', 'You asked for this adjustment, so someone else must approve it.');
+  if (decision === 'resubmit') throw err('INVALID_STATE', 'This adjustment is waiting for approval: it was not sent back for changes.');
   const reason = b.reason?.trim();
+  if (decision === 'request-changes') {
+    if (!reason) throw err('VALIDATION_ERROR', 'Say what needs to change');
+    throw err('FORBIDDEN', 'You asked for this adjustment, so someone else must review it.');
+  }
   if (!reason) throw err('VALIDATION_ERROR', 'Say why it is rejected');
-  Object.assign(r, { status: 'REJECTED', decidedById: 'user-1', decidedAt: new Date().toISOString(), decisionNote: reason });
+  // As the server: taking back one's own is a withdrawal, never a rejection.
+  Object.assign(r, { status: 'WITHDRAWN', decidedById: 'user-1', decidedAt: new Date().toISOString(), decisionNote: reason });
+  recordMockRequestEvent(r, 'WITHDRAWN', reason);
   return { id };
 }
 

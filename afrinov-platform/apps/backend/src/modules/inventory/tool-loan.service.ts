@@ -278,7 +278,7 @@ export const ToolLoanService = {
     ]);
     // A write-off of a held tool waiting for approval (ADR-028), by repair.
     const writeOffWaiting = new Set((await prisma.adjustmentRequest.findMany({
-      where: { status: 'PENDING', referenceType: TOOL_REPAIR_REFERENCE, referenceId: { in: repairs.map((r) => r.id) } },
+      where: { status: { in: ['PENDING', 'CHANGES_REQUESTED'] }, referenceType: TOOL_REPAIR_REFERENCE, referenceId: { in: repairs.map((r) => r.id) } },
       select: { referenceId: true },
     })).map((r) => r.referenceId!));
     const today = dayOf(now);

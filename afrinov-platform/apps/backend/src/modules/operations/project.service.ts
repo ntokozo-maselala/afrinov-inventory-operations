@@ -75,7 +75,7 @@ async function closingBlockers(projectNumber: string, to: 'COMPLETED' | 'CANCELL
     db.purchaseOrder.findMany({ where: { projectNumber, status: { in: [...OPEN_ORDER_STATUSES] } }, select: { id: true, number: true, status: true }, orderBy: { number: 'asc' } }),
     db.rfq.findMany({ where: { projectNumber, status: { in: ['DRAFT', 'SENT'] } }, select: { id: true, number: true, status: true }, orderBy: { number: 'asc' } }),
     toolsOutOn(db, { projectNumber }),
-    db.adjustmentRequest.count({ where: { status: 'PENDING', OR: [{ projectNumber }, { heldForProject: projectNumber }] } }),
+    db.adjustmentRequest.count({ where: { status: { in: ['PENDING', 'CHANGES_REQUESTED'] }, OR: [{ projectNumber }, { heldForProject: projectNumber }] } }),
     db.issueRequest.count({ where: { status: 'PENDING', projectNumber } }),
     to === 'COMPLETED' ? ProjectScheduleService.openCount(projectNumber, db) : Promise.resolve(0),
   ]);
