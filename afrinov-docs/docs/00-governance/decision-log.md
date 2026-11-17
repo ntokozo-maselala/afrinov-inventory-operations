@@ -1736,3 +1736,44 @@ write-off still can't be reduced in part, as a repair is written off whole.
 `check:units` now counts lost tools sent back as still waiting.
 Tests: `write-off-approval.real-http.test.ts`, `WriteOffApprovals.test.tsx`,
 `Tools.test.tsx`.
+
+### ADR-046 — A Projects item is added for one project; a project's RFQ and order lines offer its items
+**Date:** 2026-11-17 · **Status:** Accepted
+
+**Context:** Since ADR-023 a Projects item was a plain catalogue entry with no
+project of its own, any project order could use it, and the screens never
+asked for one: the order said which project it was for. In practice project
+material is bought for one job, and the owner asked on 17 Nov 2026 that it be
+added for its project on Materials, that a project's items not be ordered or
+issued for other jobs, and that the buyer find the item by its project when
+picking a line on an RFQ. With every Projects item listed on every RFQ, the
+buyer would scroll through every job's material once the platform is in use.
+
+**Decision:**
+- **Added for its project.** Adding a Projects item on Materials asks for its
+  project (open projects only), and saves it on the item's existing
+  `project_number`; it is required there. Edit item can set or change it
+  until the item has stock movements (`checkMaterialChange` refuses a change
+  after, as before). An item added from an RFQ or order line (+ New item)
+  takes that RFQ's or order's project; one added before an order has its
+  project has none until it is given one.
+- **Lines offer the project's items.** On New request for quotation a line's
+  item list waits for the RFQ's project ("Choose the project first"), then
+  lists the items for that project, then those with no project yet (added
+  before items had one), never another project's. Another project's item a
+  line already holds stays listed under its own heading, so a draft can still
+  show it. New purchase order narrows to the project's items the same way
+  once the order has its project.
+- **Materials shows it.** The Projects tab has a **Project** column: the
+  project each item was added for, or "No project yet".
+- **What doesn't change.** The server's rules are as they were: it already
+  checks an item's project is open when given and refuses a project on a
+  Stores item, and it still lets an order use any Projects item (ADR-023,
+  Phase 1). Issuing already holds an item tagged with a project to that
+  project (ADR-043). No migration.
+
+**Consequences:** This refines ADR-023 for new items: a Projects item belongs
+to one project again, and a new job gets its own items. Older items without a
+project keep working and are offered on every project's lines until given
+one. Tests: `projectItems.test.ts`, `MaterialsSections.test.tsx`,
+`Rfqs.test.tsx`, `PoNewItem.test.tsx`, `PoProjectMaterial.test.tsx`.

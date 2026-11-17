@@ -472,10 +472,17 @@ function waitingCell(m: Material, items: Waiting[] | undefined) {
  * projects of its orders, and "Waiting to issue" what was received for them and
  * not yet issued, each when it could be loaded and may be seen (null).
  */
+/** The project a Projects item was added for (ADR-046), linked to it, or that it has none yet. */
+function projectCell(m: Material) {
+  if (!m.projectNumber) return <span className="text-surface-400">No project yet</span>;
+  return <Link to={`/projects/${encodeURIComponent(m.projectNumber)}`} className="btn-link whitespace-nowrap" title={m.project?.name ?? undefined}>{m.projectNumber}</Link>;
+}
+
 function projectsColumns(orderedFor: Map<string, OrderedFor['projects']> | null, waiting: Map<string, Waiting[]> | null): DataTableColumn<Material>[] {
   return [
     skuColumn,
     nameColumn,
+    { key: 'project', header: 'Project', render: projectCell, width: '9rem' },
     ...(orderedFor ? [{ key: 'orderedFor', header: 'Ordered for', render: (m: Material) => orderedForCell(orderedFor.get(m.id)), width: '12rem' }] : []),
     ...(waiting ? [{ key: 'waiting', header: 'Waiting to issue', render: (m: Material) => waitingCell(m, waiting.get(m.id)), width: '13rem' }] : []),
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },

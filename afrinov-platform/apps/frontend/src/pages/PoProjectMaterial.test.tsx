@@ -54,7 +54,7 @@ const form = (query = '') => render(
 const optionsOf = (label: string) => within(screen.getByLabelText(label)).getAllByRole('option').map((o) => o.textContent);
 
 describe('the new-order form with project material', () => {
-  it('suggests the project from an item tagged with one, without locking it, and offers every Projects item', async () => {
+  it('suggests the project from an item tagged with one, then offers that project\'s items (ADR-046)', async () => {
     form('?materialIds=p-1369');
     expect(await screen.findByLabelText('Line 1 material')).toHaveValue('p-1369');
     await waitFor(() => expect(screen.getByLabelText('Project')).toHaveValue('1369'));
@@ -65,11 +65,12 @@ describe('the new-order form with project material', () => {
     const line2 = optionsOf('Line 2 material');
     // Procurement buys for projects: Stores items are the store's to order (Stores ordering roadmap).
     expect(line2).not.toContain('DISC — Cutting disc');
-    // Another project's item, and a closed project's: the order says which project it is for.
-    expect(line2).toContain('1402-PIPE — Pipe for 1402');
-    expect(line2).toContain('1200-PIPE — Pipe for 1200');
+    // The project's items; another project's aren't offered.
+    expect(line2).toContain('1369-PIPE — Pipe for 1369');
+    expect(line2).not.toContain('1402-PIPE — Pipe for 1402');
+    expect(line2).not.toContain('1200-PIPE — Pipe for 1200');
 
-    // The buyer may order it for another project.
+    // The buyer may still order it for another project: the line keeps the item it holds.
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: '1402' } });
     fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '4' } });
@@ -104,7 +105,7 @@ describe('the new-order form with project material', () => {
   });
 
   // Stores ordering roadmap: Procurement buys for one project.
-  it('needs its project before it saves, and adds a new item with no project of its own', async () => {
+  it('needs its project before it saves, and adds a new item with no project while it has none', async () => {
     form();
     await waitFor(() => expect(optionsOf('Project')).toContain('1369 — Plant upgrade'));
     expect(optionsOf('Project')).not.toContain('No project');
@@ -114,13 +115,13 @@ describe('the new-order form with project material', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByText('Choose the project this order is for.')).toBeInTheDocument();
     expect(mockPost).not.toHaveBeenCalled();
-    // New item opens before a project is chosen: the item gets none, the order says which.
+    // New item opens before a project is chosen: the item gets none until it has one.
     // + New item is on each line's material list, the one place to add one.
     expect(screen.queryByRole('button', { name: 'New item' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
     fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: '__new_item__' } });
     const drawer = await screen.findByRole('dialog', { name: 'New item' });
-    expect(within(drawer).getByText(/added as a Projects item, and goes on line 1; this order says which project it is for/)).toBeInTheDocument();
+    expect(within(drawer).getByText(/added as a Projects item with no project yet, and goes on line 1/)).toBeInTheDocument();
     expect(within(drawer).queryByRole('radio')).not.toBeInTheDocument();
     expect(within(drawer).queryByLabelText('Project')).not.toBeInTheDocument();
   });
