@@ -3,8 +3,35 @@
 // server decides (apps/backend/src/modules/inventory/tool-loan-terms.ts); this
 // only pre-fills the form and labels what GET /tools returns.
 import { useApi } from '../hooks/useApi';
-import { formatDate } from './format';
-import type { LoanState, OpenLoan } from '../api/types';
+import { formatDate, formatNumber } from './format';
+import type { LoanState, OpenLoan, ToolRepairRow } from '../api/types';
+
+/**
+ * A tool write-off that is open, and where it stands (ADR-045): waiting for
+ * approval, or sent back to whoever asked for changes. `to` opens it on
+ * Write-offs to approve.
+ */
+export interface ToolWriteOffState { text: string; tone: 'warning' | 'neutral'; to: string }
+
+const WRITE_OFFS = '/stock/write-offs';
+
+/** A loan's lost tools whose write-off is open, waiting and sent back apart; none when nothing is open. */
+export function lostWriteOffStates(loan: Pick<OpenLoan, 'lostWaiting' | 'lostSentBack'>): ToolWriteOffState[] {
+  const open = Number(loan.lostWaiting ?? 0);
+  const sentBack = Math.min(Number(loan.lostSentBack ?? 0), open);
+  const waiting = Math.round((open - sentBack) * 1e4) / 1e4;
+  const out: ToolWriteOffState[] = [];
+  if (waiting > 0) out.push({ text: `${formatNumber(waiting)} lost: write-off waiting for approval`, tone: 'neutral', to: `${WRITE_OFFS}?status=PENDING` });
+  if (sentBack > 0) out.push({ text: `${formatNumber(sentBack)} lost: write-off sent back for changes`, tone: 'warning', to: `${WRITE_OFFS}?status=CHANGES_REQUESTED` });
+  return out;
+}
+
+/** A repair's write-off, if one is open. A server from before ADR-045 says only that one waits. */
+export function repairWriteOffState(r: Pick<ToolRepairRow, 'writeOffWaiting' | 'writeOffStatus'>): ToolWriteOffState | null {
+  if (r.writeOffStatus === 'CHANGES_REQUESTED') return { text: 'Write-off sent back for changes', tone: 'warning', to: `${WRITE_OFFS}?status=CHANGES_REQUESTED` };
+  if (r.writeOffStatus === 'PENDING' || r.writeOffWaiting) return { text: 'Write-off waiting for approval', tone: 'neutral', to: `${WRITE_OFFS}?status=PENDING` };
+  return null;
+}
 
 /** A calendar day (YYYY-MM-DD) in the app's date format. Read at midday, so no time zone moves it to another day. */
 export const formatDay = (day: string): string => formatDate(`${day}T12:00:00`);

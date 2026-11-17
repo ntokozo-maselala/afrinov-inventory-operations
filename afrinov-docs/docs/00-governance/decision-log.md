@@ -1678,3 +1678,61 @@ Dashboard card is there so it isn't forgotten. A rejection is pointed out for
 7 days only, with no "seen" mark. Days waited are still counted from when the
 request was first asked for.
 Tests: `write-off-approval.real-http.test.ts`, `WriteOffApprovals.test.tsx`.
+
+### ADR-045 — A tool's write-off follows the write-off workflow step for step; posting is a step of its own
+**Date:** 2026-11-17 · **Status:** Accepted
+
+**Context:** A tool is adjusted in two ways of its own: checked in as lost
+(written off against its loan) or, held for repair, written off as damaged.
+Both already became an adjustment request (ADR-028) and so had approval,
+rejection, sending back, withdrawal and history (ADR-044). The owner asked
+for full parity with internal stock write-offs, and the gaps were these: a
+lost tool's request sent back could only take a new note, so one that partly
+turned up had to be withdrawn and the tool checked in again; the Tools page
+said "Write-off waiting for approval" even when it had been sent back, and a
+loan didn't say so at all; the history showed the approval and the posting as
+one step; and whoever asked was told of a rejection or a send-back but not of
+an approval.
+
+**Decision:**
+- **A lost tool's write-off sent back takes a new quantity and note.** Its
+  reason (Loss) and borrower are the loan's and don't change. The quantity is
+  at most what is still out on the loan less other write-offs of it waiting,
+  in whole units, checked under the locks a check-in takes
+  (`ToolLoanService.checkLostAmendment`). Fewer lost means the rest stay on
+  loan, to be checked in. `amendable` on the list says what may change: `ALL`
+  (made by hand), `QUANTITY` (lost on loan) or `NOTE` (a stock count's
+  difference, or a tool held for repair, which is written off whole).
+- **The tool record doesn't change before approval.** As before: a lost tool
+  stays on loan and can't be checked in again; a repair stays held and can't
+  be marked repaired or written off again; this holds while the request is
+  sent back, too (`OPEN_ADJUSTMENT_STATUSES`).
+- **Posting is a step of its own.** Approving writes `APPROVED` and then
+  `COMPLETED` in the same transaction; `COMPLETED` names the movement posted
+  (`transaction_id`) and says what was done (the loan's return and write-off,
+  or the repair closed). Steps written in one transaction share a time, so
+  `seq` keeps them in the order written. Each request already approved gets
+  its `COMPLETED` step by migration.
+- **The steps are distinct.** A request's status is one of `PENDING`,
+  `CHANGES_REQUESTED`, `APPROVED`, `REJECTED` or `WITHDRAWN`; `RESUBMITTED`
+  and `COMPLETED` are steps in its history (a request sent again waits, so its
+  status is `PENDING`; one completed is `APPROVED`).
+- **Every decision reaches whoever asked.** `GET /adjustment-requests/summary`
+  adds `approvedForMe` (approved by someone else in the last 7 days) beside
+  `sentBackToMe` and `rejectedForMe`, and Write-offs to approve points out
+  each.
+- **The Tools page shows where a write-off stands.** A loan shows its lost
+  tools waiting and sent back apart (`lostSentBack`), a repair its
+  `writeOffStatus`, each linking to Write-offs to approve with that status
+  (`?status=`). Write-offs to approve labels a request from a tool ("Tool lost
+  on loan", "Tool held for repair").
+
+Migrations `20260101000071_adjustment_completed_step` (the `COMPLETED` value,
+`seq` and `transaction_id`) and `20260101000072_adjustment_completed_backfill`.
+
+**Consequences:** The same rules, steps and notices apply to a tool's
+write-off and any other adjustment: the workflow is one, not two. A repair
+write-off still can't be reduced in part, as a repair is written off whole.
+`check:units` now counts lost tools sent back as still waiting.
+Tests: `write-off-approval.real-http.test.ts`, `WriteOffApprovals.test.tsx`,
+`Tools.test.tsx`.

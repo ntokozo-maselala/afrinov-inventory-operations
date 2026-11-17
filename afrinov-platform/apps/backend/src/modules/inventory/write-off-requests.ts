@@ -16,10 +16,11 @@ export const OPEN_ADJUSTMENT_STATUSES: AdjustmentRequestStatus[] = [AdjustmentRe
 export async function recordRequestEvent(
   request: Pick<AdjustmentRequest, 'id' | 'quantity' | 'reasonCode' | 'reasonNote' | 'recipientId' | 'value'>,
   kind: AdjustmentRequestEventKind, actorId: string, note: string | null, tx: Prisma.TransactionClient,
+  transactionId: string | null = null,
 ): Promise<void> {
   await tx.adjustmentRequestEvent.create({
     data: {
-      requestId: request.id, kind, actorId, note,
+      requestId: request.id, kind, actorId, note, transactionId,
       quantity: request.quantity, reasonCode: request.reasonCode, reasonNote: request.reasonNote, recipientId: request.recipientId, value: request.value,
     },
   });

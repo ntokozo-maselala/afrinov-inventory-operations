@@ -16,7 +16,7 @@
 // Loans are corrected by checking the tool in or out again, not by reversing
 // the movement (see InventoryService.reverse).
 import { randomUUID } from 'node:crypto';
-import { AdjustmentReasonCode, InventoryTransactionType, Prisma } from '@prisma/client';
+import { AdjustmentReasonCode, AdjustmentRequestStatus, InventoryTransactionType, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { heldForRepair, heldAt, TOOL_REPAIR_REFERENCE } from '../../shared/inventory/tool-repairs.js';
 import { inTx } from '../../shared/tx.js';
@@ -28,7 +28,7 @@ import { loanTerms } from './tool-loan-dates.js';
 import { ReceiptConfirmationService, type ReceiptSummary } from './receipt-confirmation.service.js';
 import { checkWriteOff, recentWriteOffQuantity } from './write-off-limit.js';
 import { checkWholeUnits } from '../../shared/units.js';
-import { pendingLostByLoan, requestAdjustment } from './write-off-requests.js';
+import { pendingLostByLoan, requestAdjustment, OPEN_ADJUSTMENT_STATUSES } from './write-off-requests.js';
 import {
   addDays, currentDueOn, dayOf, daysBetween, defaultDueOn, dueOnAt, dueOnBefore, dueOnProblem, loanDatesOf, loanState, overdueBlocksCheckout,
   type LoanState, type LoanTerms,
@@ -158,6 +158,8 @@ export interface OpenLoan {
   out: string;
   /** Of those out, how many are waiting to be written off as lost (ADR-028): not to be checked in again. */
   lostWaiting: string;
+  /** Of lostWaiting, how many an approver sent back to whoever asked, for changes (ADR-045). */
+  lostSentBack: string;
   checkedOutAt: string;
   checkedOutBy: string;
   note: string | null;
@@ -192,7 +194,13 @@ export interface ToolRow {
   locations: Array<{ locationId: string; locationName: string; quantity: string; heldForRepair: string }>;
   loans: OpenLoan[];
   /** Damaged check-ins waiting to be repaired or written off. */
-  repairs: Array<{ id: string; locationId: string; locationName: string; quantity: string; note: string | null; reportedAt: string; reportedBy: string; writeOffWaiting: boolean }>;
+  repairs: Array<{
+    id: string; locationId: string; locationName: string; quantity: string; note: string | null; reportedAt: string; reportedBy: string;
+    /** A write-off of it is open: waiting for approval, or sent back for changes. */
+    writeOffWaiting: boolean;
+    /** Where that write-off stands (ADR-045); null with none open. */
+    writeOffStatus: 'PENDING' | 'CHANGES_REQUESTED' | null;
+  }>;
 }
 
 /** An overdue loan named when lending more to the same recipient. */
@@ -276,11 +284,17 @@ export const ToolLoanService = {
         orderBy: [{ reportedAt: 'asc' }, { id: 'asc' }],
       }),
     ]);
-    // A write-off of a held tool waiting for approval (ADR-028), by repair.
-    const writeOffWaiting = new Set((await prisma.adjustmentRequest.findMany({
-      where: { status: { in: ['PENDING', 'CHANGES_REQUESTED'] }, referenceType: TOOL_REPAIR_REFERENCE, referenceId: { in: repairs.map((r) => r.id) } },
-      select: { referenceId: true },
-    })).map((r) => r.referenceId!));
+    // A write-off of a held tool waiting for approval or sent back (ADR-028, ADR-045), by repair.
+    const writeOffStatus = new Map((await prisma.adjustmentRequest.findMany({
+      where: { status: { in: OPEN_ADJUSTMENT_STATUSES }, referenceType: TOOL_REPAIR_REFERENCE, referenceId: { in: repairs.map((r) => r.id) } },
+      select: { referenceId: true, status: true },
+    })).map((r) => [r.referenceId!, r.status as 'PENDING' | 'CHANGES_REQUESTED']));
+    // Of a lost tool's write-off waiting, what was sent back for changes, by loan (ADR-045).
+    const lostSentBack = new Map<string, Decimal>();
+    for (const r of await prisma.adjustmentRequest.findMany({
+      where: { status: AdjustmentRequestStatus.CHANGES_REQUESTED, referenceType: TOOL_LOAN_REFERENCE, referenceId: { in: loans.map((l) => l.id) } },
+      select: { referenceId: true, quantity: true },
+    })) lostSentBack.set(r.referenceId!, (lostSentBack.get(r.referenceId!) ?? toDecimal(0)).plus(r.quantity.negated()));
     const today = dayOf(now);
     // Each slip's receipt, from all its lines: a slip may lend several tools.
     const slipLines = new Map<string, Array<{ id: string; quantity: string; reversed: boolean }>>();
@@ -314,6 +328,7 @@ export const ToolLoanService = {
         quantity: lent.toString(),
         out: out.toString(),
         lostWaiting: (lostWaiting.get(l.id) ?? toDecimal(0)).toString(),
+        lostSentBack: (lostSentBack.get(l.id) ?? toDecimal(0)).toString(),
         checkedOutAt: l.postedAt.toISOString(),
         checkedOutBy: l.actor.name,
         note: l.reasonNote,
@@ -353,7 +368,8 @@ export const ToolLoanService = {
         loans: loansOut,
         repairs: repairs.filter((r) => r.materialId === t.id).map((r) => ({
           id: r.id, locationId: r.locationId, locationName: r.location.name, quantity: r.quantity.toString(), note: r.note,
-          reportedAt: r.reportedAt.toISOString(), reportedBy: r.reportedBy.name, writeOffWaiting: writeOffWaiting.has(r.id),
+          reportedAt: r.reportedAt.toISOString(), reportedBy: r.reportedBy.name,
+          writeOffWaiting: writeOffStatus.has(r.id), writeOffStatus: writeOffStatus.get(r.id) ?? null,
         })),
       };
     });
@@ -658,6 +674,32 @@ export const ToolLoanService = {
       await recomputeBalance(storesStock(loan.materialId, loan.locationId), tx);
       return { transactionId: posted.writeOffId };
     });
+  },
+
+  /**
+   * Whether a lost tool's write-off sent back for changes may be amended to
+   * this quantity (ADR-045): more than 0, whole units, and no more than is
+   * still out on its loan less what other write-offs of it are waiting for.
+   * Under the locks a check-in takes, so the two can't both pass. Nothing is
+   * posted: the tool stays on loan until the amended write-off is approved.
+   */
+  async checkLostAmendment(input: { requestId: string; loanId: string; quantity: Decimal }, tx: Tx): Promise<void> {
+    const loan = await tx.inventoryTransaction.findUnique({ where: { id: input.loanId }, include: { material: { select: { sku: true } } } });
+    if (!loan || loan.type !== InventoryTransactionType.LOAN) throw Errors.notFound('Tool check-out');
+    await lock(tx, [`${loan.materialId}:${loan.locationId}`]);
+    await lockInventoryBalances([storesStock(loan.materialId, loan.locationId)], tx);
+    if (!gtZero(input.quantity)) throw Errors.validation('A lost tool\'s write-off must be for at least one.');
+    const own = await tx.adjustmentRequest.findUnique({ where: { id: input.requestId }, select: { quantity: true } });
+    const others = ((await pendingLostByLoan([loan.id], tx)).get(loan.id) ?? toDecimal(0)).minus(own ? own.quantity.negated() : 0);
+    const out = loan.quantity.negated().minus((await returnedByLoan(tx, [loan.id])).get(loan.id) ?? 0).minus(others);
+    if (input.quantity.gt(out)) {
+      const held = gtZero(others) ? ` (${others.toString()} more is waiting to be written off as lost)` : '';
+      throw Errors.insufficientBalance(`Cannot write off ${input.quantity.toString()} × ${loan.material.sku} as lost: only ${out.toString()} is still checked out on that loan${held}.`, {
+        loanId: loan.id, requested: input.quantity.toString(), available: out.toString(),
+      });
+    }
+    await checkMaterialActive(loan.materialId, tx);
+    await checkWholeUnits([{ materialId: loan.materialId, quantity: input.quantity, group: loan.id, remainder: out }], tx);
   },
 
   /**
