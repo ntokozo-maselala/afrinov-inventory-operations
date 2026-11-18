@@ -1753,7 +1753,7 @@ buyer would scroll through every job's material once the platform is in use.
 - **Added for its project.** Adding a Projects item on Materials asks for its
   project (open projects only), and saves it on the item's existing
   `project_number`; it is required there. Edit item can change it until the
-  item has stock movements on that project (`checkMaterialChange` refuses a
+  item has any stock movements, for whichever project (`checkMaterialChange` refuses a
   change after, as before), and can't take it off. An older item with no
   project can be given its first one at any time, even after stock has moved:
   its history names no project, so there is none to keep. An item added from an RFQ or order line (+ New item)

@@ -440,12 +440,13 @@ describe('the item form asks for the section first', () => {
 
   // Cubic, PR #207: a project can be changed but not taken off, so the form mustn't offer it.
   it('offers "No project yet" only to an item that has no project', async () => {
+    // The exact option, once the projects have loaded: "Loading…" mustn't stand in for it.
+    const noneFor = () => within(screen.getByLabelText(/^Project(?!s)/)).findByRole('option', { name: 'No project yet' });
     const { unmount } = form({ initial: projectItem('1369-PIPE', '1369') });
-    const noneFor = () => within(screen.getByLabelText(/^Project(?!s)/)).getByRole('option', { name: /No project yet|Loading/ });
-    expect(noneFor()).toBeDisabled();
+    expect(await noneFor()).toBeDisabled();
     unmount();
     form({ initial: projectItem('OLD-PLATE', null) });
-    expect(noneFor()).toBeEnabled();
+    expect(await noneFor()).toBeEnabled();
   });
 });
 
@@ -503,12 +504,20 @@ describe('a Projects item has no stock status, and names the project only for it
     withStock('1369-PIPE', 'ACTIVE', []);
     detail('m-1369-PIPE');
     const card = (await screen.findByRole('heading', { name: 'Ordering' })).closest('section')!;
-    expect(within(card).getByText(/offered on that project’s RFQs and orders\. The store receives it against its purchase order/)).toBeInTheDocument();
+    expect(within(card).getByText(/Added for project 1369 and offered on its RFQs and orders\. The store receives it against its purchase order/)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Project status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Stock summary' })).not.toBeInTheDocument();
     expect(screen.queryByText('Stock by location')).not.toBeInTheDocument();
     expect(screen.queryByText('Left in the store')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'View in stock' })).not.toBeInTheDocument();
+  });
+
+  // Cubic, PR #207: an older item with no project isn't said to be added for one.
+  it('says an item with no project yet is offered on every project until it is given one', async () => {
+    detail('m-OLD-PLATE');
+    const card = (await screen.findByRole('heading', { name: 'Ordering' })).closest('section')!;
+    expect(within(card).getByText(/Added before items had a project: offered on every project’s RFQs and orders until it is given one\./)).toBeInTheDocument();
+    expect(within(card).queryByText(/Added for project/)).not.toBeInTheDocument();
   });
 
   it('shows what is left in the store from before, for the project it was received for', async () => {
