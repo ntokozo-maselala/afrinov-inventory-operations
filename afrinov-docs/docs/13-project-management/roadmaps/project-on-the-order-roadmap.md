@@ -14,6 +14,14 @@ It amends the [Materials Sections Roadmap](materials-sections-roadmap.md), Phase
 
 > **Amended by ADR-027** ([Project Material Through the Store Roadmap](project-material-through-the-store-roadmap.md), Nov 2026): project material now comes through the store, and the stock carries its project (`held_for_project`), so one item can be held for two projects at once. Leftovers keep their project on the item, as this roadmap left them.
 
+> **Amended by ADR-046** (17 Nov 2026): a Projects item is **added for one project** again. What follows in this roadmap is kept as history where it says otherwise:
+>
+> - "A plain catalogue entry… any project order can use it" and "Ordering another project's item: Allowed": a project's RFQ and order lines now offer that project's items, then those with no project yet, and **not another project's**. The one exception is an item a line already holds when the project changes: it stays listed on that line only, so it can be seen and changed.
+> - "One per material: `PLATE-10MM`, used by any project": a new job gets its own items.
+> - New items get a project: one added on Materials, or with + New item on an RFQ or order line, is for that project (none only while the order has no project yet).
+>
+> Still as this roadmap left it: the order says which project its stock is held for; the "Needs a project" step and its banners stay gone; older items with no project keep working on every project's lines until given one.
+
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | The server takes the project from the order | M | Built (#129) |

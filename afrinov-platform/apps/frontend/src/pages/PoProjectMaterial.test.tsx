@@ -26,6 +26,8 @@ const pipe = (id: string, projectNumber: string, status = 'ACTIVE') => ({
 const MATERIALS = [
   { id: 'm-1', sku: 'DISC', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '10', unitCost: '12.5', active: true },
   pipe('p-1369', '1369'), pipe('p-1402', '1402'), pipe('p-1200', '1200', 'COMPLETED'),
+  // Added before items had a project: offered on every project's lines until given one.
+  { id: 'p-old', sku: 'OLD-VALVE', name: 'Valve', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost: '40', active: true, projectNumber: null, project: null },
 ];
 const PROJECTS = [
   { projectNumber: '1369', name: 'Plant upgrade', active: true, status: 'ACTIVE' },
@@ -69,9 +71,16 @@ describe('the new-order form with project material', () => {
     expect(line2).toContain('1369-PIPE — Pipe for 1369');
     expect(line2).not.toContain('1402-PIPE — Pipe for 1402');
     expect(line2).not.toContain('1200-PIPE — Pipe for 1200');
+    // A Projects item with no project yet is offered too, under its own heading.
+    const noProject = within(screen.getByLabelText('Line 2 material')).getByRole('group', { name: 'No project yet' });
+    expect(within(noProject).getAllByRole('option').map((o) => o.textContent)).toEqual(['OLD-VALVE — Valve']);
 
     // The buyer may still order it for another project: the line keeps the item it holds.
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: '1402' } });
+    expect(optionsOf('Line 1 material')).toContain('1369-PIPE — Pipe for 1369');
+    // Cubic, PR #207: only on the line that holds it; the other lines offer 1402's items and none of 1369's.
+    expect(optionsOf('Line 2 material')).toContain('1402-PIPE — Pipe for 1402');
+    expect(optionsOf('Line 2 material')).not.toContain('1369-PIPE — Pipe for 1369');
     fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '4' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));

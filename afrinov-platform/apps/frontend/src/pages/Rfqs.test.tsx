@@ -174,6 +174,32 @@ describe('New request for quotation', () => {
     expect(within(select).queryByRole('option', { name: /1402-PIPE/ })).not.toBeInTheDocument();
   });
 
+  // Cubic, PR #207: another project's item stays listed on the line that holds it, and only there.
+  it("keeps another project's item on the line that holds it after the project changes, and on no other line", async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/materials') return [
+        ...(await base(path)) as unknown[],
+        { id: 'm-other', sku: '1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', requiredStock: '0', active: true, projectNumber: '1402', project: { projectNumber: '1402', status: 'ACTIVE' } },
+      ];
+      if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1325', name: 'Door rails', status: 'ACTIVE' }, { projectNumber: '1402', name: 'Boiler', status: 'ACTIVE' }];
+      return base(path);
+    });
+    appAt('/rfqs/new');
+    await chooseProject('1402');
+    const line1 = await screen.findByLabelText('Line 1 item');
+    await within(line1).findByRole('option', { name: /1402-PIPE/ });
+    fireEvent.change(line1, { target: { value: 'm-other' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Project'), { target: { value: 'AFRI-1325' } });
+
+    expect(within(line1).getByRole('group', { name: 'Another project’s, on a line already' })).toContainElement(within(line1).getByRole('option', { name: /1402-PIPE/ }));
+    expect(within(screen.getByLabelText('Line 2 item')).queryByRole('option', { name: /1402-PIPE/ })).not.toBeInTheDocument();
+    // Once the line takes another item, the old project's is no longer offered.
+    fireEvent.change(line1, { target: { value: 'm-1' } });
+    expect(within(line1).queryByRole('option', { name: /1402-PIPE/ })).not.toBeInTheDocument();
+  });
+
   it("doesn't offer inactive items, which the server would refuse", async () => {
     appAt('/rfqs/new');
     await chooseProject();

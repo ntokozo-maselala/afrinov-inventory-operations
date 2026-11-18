@@ -176,11 +176,16 @@ export function MaterialForm({ initial, section: startSection = 'STORES', catego
           label="Project"
           htmlFor="m-project"
           required={!editing}
-          help={editing ? 'The project the item is bought for. It can change until the item has stock movements.' : 'The project the item is bought for. It is offered on that project’s RFQs and orders.'}
+          help={editing
+            ? (initial?.projectNumber
+              ? 'The project the item is bought for. It can change to another project until the item has stock movements.'
+              : 'The project the item is bought for. An item with no project yet can be given one at any time.')
+            :'The project the item is bought for. It is offered on that project’s RFQs and orders.'}
           error={projectsReq.error ? "Couldn't load the projects." : null}
         >
           <Select id="m-project" value={projectNumber} onChange={(e) => setProjectNumber(e.target.value)} invalid={!!validation && !editing && !projectNumber}>
-            <option value="">{projectsReq.loading ? 'Loading…' : editing ? 'No project yet' : 'Choose the project…'}</option>
+            {/* An item's project can be changed but not taken off, so an item with one can't go back to none. */}
+            <option value="" disabled={!!initial?.projectNumber}>{projectsReq.loading ? 'Loading…' : editing ? 'No project yet' : 'Choose the project…'}</option>
             {projectChoices.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` — ${p.name}` : ''}</option>)}
           </Select>
         </Field>

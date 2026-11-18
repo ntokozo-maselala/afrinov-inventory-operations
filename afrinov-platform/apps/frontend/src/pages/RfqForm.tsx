@@ -125,7 +125,9 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
 
   // The RFQ's project is the buyer's choice; no line fixes it.
   const project = projectChoice;
-  const lineMaterials = itemsForProject(materials, project, new Set([...held, ...lines.map((l) => l.materialId)]));
+  // Each line's own list: another project's item is offered only on the line
+  // that holds it now, never on the others, and not once it is changed.
+  const lineMaterials = (materialId: string) => itemsForProject(materials, project, new Set([materialId]));
   const groups = itemGroupLabels(project);
   const projects = (projectsReq.data ?? []).filter((p) => p.status !== 'COMPLETED' && p.status !== 'CANCELLED');
   const projectOptions = project && !projects.some((p) => p.projectNumber === project) ? [...projects, { projectNumber: project, name: null }] : projects;
@@ -254,6 +256,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
           <div className="space-y-2">
             {lines.map((l, i) => {
               const item = catalogue.find((m) => m.id === l.materialId);
+              const offeredItems = lineMaterials(l.materialId);
               return (
                 <div key={l.key} className={`${LINE_GRID} items-start`}>
                   <output aria-label={`Line ${i + 1} item number`} className="hidden md:block py-2 text-sm text-right font-mono text-surface-500">{i + 1}</output>
@@ -265,7 +268,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
                       {project && canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
                       {/* An inactive item isn't quoted for; one a draft already holds stays listed so it can be changed. */}
                       {GROUPS.map((key) => {
-                        const offered = lineMaterials[key].filter((m) => m.active || m.id === l.materialId);
+                        const offered = offeredItems[key].filter((m) => m.active || m.id === l.materialId);
                         return offered.length === 0 ? null : (
                           <optgroup key={key} label={groups[key]}>
                             {offered.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}{m.active ? '' : ' (inactive)'}</option>)}

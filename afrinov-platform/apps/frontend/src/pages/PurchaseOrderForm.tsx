@@ -196,7 +196,9 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   // A Stores order offers every Stores item. A project order narrows to its
   // project's items once it has one (ADR-046); until then it offers them all.
   const grouped = !stores && !!orderProject;
-  const lineMaterials = grouped ? itemsForProject(materials, orderProject, new Set(lines.map((l) => l.materialId))) : { own: materials, unassigned: [] as Material[], held: [] as Material[] };
+  // Each line's own list: another project's item is offered only on the line
+  // that holds it now, never on the others, and not once it is changed.
+  const lineMaterials = (materialId: string) => (grouped ? itemsForProject(materials, orderProject, new Set([materialId])) : { own: materials, unassigned: [] as Material[], held: [] as Material[] });
   const groups = itemGroupLabels(orderProject);
   // Each row's subtotal, for its Subtotal column (blank until it has a quantity and a price).
   const rowMoney = priceLines(lines.map((l) => ({ ...l, orderedQty: readQuantity(l.orderedQty) > 0 ? readQuantity(l.orderedQty) : 0 })), Number(vatRate) || 0).lines;
@@ -271,7 +273,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const [newItemFor, setNewItemFor] = useState<NewItemSession | null>(null);
   const openFor = useRef<NewItemSession | null>(null);
   function openNewItem(key: number) { const s = { key, session: nextSession++ }; openFor.current = s; setNewItemFor(s); }
-  // The new item is a Projects item with no project of its own: the order says which project it is for.
+  // The new item is a Projects item for the order's project, or none yet if the order has none (ADR-046).
   function startNewItem(key: number) {
     openNewItem(key);
   }
@@ -445,13 +447,16 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                     <option value="">Material…</option>
                     {/* Not in the catalogue yet: added from the line, for the order's project (ADR-046). */}
                     {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
-                    {!grouped
-                      ? lineMaterials.own.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)
-                      : GROUPS.map((key) => (lineMaterials[key].length === 0 ? null : (
-                        <optgroup key={key} label={groups[key]}>
-                          {lineMaterials[key].map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
-                        </optgroup>
-                      )))}
+                    {(() => {
+                      const offered = lineMaterials(l.materialId);
+                      return !grouped
+                        ? offered.own.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)
+                        : GROUPS.map((key) => (offered[key].length === 0 ? null : (
+                          <optgroup key={key} label={groups[key]}>
+                            {offered[key].map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
+                          </optgroup>
+                        )));
+                    })()}
                   </Select>
                 </div>
                 <div className="col-span-3 md:col-span-1">

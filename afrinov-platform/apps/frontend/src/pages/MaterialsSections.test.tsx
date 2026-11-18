@@ -227,7 +227,8 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
     it('filters by project from the address, an item serving two projects under both', async () => {
       withOrders(() => ORDERED);
       list('/materials?section=PROJECTS&orderedFor=1402');
-      await screen.findAllByRole('link', { name: '1402' });
+      // The filter shows once the orders have loaded; a 1402 link can show before, in the Project column.
+      await screen.findByLabelText('Ordered for');
       expect([...skus()].sort()).toEqual(['1369-PIPE', '1402-BOLT']);
       expect(screen.getByLabelText('Ordered for')).toHaveValue('1402');
       expect(screen.getByRole('option', { name: '1369 · Plant upgrade' })).toBeInTheDocument();
@@ -236,8 +237,7 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
     it('filters to what is on no order yet', async () => {
       withOrders(() => ORDERED);
       list('/materials?section=PROJECTS');
-      await screen.findAllByRole('link', { name: '1402' });
-      fireEvent.change(screen.getByLabelText('Ordered for'), { target: { value: 'none' } });
+      fireEvent.change(await screen.findByLabelText('Ordered for'), { target: { value: 'none' } });
       expect(skus()).toEqual(['OLD-PLATE']);
     });
 
@@ -437,6 +437,16 @@ describe('the item form asks for the section first', () => {
     await waitFor(() => expect(mockPatch).toHaveBeenCalled());
     expect(mockPatch.mock.calls[0]![1]).toMatchObject({ projectNumber: '1402' });
   });
+
+  // Cubic, PR #207: a project can be changed but not taken off, so the form mustn't offer it.
+  it('offers "No project yet" only to an item that has no project', async () => {
+    const { unmount } = form({ initial: projectItem('1369-PIPE', '1369') });
+    const noneFor = () => within(screen.getByLabelText(/^Project(?!s)/)).getByRole('option', { name: /No project yet|Loading/ });
+    expect(noneFor()).toBeDisabled();
+    unmount();
+    form({ initial: projectItem('OLD-PLATE', null) });
+    expect(noneFor()).toBeEnabled();
+  });
 });
 
 const detail = (id: string) => render(
@@ -493,7 +503,7 @@ describe('a Projects item has no stock status, and names the project only for it
     withStock('1369-PIPE', 'ACTIVE', []);
     detail('m-1369-PIPE');
     const card = (await screen.findByRole('heading', { name: 'Ordering' })).closest('section')!;
-    expect(within(card).getByText(/its purchase order, which says which project it is for/)).toBeInTheDocument();
+    expect(within(card).getByText(/offered on that project’s RFQs and orders\. The store receives it against its purchase order/)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Project status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Stock summary' })).not.toBeInTheDocument();
     expect(screen.queryByText('Stock by location')).not.toBeInTheDocument();

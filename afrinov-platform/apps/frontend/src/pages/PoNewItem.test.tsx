@@ -96,6 +96,8 @@ describe('+ New item on an order line', () => {
   });
 
   it('adds an item with no project yet when the order has none chosen', async () => {
+    // As the server answers: sent with no project, it is saved with none.
+    mockPost.mockImplementation(async (path: string) => (path === '/materials' ? created({ sku: 'FLANGE', projectNumber: null, project: null }) : { id: 'po-1', number: 'AFRI-0001' }));
     renderForm();
     await waitFor(() => expect(screen.getByRole('option', { name: /1369 — Plant upgrade/ })).toBeInTheDocument());
     // No project chosen: the line opens New item straight away.
@@ -108,6 +110,8 @@ describe('+ New item on an order line', () => {
     fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new'));
     expect((mockPost.mock.calls.find((c) => c[0] === '/materials')![1] as { projectNumber?: string }).projectNumber).toBeUndefined();
+    // An item with no project suggests none, so the order is still without one.
+    expect(screen.getByLabelText('Project')).toHaveValue('');
   });
 
   // Review: the line kept the price of the item it held before.
