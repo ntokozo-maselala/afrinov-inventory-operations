@@ -28,6 +28,8 @@ enum RoleName {
   CEO
   WORKSHOP_MANAGER
   SALES
+  // Approves Sales RFQs, the Director standing in (ADR-047).
+  SALES_MANAGER
 }
 
 // The signatures an order can need, in the order they are signed.

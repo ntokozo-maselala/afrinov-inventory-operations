@@ -46,7 +46,7 @@ const DEMO_USER: AuthUser = {
   id: 'demo-vusi',
   email: 'Vusi@afrinov.co.za',
   name: 'Vusi (Demo)',
-  roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES'],
+  roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES', 'SALES_MANAGER'],
 };
 
 // Default user used by the mock `/auth/me` endpoint. We mirror its name
@@ -56,7 +56,7 @@ const MOCK_DEV_USER: AuthUser = {
   id: 'user-1',
   email: 'admin@afrinov.local',
   name: 'System Administrator (dev)',
-  roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES'],
+  roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES', 'SALES_MANAGER'],
 };
 
 function unauthenticated(message = 'Invalid email or password. Please check your credentials and try again.'): ApiError {

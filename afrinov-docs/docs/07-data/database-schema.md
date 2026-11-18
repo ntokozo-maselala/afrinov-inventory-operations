@@ -16,7 +16,7 @@ Quantities and money are `DECIMAL(18,4)`.
 | `user_roles` (UserRole) | user_id, role_id | composite PK; cascade on delete |
 | `role_permissions` (RolePermission) | role_id, permission_id | composite PK; cascade on delete |
 
-`RoleName`: ADMIN, STORE_CONTROLLER, PROCUREMENT, APPROVER, TECHNICIAN, VIEWER, PROCUREMENT_MANAGER, DIRECTOR, CEO, WORKSHOP_MANAGER, SALES.
+`RoleName`: ADMIN, STORE_CONTROLLER, PROCUREMENT, APPROVER, TECHNICIAN, VIEWER, PROCUREMENT_MANAGER, DIRECTOR, CEO, WORKSHOP_MANAGER, SALES, SALES_MANAGER (ADR-047).
 
 ## Master data
 | Table (model) | Key columns | Constraints and notes |

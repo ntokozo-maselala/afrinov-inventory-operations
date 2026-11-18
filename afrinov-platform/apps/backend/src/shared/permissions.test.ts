@@ -22,14 +22,15 @@ describe('RolePermissions', () => {
 
   it('shows Sales prices only to Sales, the managers who oversee margin, and admins', () => {
     const holders = (code: string) => Object.entries(RolePermissions).filter(([, p]) => (p as string[]).includes(code)).map(([role]) => role).sort();
-    expect(holders(PermissionCode.ViewSalesRfq)).toEqual(['ADMIN', 'CEO', 'DIRECTOR', 'PROCUREMENT_MANAGER', 'SALES']);
-    expect(holders(PermissionCode.ManageSalesRfq)).toEqual(['ADMIN', 'SALES']);
+    expect(holders(PermissionCode.ViewSalesRfq)).toEqual(['ADMIN', 'CEO', 'DIRECTOR', 'PROCUREMENT_MANAGER', 'SALES', 'SALES_MANAGER']);
+    expect(holders(PermissionCode.ManageSalesRfq)).toEqual(['ADMIN', 'SALES', 'SALES_MANAGER']);
     expect(RolePermissions.SALES).not.toContain(PermissionCode.ViewPurchaseOrder);
   });
 
   it('leaves approving a Sales price to the Director, and the labour rates to the Workshop Manager', () => {
     const holders = (code: string) => Object.entries(RolePermissions).filter(([, p]) => (p as string[]).includes(code)).map(([role]) => role).sort();
-    expect(holders(PermissionCode.ApproveSalesRfq)).toEqual(['ADMIN', 'DIRECTOR']);
+    // ADR-047: the Sales Manager, the Director standing in.
+    expect(holders(PermissionCode.ApproveSalesRfq)).toEqual(['ADMIN', 'DIRECTOR', 'SALES_MANAGER']);
     expect(holders(PermissionCode.ManageLabourRates)).toEqual(['ADMIN', 'WORKSHOP_MANAGER']);
   });
 

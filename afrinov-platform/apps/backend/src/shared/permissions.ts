@@ -58,7 +58,8 @@ export const PermissionCode = {
   // its own permission, not the purchase order one buyers hold.
   ViewSalesRfq: 'view:sales_rfq',
   ManageSalesRfq: 'manage:sales_rfq',
-  // The Director approves a Sales RFQ's price before it goes to the client.
+  // The Sales Manager approves a Sales RFQ's price before it goes to the client,
+  // the Director standing in (ADR-047).
   ApproveSalesRfq: 'approve:sales_rfq',
   // The hourly selling rates Sales prices labour at; the Workshop Manager keeps them.
   ManageLabourRates: 'manage:labour_rates',
@@ -136,6 +137,15 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
   SALES: [
     PermissionCode.ViewSalesRfq,
     PermissionCode.ManageSalesRfq,
+    PermissionCode.ManageProjects,
+    PermissionCode.ViewReports,
+  ],
+  // Sales' own manager approves the price (ADR-047), and can price a job too;
+  // never one they raised or submitted.
+  SALES_MANAGER: [
+    PermissionCode.ViewSalesRfq,
+    PermissionCode.ManageSalesRfq,
+    PermissionCode.ApproveSalesRfq,
     PermissionCode.ManageProjects,
     PermissionCode.ViewReports,
   ],

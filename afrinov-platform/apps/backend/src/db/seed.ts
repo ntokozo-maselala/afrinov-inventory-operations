@@ -26,7 +26,7 @@ import { recomputeBalancesFor } from '../modules/inventory/balances.js';
 import { prisma } from '../shared/db.js';
 import { seedPlan } from './seed-plan.js';
 
-type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES';
+type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES' | 'SALES_MANAGER';
 
 
 interface DemoMaterial {

@@ -1,10 +1,10 @@
 // Sales RFQs: how Sales prices a job for a client in one or more equipment
 // lines, each from the production labour at the listed rates, the project's
-// Procurement quotes and other costs, with the job's markup. The Director
-// approves the price, and its quotation then goes to the client.
+// Procurement quotes and other costs, with the job's markup. The Sales Manager
+// approves the price (the Director standing in, ADR-047), and its quotation then goes to the client.
 //
 // The list lands on the ones still in hand (drafts and those waiting for the
-// Director); the Director's "Waiting for my approval" is the status filter. A
+// Sales Manager); an approver who prices nothing lands on "Waiting for my approval". A
 // Sales RFQ's page shows each equipment line's costing, its quotation details
 // and its Activity, with the actions its status and the viewer allow.
 import { useState } from 'react';
@@ -34,7 +34,7 @@ import { QUOTATION_SETTINGS, downloadQuotation, quotationCompanyFromSettings } f
 
 const LIST = { label: 'Sales RFQs', to: '/sales-rfqs' };
 
-/** Drafts and those waiting for the Director: the default view. */
+/** Drafts and those waiting for the Sales Manager: the default view. */
 const IN_HAND = 'DRAFT,PENDING_APPROVAL';
 
 const STATUS_OPTIONS = [
@@ -62,7 +62,7 @@ export function SalesRfqs() {
   const [q, setQ] = useState('');
   const [params, setParams] = useSearchParams();
   const rawStatus = params.get('status');
-  // The Director lands on what waits for them; Sales on what it still has in hand.
+  // An approver who prices nothing (the Director) lands on what waits for them; Sales on what it still has in hand.
   const defaultStatus = canApprove && !canManage ? 'PENDING_APPROVAL' : IN_HAND;
   const status = rawStatus === null ? defaultStatus : rawStatus === 'all' ? '' : rawStatus;
   const statuses = status ? status.split(',') : [];
@@ -79,7 +79,7 @@ export function SalesRfqs() {
     <div>
       <PageHeader
         title="Sales RFQs"
-        description="Price a piece of equipment for the client: the labour at the listed rates, the material from the project's approved orders, and the job's markup. The Director approves the price before the quotation goes out. Only Sales and senior managers see these."
+        description="Price a piece of equipment for the client: the labour at the listed rates, the material from the project's approved orders, and the job's markup. The Sales Manager approves the price before the quotation goes out. Only Sales and senior managers see these."
         actions={canManage ? <Link to="/sales-rfqs/new" className="btn-primary"><Icon.Plus size={14} /> New Sales RFQ</Link> : undefined}
       />
       <Toolbar
@@ -315,7 +315,7 @@ export function SalesRfqDetail() {
       {r && dialog === 'submit' && (
         <ConfirmDialog
           title={`Submit ${r.number} for approval?`}
-          description={`It goes to the Director at ${formatMoney(r.totals.totalExVat)} excl. VAT. Its quotes' amounts and the VAT rate are fixed as they are now, and it can't be edited unless the Director sends it back.`}
+          description={`It goes to the Sales Manager at ${formatMoney(r.totals.totalExVat)} excl. VAT. Its quotes' amounts and the VAT rate are fixed as they are now, and it can't be edited unless the Sales Manager sends it back.`}
           confirm="Submit" onClose={() => setDialog(null)}
           onConfirm={() => act('{n} submitted for approval', () => api.post<SalesRfq>(`/sales-rfqs/${r.id}/submit`))}
         />
@@ -381,7 +381,7 @@ function markupWords(r: SalesRfq): string {
 
 /**
  * One equipment line: what the quotation prints for it, then what it costs for
- * one unit (labour, quotes, other costs) and its price, so the Director can
+ * one unit (labour, quotes, other costs) and its price, so the Sales Manager can
  * trace each figure on the quotation.
  */
 function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipmentLine; r: SalesRfq; canEdit: boolean; linked: boolean }) {

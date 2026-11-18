@@ -9,7 +9,7 @@
 // (sales-costing.ts).
 //
 // New and Edit share it; only a draft is edited. Saving opens the Sales RFQ,
-// where it is submitted to the Director.
+// where it is submitted to the Sales Manager.
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -103,7 +103,7 @@ export function EditSalesRfq() {
       <div>
         <PageHeader title={`Edit ${rfq.data.number}`} breadcrumb={[RFQS, { label: rfq.data.number, to: `/sales-rfqs/${rfq.data.id}` }, { label: 'Edit' }]} />
         <Alert tone="info" title="Only a draft is edited" className="max-w-2xl">
-          {rfq.data.status === 'PENDING_APPROVAL' ? 'It is with the Director. They can send it back to you to change.' : 'It is no longer a draft.'}{' '}
+          {rfq.data.status === 'PENDING_APPROVAL' ? 'It is with the Sales Manager. They can send it back to you to change.' : 'It is no longer a draft.'}{' '}
           <Link to={`/sales-rfqs/${rfq.data.id}`} className="btn-link">Back to {rfq.data.number}</Link>
         </Alert>
       </div>
@@ -298,7 +298,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
     <div>
       <PageHeader
         title={rfq ? `Edit ${rfq.number}` : 'New Sales RFQ'}
-        description="Price the job for the client, one equipment line at a time. Save it as a draft, then submit it to the Director from its page."
+        description="Price the job for the client, one equipment line at a time. Save it as a draft, then submit it to the Sales Manager from its page."
         breadcrumb={rfq ? [RFQS, { label: rfq.number, to: back }, { label: 'Edit' }] : [RFQS, { label: 'New' }]}
       />
       <form onSubmit={(e) => { e.preventDefault(); void save(); }} className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start" noValidate>
@@ -315,7 +315,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
               <Field label="Price due" htmlFor="srfq-closing" help="When the client wants the price by.">
                 <Input id="srfq-closing" type="date" value={closingDate} onChange={(e) => setClosingDate(e.target.value)} />
               </Field>
-              <Field label="Description" htmlFor="srfq-description" help={rfq ? 'For Sales and the Director; not on the quotation.' : "For Sales and the Director; not on the quotation. Left blank, it takes the project's name."}>
+              <Field label="Description" htmlFor="srfq-description" help={rfq ? 'For Sales and the Sales Manager; not on the quotation.' : "For Sales and the Sales Manager; not on the quotation. Left blank, it takes the project's name."}>
                 <Input id="srfq-description" maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
               </Field>
             </div>
@@ -414,7 +414,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
             </Field>
           </fieldset>
 
-          <Field label="Remarks" htmlFor="srfq-notes" help="For Sales and the Director; not on the quotation.">
+          <Field label="Remarks" htmlFor="srfq-notes" help="For Sales and the Sales Manager; not on the quotation.">
             <Textarea id="srfq-notes" rows={3} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
 
@@ -637,7 +637,7 @@ function EquipmentLineCard({
           ))}
         </ul>
         <div className="flex items-center justify-between pt-1">
-          <p className="text-meta">An allowance: material estimated before a supplier quotes, e.g. anticipated spares. Counted as material; the Director sees it as an estimate.</p>
+          <p className="text-meta">An allowance: material estimated before a supplier quotes, e.g. anticipated spares. Counted as material; the Sales Manager sees it as an estimate.</p>
           <Button size="sm" variant="secondary" type="button" onClick={() => onChange((l) => ({ allowances: [...l.allowances, blankAllowance()] }))} leadingIcon={<Icon.Plus size={12} />} aria-label={`Add allowance to ${name}`}>Add allowance</Button>
         </div>
         {line.allowances.length > 0 && (

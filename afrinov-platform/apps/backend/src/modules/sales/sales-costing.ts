@@ -1,4 +1,4 @@
-// The money on a Sales RFQ, worked out in one place so the page, the Director's
+// The money on a Sales RFQ, worked out in one place so the page, the Sales Manager's
 // approval and the quotation show the same figures. All rand, excl. VAT until
 // the last two.
 //

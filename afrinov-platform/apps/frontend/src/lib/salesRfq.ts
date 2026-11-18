@@ -206,7 +206,7 @@ export const SALES_STATUS_LABEL: Record<SalesRfqStatus, string> = {
   CANCELLED: 'Cancelled',
 };
 
-/** Whether this person may approve it: the Director, and never one they raised or submitted. */
+/** Whether this person may approve it: the Sales Manager or the Director standing in, and never one they raised or submitted. */
 export function mayApprove(r: Pick<SalesRfq, 'status' | 'createdById' | 'createdBy' | 'submittedById' | 'submittedBy'>, userId: string | undefined, canApprove: boolean): boolean {
   if (!canApprove || r.status !== 'PENDING_APPROVAL' || !userId) return false;
   const raised = r.createdById ?? r.createdBy?.id;

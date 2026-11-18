@@ -7,7 +7,7 @@ import { newPasswordSchema } from './auth.routes.js';
 import { listSignIns, SIGN_IN_OUTCOMES } from './sign-in-log.js';
 import { Errors } from '../../shared/errors.js';
 
-const ROLE_NAMES = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES'] as const;
+const ROLE_NAMES = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES', 'SALES_MANAGER'] as const;
 
 export const createUserSchema = z.object({
   email: z.email(),

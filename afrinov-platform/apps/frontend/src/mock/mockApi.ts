@@ -2865,7 +2865,7 @@ function devUser(): MockUser {
     id: 'user-1',
     email: 'admin@afrinov.local',
     name: 'System Administrator (dev)',
-    roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES'],
+    roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES', 'SALES_MANAGER'],
   };
 }
 
@@ -4229,7 +4229,7 @@ interface MockAdminUser {
   name: string;
   active: boolean;
   createdAt: string;
-  roles: Array<{ role: { name: 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES' } }>;
+  roles: Array<{ role: { name: 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES' | 'SALES_MANAGER' } }>;
   /** Largest order (rand, incl. VAT) they may approve; null: no limit. */
   approvalLimit?: string | null;
 }

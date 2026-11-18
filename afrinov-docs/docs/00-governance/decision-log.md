@@ -1736,3 +1736,39 @@ write-off still can't be reduced in part, as a repair is written off whole.
 `check:units` now counts lost tools sent back as still waiting.
 Tests: `write-off-approval.real-http.test.ts`, `WriteOffApprovals.test.tsx`,
 `Tools.test.tsx`.
+
+### ADR-047 — The Sales Manager approves a Sales RFQ's price; the Director stands in
+**Date:** 2026-11-18 · **Status:** Accepted
+
+**Context:** A Sales RFQ is the client costing: Sales prices the job and
+submits it, and until now the Director approved the price before the
+quotation went out (`approve:sales_rfq`). The owner asked that the Sales
+Manager approve Sales costings instead, as the person who answers for what
+Sales quotes. There was no Sales Manager role.
+
+**Decision:**
+- **A Sales Manager role.** `RoleName` gains `SALES_MANAGER`, holding
+  `view:sales_rfq`, `manage:sales_rfq`, `approve:sales_rfq`,
+  `manage:projects` and `view:reports`: what Sales holds, plus approving the
+  price. Like Sales, it reads the labour rates and has no suppliers, purchase
+  orders or Procurement RFQs.
+- **The Sales Manager approves, or sends back with a reason.** The Director
+  keeps `approve:sales_rfq` and stands in, as for project issues (ADR-043);
+  no stand-in flag is kept, as the approver's name is on the record. Admin
+  holds the permission as it holds all of them.
+- **Never their own.** The Sales Manager may raise and price a job too, but
+  can't approve one they raised or submitted: someone else approves it (the
+  Director, or another Sales Manager). The existing check is unchanged.
+- **Wording.** Screens, messages and the submit confirmation say "the Sales
+  Manager" where they said "the Director". A Sales Manager lands on Sales RFQs
+  still in hand (drafts and those waiting); the Director, who prices nothing,
+  still lands on what waits for their approval.
+
+Migrations `20260101000073_sales_manager_role` (the enum value, which
+Postgres can't use in the transaction that adds it) and
+`20260101000074_sales_manager_rights` (the role and its permissions). The
+seed creates the role from `RolePermissions`.
+
+**Consequences:** An Admin gives the Sales Manager role to whoever runs Sales
+(Settings > Users). Until someone holds it, the Director approves as before.
+Tests: `permissions.test.ts`, `usePermissions.test.tsx`.

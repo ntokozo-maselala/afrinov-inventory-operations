@@ -194,10 +194,12 @@ describe('usePermissions — the role check sheet', () => {
     PROCUREMENT: ['materials:create', 'materials:cost', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
     // What a job is priced at is kept from buyers and the store. Sales no longer deals with suppliers.
     SALES: ['sales:view', 'sales:manage', 'projects:manage', 'labourRates:view'],
+    // Sales' own manager approves the price, the Director standing in (ADR-047).
+    SALES_MANAGER: ['sales:view', 'sales:manage', 'sales:approve', 'projects:manage', 'labourRates:view'],
     // View only: orders are signed by the roles below.
     APPROVER: ['orders:view'],
     PROCUREMENT_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view', 'sales:view', 'labourRates:view'],
-    // The Director approves a Sales RFQ's price.
+    // The Director stands in for the Sales Manager on a Sales RFQ's price (ADR-047).
     // The Director stands in for the Workshop Manager on project issues (ADR-043).
     DIRECTOR: ['orders:approve', 'orders:view', 'sales:view', 'sales:approve', 'labourRates:view', 'issues:approve', 'issues:view'],
     CEO: ['orders:approve', 'orders:view', 'sales:view', 'labourRates:view'],

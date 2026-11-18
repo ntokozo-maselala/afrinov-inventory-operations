@@ -1,5 +1,5 @@
 // Sales requests for quotation: how Sales prices a job for the client, and the
-// quotation that goes out once the Director approves the price.
+// quotation that goes out once the Sales Manager approves the price.
 //
 // It is the "Costing: Sales Rep." step of the RFQ Process Flow
 // (AFRI-03A-06-SOP-001), after Material Quotes (Procurement) and Labour
@@ -15,9 +15,9 @@
 //
 // State machine: DRAFT → PENDING_APPROVAL → APPROVED, with CANCELLED from any of
 // them. Only a draft is edited. Submitting fixes the figures: each quote's
-// amount and the VAT rate are taken then, so the Director approves what Sales
+// amount and the VAT rate are taken then, so the Sales Manager approves what Sales
 // saw, and a quote corrected afterwards doesn't move an approved price. The
-// Director approves it, which gives it its quotation reference and date, or
+// Sales Manager (or the Director standing in) approves it, which gives it its quotation reference and date, or
 // sends it back to draft with a reason. Nobody approves one they raised or
 // submitted. Every change is written to the audit log (entity type SalesRfq).
 import { Prisma, type SalesRfqStatus } from '@prisma/client';
@@ -404,7 +404,7 @@ const STATUS_WORDS: Record<SalesRfqStatus, string> = {
   DRAFT: 'a draft', PENDING_APPROVAL: 'waiting for approval', APPROVED: 'approved', CANCELLED: 'cancelled',
 };
 
-/** What a draft still needs before it goes to the Director, in plain words. */
+/** What a draft still needs before it goes to the Sales Manager, in plain words. */
 function stillNeeded(rfq: Detail): string[] {
   const lines = rfq.equipmentLines;
   const one = lines.length === 1;
@@ -545,7 +545,7 @@ export const SalesRfqService = {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:rfq-number'))`;
       const rfq = await held(input.id, tx);
       if (rfq.status !== 'DRAFT') {
-        throw Errors.invalidState(`${rfq.number} is ${STATUS_WORDS[rfq.status]}, so it can't be edited${rfq.status === 'PENDING_APPROVAL' ? '. The Director can send it back to you.' : ''}`, { status: rfq.status });
+        throw Errors.invalidState(`${rfq.number} is ${STATUS_WORDS[rfq.status]}, so it can't be edited${rfq.status === 'PENDING_APPROVAL' ? '. The Sales Manager can send it back to you.' : ''}`, { status: rfq.status });
       }
       const data: Prisma.SalesRfqUncheckedUpdateInput = {};
       const before: Record<string, unknown> = {};
@@ -608,7 +608,7 @@ export const SalesRfqService = {
   },
 
   /**
-   * Sends a draft to the Director. Each equipment line needs its name and
+   * Sends a draft to the Sales Manager. Each equipment line needs its name and
    * something to price it; the Sales RFQ needs the client and a markup on every line (its own or the job's). Each
    * quote is valued again and that amount kept, and the VAT rate of the day is
    * fixed on it.
@@ -653,7 +653,7 @@ export const SalesRfqService = {
   },
 
   /**
-   * The Director approves the price: it is issued today with the project's next
+   * The Sales Manager (or the Director standing in) approves the price: it is issued today with the project's next
    * quotation reference.
    *
    * @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is waiting for
@@ -677,7 +677,7 @@ export const SalesRfqService = {
     return SalesRfqService.getById(id);
   },
 
-  /** The Director sends it back to Sales as a draft, saying why. @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is waiting for approval. */
+  /** The Sales Manager sends it back to Sales as a draft, saying why. @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is waiting for approval. */
   async sendBack(id: string, reason: string, actorId: string) {
     const why = cleanText(reason);
     if (!why) throw Errors.validation('Say what Sales should change');
