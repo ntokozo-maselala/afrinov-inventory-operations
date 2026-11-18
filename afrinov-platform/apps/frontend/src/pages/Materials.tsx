@@ -3,11 +3,11 @@
 // up to the whole, and each item says how much stock it has and where (ADR-031).
 // Stock counts lines and Tools its active tools, so this is the one page that
 // counts every item. The tab is in the link (?section=PROJECTS). A Projects item
-// has no project of its own: the order it is bought on says which (Project on
-// the Order Roadmap, Phase 3), and one item can serve several projects. So the
-// Projects tab shows "Ordered for", the projects of the orders it is on, and
-// filters by it (?orderedFor=), with no "needs a project" step; an older
-// ?project= link opens the whole Projects tab.
+// is added for one project, or has none yet if it was added before items had one
+// (ADR-046); its order says which project the stock is held for, which can be
+// another. So the Projects tab shows the item's Project and "Ordered for", the
+// projects of the orders it is on, and filters by the latter (?orderedFor=); an
+// older ?project= link opens the whole Projects tab.
 import { useMemo, useState, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -64,14 +64,14 @@ const DESCRIPTIONS: Record<Tab, string> = {
   ALL: 'Every item in the catalogue, whether or not it has ever been received. Stock lists what is on the shelf, one line per location.',
   STORES: 'Stores material: kept on the shelf and topped up. Each item has a category, unit of measure and required stock (the level to keep on hand).',
   TOOLS: 'Tools: kept in the store, ordered like Stores material, and checked in and out on the Tools page.',
-  PROJECTS: 'Projects material: bought for a project on its purchase order, which says which project it is for. Never re-ordered. It comes through the store and is issued to its project as soon as it is received.',
+  PROJECTS: 'Projects material: each item is added for one project and offered on that project\'s RFQs and orders. Never re-ordered. It comes through the store and is issued to its project as soon as it is received.',
 };
 
 const EMPTY: Record<Tab, { title: string; description: string }> = {
   ALL: { title: 'No items yet', description: 'Add materials to start tracking inventory.' },
   STORES: { title: 'No Stores materials yet', description: 'Add materials to start tracking inventory.' },
   TOOLS: { title: 'No tools yet', description: 'Add a tool, then receive it into the store.' },
-  PROJECTS: { title: 'No Projects materials yet', description: 'Add the material bought for projects. The order it is bought on says which project it is for.' },
+  PROJECTS: { title: 'No Projects materials yet', description: 'Add the material bought for projects, each for the project it is for.' },
 };
 
 // Which items to show by their stock. Read from ?stock=, so Stock can link to
@@ -466,18 +466,26 @@ function waitingCell(m: Material, items: Waiting[] | undefined) {
   );
 }
 
+/** The project a Projects item was added for (ADR-046), linked to it, or that it has none yet. */
+function projectCell(m: Material) {
+  if (!m.projectNumber) return <span className="text-surface-400">No project yet</span>;
+  return <Link to={`/projects/${encodeURIComponent(m.projectNumber)}`} className="btn-link whitespace-nowrap" title={m.project?.name ?? undefined}>{m.projectNumber}</Link>;
+}
+
 /**
- * Return Projects table columns. The item has no project of its own, as the
- * order says which (Project on the Order Roadmap); "Ordered for" shows the
- * projects of its orders, and "Waiting to issue" what was received for them and
- * not yet issued, each when it could be loaded and may be seen (null).
+ * Return Projects table columns: the project the item was added for (ADR-046);
+ * "Ordered for", the projects of its orders; and "Waiting to issue", what was
+ * received for them and not yet issued, each when it could be loaded and may
+ * be seen (null).
  */
 function projectsColumns(orderedFor: Map<string, OrderedFor['projects']> | null, waiting: Map<string, Waiting[]> | null): DataTableColumn<Material>[] {
+  // Narrower than on the other tabs, so the name keeps its room beside the Project column.
   return [
-    skuColumn,
+    { ...skuColumn, width: '10rem' },
     nameColumn,
-    ...(orderedFor ? [{ key: 'orderedFor', header: 'Ordered for', render: (m: Material) => orderedForCell(orderedFor.get(m.id)), width: '12rem' }] : []),
-    ...(waiting ? [{ key: 'waiting', header: 'Waiting to issue', render: (m: Material) => waitingCell(m, waiting.get(m.id)), width: '13rem' }] : []),
+    { key: 'project', header: 'Project', render: projectCell, width: '7.5rem' },
+    ...(orderedFor ? [{ key: 'orderedFor', header: 'Ordered for', render: (m: Material) => orderedForCell(orderedFor.get(m.id)), width: '10rem' }] : []),
+    ...(waiting ? [{ key: 'waiting', header: 'Waiting to issue', render: (m: Material) => waitingCell(m, waiting.get(m.id)), width: '11rem' }] : []),
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     ...tailColumns,
   ];

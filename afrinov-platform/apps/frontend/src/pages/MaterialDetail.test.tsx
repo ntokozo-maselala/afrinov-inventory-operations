@@ -300,7 +300,7 @@ describe('MaterialDetail Projects item received for a project', () => {
     renderPage();
     await screen.findByRole('table', { name: 'In the store for projects' });
     expect(await screen.findByRole('link', { name: 'Issue' })).toHaveAttribute('href', '/stock/issue?materialId=m-1');
-    expect(screen.getByText(/The store receives it against that order and holds it for that project./)).toBeInTheDocument();
+    expect(screen.getByText(/The store receives it against its purchase order and holds it for the order’s project\./)).toBeInTheDocument();
     expect(screen.queryByText(/was received before/)).not.toBeInTheDocument();
   });
 

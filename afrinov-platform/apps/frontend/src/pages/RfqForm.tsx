@@ -23,11 +23,12 @@ import { NoAccess } from '../components/NoAccess';
 import { useToast } from '../components/Toast';
 import { Drawer } from '../components/Modal';
 import { MaterialForm } from '../components/MaterialForm';
+import { GROUPS, itemGroupLabels, itemsForProject } from '../lib/projectItems';
 import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material, Supplier } from '../api/types';
 import { sectionOf, suggestedProject } from '../lib/categories';
-import type { Rfq } from '../lib/rfq';
+import type { Rfq } from '../lib/rfq';
 import { QuantityInput } from '../components/QuantityInput';
 import { useUnits } from '../hooks/useUnits';
 import { firstLineQuantityError, readQuantity } from '../lib/quantity';
@@ -102,10 +103,9 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
   const [added, setAdded] = useState<Material[]>([]);
   const catalogue = [...(materialsReq.data ?? []), ...added.filter((a) => !materialsReq.data?.some((m) => m.id === a.id))];
   // An RFQ is for one project and Projects items only (Stores ordering
-  // roadmap): Stores stock is ordered by the store at known prices. Any
-  // Projects item, whatever project it was tagged with: the RFQ says which
-  // project it is for (Project on the Order Roadmap, Phase 2). What a draft
-  // already holds stays listed, so it can be changed.
+  // roadmap): Stores stock is ordered by the store at known prices. A line
+  // offers the items added for the RFQ's project, then those with no project
+  // yet (ADR-046). What a draft already holds stays listed, so it can be changed.
   const held = new Set(rfq?.lines.map((l) => l.materialId ?? '') ?? []);
   const materials = catalogue.filter((m) => held.has(m.id) || sectionOf(m.category) === 'PROJECTS');
   const suppliers = suppliersReq.data ?? [];
@@ -125,7 +125,10 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
 
   // The RFQ's project is the buyer's choice; no line fixes it.
   const project = projectChoice;
-  const lineMaterials = materials;
+  // Each line's own list: another project's item is offered only on the line
+  // that holds it now, never on the others, and not once it is changed.
+  const lineMaterials = (materialId: string) => itemsForProject(materials, project, new Set([materialId]));
+  const groups = itemGroupLabels(project);
   const projects = (projectsReq.data ?? []).filter((p) => p.status !== 'COMPLETED' && p.status !== 'CANCELLED');
   const projectOptions = project && !projects.some((p) => p.projectNumber === project) ? [...projects, { projectNumber: project, name: null }] : projects;
 
@@ -151,7 +154,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
     toast.success(`${saved.sku} added to the catalogue and to the RFQ`);
   }
 
-  // A new item is a Projects item with no project of its own: the RFQ says which project it is for.
+  // A new item is a Projects item for the RFQ's project (ADR-046).
   function startNewItem(key: number) {
     openNewItem(key);
   }
@@ -253,16 +256,25 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
           <div className="space-y-2">
             {lines.map((l, i) => {
               const item = catalogue.find((m) => m.id === l.materialId);
+              const offeredItems = lineMaterials(l.materialId);
               return (
                 <div key={l.key} className={`${LINE_GRID} items-start`}>
                   <output aria-label={`Line ${i + 1} item number`} className="hidden md:block py-2 text-sm text-right font-mono text-surface-500">{i + 1}</output>
                   <div className="col-span-12 md:col-span-1">
-                    <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} item`}>
-                      <option value="">Item…</option>
-                      {/* Not in the catalogue yet: added from the line, once the RFQ has its project. */}
-                      {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
+                    {/* The project's items, once the RFQ has its project (ADR-046). */}
+                    <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} item`} disabled={!project}>
+                      <option value="">{project ? 'Item…' : 'Choose the project first'}</option>
+                      {/* Not in the catalogue yet: added from the line, for the RFQ's project. */}
+                      {project && canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
                       {/* An inactive item isn't quoted for; one a draft already holds stays listed so it can be changed. */}
-                      {lineMaterials.filter((m) => m.active || m.id === l.materialId).map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}{m.active ? '' : ' (inactive)'}</option>)}
+                      {GROUPS.map((key) => {
+                        const offered = offeredItems[key].filter((m) => m.active || m.id === l.materialId);
+                        return offered.length === 0 ? null : (
+                          <optgroup key={key} label={groups[key]}>
+                            {offered.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}{m.active ? '' : ' (inactive)'}</option>)}
+                          </optgroup>
+                        );
+                      })}
                     </Select>
                   </div>
                   <output aria-label={`Line ${i + 1} units`} className="col-span-4 md:col-span-1 py-2 text-sm text-surface-700 truncate">{item?.unitOfMeasure ?? '—'}</output>
@@ -323,13 +335,14 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
             open
             onClose={closeNewItem}
             title="New item"
-            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item, and goes on line ${lineNo}; this RFQ says which project it is for.`}
+            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${project}, and goes on line ${lineNo}.`}
             width="md"
           >
             <MaterialForm
               key={from.session}
               section="PROJECTS"
               fixedBy="the RFQ"
+              project={project}
               onCancel={closeNewItem}
               onSaved={(saved) => itemAdded(saved as unknown as Material, from)}
               onError={(err) => toast.error('Could not add item', err.message)}
