@@ -34,6 +34,9 @@
     },
     "@typescript-eslint/typescript-estree": {
       "minimatch": "^11.0.5"
+    },
+    "@prisma/config": {
+      "effect": "3.22.4"
     }
   },
   "allowScripts": {
