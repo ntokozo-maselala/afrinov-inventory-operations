@@ -16,9 +16,9 @@ export const setManySchema = z.object({
 });
 
 /** One section at a time (system audit C10). */
-const SECTIONS = ['general', 'inventory', 'purchase_orders', 'notifications', 'users', 'appearance', 'security', 'system', 'data', 'projects'] as const;
-export const resetSectionQuerySchema = z.object({ category: z.enum(SECTIONS) });
-export const resetSectionSchema = z.object({ category: z.enum(SECTIONS), reason: reasonSchema });
+export const SETTING_SECTIONS = ['general', 'inventory', 'purchase_orders', 'notifications', 'users', 'appearance', 'security', 'system', 'data', 'projects'] as const;
+export const resetSectionQuerySchema = z.object({ category: z.enum(SETTING_SECTIONS) });
+export const resetSectionSchema = z.object({ category: z.enum(SETTING_SECTIONS), reason: reasonSchema });
 
 function roles(req: FastifyRequest): string[] {
   const u = (req as { user?: { roles?: string[]; sub?: string; email?: string; name?: string } }).user;
@@ -37,7 +37,11 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   // theme/density application, low-stock indicators, etc.).
   app.get('/settings', { preHandler: [app.authenticate] }, async (req) => {
     const q = req.query as { category?: string } | undefined;
-    return SettingsService.list(q?.category ? { category: q.category as never } : undefined);
+    if (!q?.category) return SettingsService.list(undefined);
+    // Checked here: an unknown section reached the database as an invalid enum value (a 500).
+    const section = SETTING_SECTIONS.find((s) => s === q.category);
+    if (!section) throw Errors.validation('Unknown settings section', { category: q.category });
+    return SettingsService.list({ category: section });
   });
 
   app.get('/settings/values', { preHandler: [app.authenticate] }, async (req) => {

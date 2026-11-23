@@ -57,7 +57,7 @@ import {
   createLabourRateSchema, createSalesRfqSchema, listLabourRatesQuerySchema, listSalesRfqQuerySchema, salesQuoteOptionsQuerySchema, sendBackSalesRfqSchema,
   updateLabourRateSchema, updateSalesRfqSchema,
 } from '../modules/sales/sales-rfq.routes.js';
-import { setOneSchema, setManySchema, resetSectionQuerySchema, resetSectionSchema } from '../modules/settings/settings.routes.js';
+import { setOneSchema, setManySchema, resetSectionQuerySchema, resetSectionSchema, SETTING_SECTIONS } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
   materialCategorySchema,
@@ -863,7 +863,7 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/slips/images/past-keep', tag: 'Settings', summary: 'How many signatures a keep period would remove now',
     description: 'For Settings to say, before inventory.receiptImageKeepMonths is saved, how many signatures and slip photos the new period removes within the hour. months 0 (keep always) counts none.',
-    permissions: [P.ManageSettings], query: z.object({ months: z.coerce.number().int().min(0).max(240) }), errors: [400],
+    permissions: [P.ManageSettings], query: z.object({ months: z.coerce.number().int().min(0).max(240).openapi({ param: { required: true } }) }), errors: [400],
   },
   {
     method: 'get', path: '/slips/:slipId/confirmation/image', tag: 'Reports', summary: 'The signature or signed-slip photo a slip was confirmed with',
@@ -1254,7 +1254,8 @@ export const OPERATIONS: Operation[] = [
   // Settings
   {
     method: 'get', path: '/settings', tag: 'Settings', summary: 'List settings with their metadata',
-    query: z.object({ category: z.string().optional() }),
+    query: z.object({ category: z.enum(SETTING_SECTIONS).optional() }),
+    errors: [400],
   },
   {
     method: 'get', path: '/settings/values', tag: 'Settings', summary: 'Current values of selected settings',

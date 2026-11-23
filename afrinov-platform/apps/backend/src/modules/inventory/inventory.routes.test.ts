@@ -551,6 +551,39 @@ describe('inventory routes', () => {
       expect(mockedCountList).toHaveBeenCalledWith({ from: '2026-09-25', to: '2026-09-30', locationId: 'l-1', actorId: 'u-1', before: undefined, limit: undefined });
     });
 
+    // limit=abc reached Prisma as take: NaN (a 500), and limit=-1 as take: -1
+    // (the oldest rows, silently).
+    it('refuses a limit that is not a whole number above 0 before any list is read', async () => {
+      const headers = authed('user-v', ['view:reports']);
+      for (const path of ['/inventory-transactions', '/inventory-issues', '/stock-receipts', '/stock-counts']) {
+        for (const limit of ['abc', '-1', '0', '2.5']) {
+          const res = await app.inject({ method: 'GET', url: `/api/v1${path}?limit=${limit}`, headers });
+          expect(res.statusCode, `${path}?limit=${limit}`).toBe(400);
+          expect(res.json().error.code, `${path}?limit=${limit}`).toBe('VALIDATION_ERROR');
+        }
+      }
+      expect(mockedQueryHistory).not.toHaveBeenCalled();
+      expect(mockedSlips).not.toHaveBeenCalled();
+      expect(mockedReceiptList).not.toHaveBeenCalled();
+      expect(mockedCountList).not.toHaveBeenCalled();
+    });
+
+    it('caps a limit above the page size, as before', async () => {
+      const headers = authed('user-v', ['view:reports']);
+      mockedQueryHistory.mockResolvedValue([]);
+      mockedSlips.mockResolvedValue([]);
+      mockedReceiptList.mockResolvedValue([]);
+      mockedCountList.mockResolvedValue([]);
+      await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions?limit=5000', headers });
+      expect(mockedQueryHistory).toHaveBeenCalledWith(expect.objectContaining({ limit: 1000 }));
+      await app.inject({ method: 'GET', url: '/api/v1/inventory-issues?limit=1000', headers });
+      expect(mockedSlips).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
+      await app.inject({ method: 'GET', url: '/api/v1/stock-receipts?limit=201', headers });
+      expect(mockedReceiptList).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
+      await app.inject({ method: 'GET', url: '/api/v1/stock-counts?limit=5', headers });
+      expect(mockedCountList).toHaveBeenCalledWith(expect.objectContaining({ limit: 5 }));
+    });
+
     it('passes a report kind to the movement history, ignoring an unknown one', async () => {
       mockedQueryHistory.mockResolvedValue([]);
       await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions?report=writeoffs', headers: authed() });

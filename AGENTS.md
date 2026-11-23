@@ -127,6 +127,11 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `err.message` cannot leak server text. Never render a raw exception message.
   See `afrinov-docs/docs/12-operations/error-handling.md` and
   `afrinov-docs/docs/08-api/error-model.md`.
+- **Read a query parameter through a check before it reaches Prisma.** A list
+  route that reads `?limit` by hand uses `pageLimit(raw, max)`
+  (`src/shared/paging.ts`), never `Number(q['limit'])`: `abc` became `take: NaN`
+  (a 500) and `-1` the oldest rows. An enum filter is checked against its list
+  first (as `GET /settings?category` is against `SETTING_SECTIONS`).
 - **A failed refresh keeps data only for availability failures.** `useApi`
   marks `stale` for `SERVICE_UNAVAILABLE`/`NETWORK_ERROR`/`TIMEOUT`; `FORBIDDEN`
   and `UNAUTHENTICATED` clear it, so a permission loss is never shown as "here
