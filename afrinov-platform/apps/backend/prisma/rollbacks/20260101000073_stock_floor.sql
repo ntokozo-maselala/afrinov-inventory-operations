@@ -1,0 +1,24 @@
+-- Rollback of 20260101000073_stock_floor (ADR-047). Changes no data.
+--
+-- Migrations here are forward-only; a rollback is a reviewed script an
+-- operator runs, kept beside the migration it undoes. Only needed if the
+-- constraint itself causes a problem: rolling the application back to an
+-- earlier version does NOT need it, as no earlier version writes a balance
+-- below zero on purpose.
+--
+-- Roll back (from apps/backend, with DATABASE_URL set as for a deploy):
+--
+--   npx prisma db execute --file prisma/rollbacks/20260101000073_stock_floor.sql
+--
+-- Prisma still lists the migration as applied afterwards, and
+-- `prisma migrate resolve --rolled-back` does NOT change that for a migration
+-- that succeeded (it only touches a failed one; tried 2026-11-23). So a later
+-- deploy will not put the constraint back by itself. Put it back with the
+-- migration's own script, which checks for balances below zero first:
+--
+--   npx prisma db execute --file prisma/migrations/20260101000073_stock_floor/migration.sql
+--
+-- Until then `npm run check:issued-stock` reports the constraint missing.
+-- Safe to run twice. integration/stock-floor.real-http.test.ts runs this
+-- script inside a transaction it then undoes, so a broken rollback fails CI.
+ALTER TABLE "inventory_balances" DROP CONSTRAINT IF EXISTS "inventory_balances_quantity_non_negative";

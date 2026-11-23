@@ -33,6 +33,9 @@ and the recovery considerations for the migration added in this workstream.
   PostgreSQL advisory locks in a stable `(materialId, locationId)` order, so
   concurrent movements serialize instead of both passing a read-then-write
   check. This is the remediation for the prior audit's DATA-01/02/04 findings.
+- No balance is below zero: the balance lock comes before the read, and a
+  database constraint refuses what a path that skipped it would leave (ADR-047,
+  "Stock floor" below).
 
 ## Schema and migration state
 
@@ -158,6 +161,70 @@ overdrawing stock, duplicate goods-receipt posting, over-receipt of a PO line)
 are covered by advisory-lock serialization and by real-PostgreSQL integration
 tests that race two requests and assert exactly one succeeds. Those suites pass
 here (see `VERIFICATION_EVIDENCE.md`).
+
+Two quick local requests often run one after the other by chance, so a plain
+race test can pass with the lock removed. Since ADR-047 the stock races use
+`overlapping` (`integration/helpers.ts`): it holds `inventory_transactions` in
+EXCLUSIVE mode (reads pass, inserts wait), starts the requests, waits until
+`pg_stat_activity` shows each one waiting on a lock, then lets go. It polls
+from outside its own transaction, because inside one `pg_stat_activity` is a
+snapshot that never refreshes. Removing the transfer's lock makes its race
+test fail (checked 2026-11-23).
+
+## Stock floor (ADR-047)
+
+No balance is ever below zero (BR-009). Two layers hold it:
+
+1. **The balance lock, taken before the read.** Every path that moves stock
+   takes `lockInventoryBalances`, then reads, checks, writes the ledger line
+   and recomputes. `recomputeBalance` takes the lock as well, so a path that
+   skipped it still recomputes from the true total.
+2. **The constraint.** `inventory_balances_quantity_non_negative`,
+   `CHECK (quantity >= 0)`, added by `20260101000073_stock_floor`. A path that
+   skips the check is refused (422 `INSUFFICIENT_BALANCE`, logged as
+   `stock-floor-refused`) instead of leaving stock below zero.
+
+The constraint alone is not enough, and this was shown rather than assumed:
+with the transfer's lock removed and no lock in the recompute, two overlapping
+transfers each summed only the lines they could see, both stored 4, and the
+ledger said −2. With the lock in the recompute, the second sums −2 and is
+refused.
+
+**Preflight.** The migration locks `inventory_balances`, counts balances
+below zero and refuses with that count before adding the constraint, so a
+populated database is never half changed. Prisma then records it failed
+(P3018, then P3009 on later deploys). Recovery, followed end to end on a test
+database on 2026-11-23: `npm run check:issued-stock` lists the balances;
+correct each with an adjustment; `npx prisma migrate resolve --rolled-back
+20260101000073_stock_floor`; deploy again.
+
+**Rollback.** `npx prisma db execute --file prisma/rollbacks/20260101000073_stock_floor.sql`
+drops the constraint and changes no data. `migrate resolve --rolled-back`
+does not unmark a migration that succeeded (it only changes a failed record),
+so Prisma still lists it as applied and a later deploy won't put the
+constraint back. Put it back with
+`npx prisma db execute --file prisma/migrations/20260101000073_stock_floor/migration.sql`,
+which runs the preflight first. Until then `npm run check:issued-stock`
+reports the constraint missing; `migration-drift` can't see CHECK
+constraints, so that check is how a forgotten rollback is found.
+`integration/stock-floor.real-http.test.ts` runs the rollback, the migration
+and the preflight inside a transaction it undoes.
+
+**Guard.** `src/shared/inventory/ledger-writers.test.ts` fails when a file not
+on its list writes `inventory_transactions` or `inventory_balances`, or a
+listed writer stops taking the lock or recomputing the balance.
+
+**Daily reconciliation.** The constraint sees one row, so it cannot tell a
+balance that no longer equals its ledger (shown 2026-11-23: an absolute
+recompute from a stale sum stored 4 over a ledger of −2, and passed). That
+relationship is kept by the application and checked once a day by the
+backend: `StockReconciliationService.runIfDue` runs the `check:issued-stock`
+check in one REPEATABLE READ transaction under a try-lock and records it in
+`stock_reconciliation_runs` (migration `20260101000074`, kept a year). Drift is
+an error-level `ledger-drift` log event and a Dashboard card for Admins, with
+the list under Settings → Data & backup. Rollback:
+`prisma/rollbacks/20260101000074_stock_reconciliation_runs.sql` drops only that
+table, tested inside an undone transaction like the floor's.
 
 ## Backup, restore and rollback
 

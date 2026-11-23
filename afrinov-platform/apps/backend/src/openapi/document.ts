@@ -1291,6 +1291,13 @@ export const OPERATIONS: Operation[] = [
       + 'and the latest runs.',
     permissions: [P.ManageSettings],
   },
+  {
+    method: 'get', path: '/stock-reconciliation/status', tag: 'Settings', summary: 'Whether the daily stock check found the figures adding up',
+    description: 'From the check the backend runs once a day (ADR-047): every stored balance equals its ledger, none is below zero, every issue adds up '
+      + 'and the stock floor constraint is in place. State NONE (never run), OK, DRIFT (something does not add up; the run lists up to 50 problems '
+      + 'and the true count), FAILED (the check could not run) or LATE (no check finished for 26 hours), with the newest run.',
+    permissions: [P.ManageSettings],
+  },
 
   // Audit
   {

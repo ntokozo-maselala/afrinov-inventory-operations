@@ -207,8 +207,20 @@ If the backend stops at once, read `docker compose logs backend`: a missing
 `SEED_ADMIN_PASSWORD`, a short `JWT_SECRET` or `TRUST_PROXY=true` each stop it
 with a message saying so.
 
+Then check the stock floor is in place (ADR-047): the database itself refuses
+any balance below zero, so it is there before any stock is loaded. From
+`/opt/afrinov/afrinov-platform/apps/backend`:
+
+```sh
+npm run check:issued-stock      # "Checked 0 stock balances and 0 issues. Everything adds up."
+```
+
+If it says the stock floor constraint is missing, run the command it prints
+before going on.
+
 - [ ] Backend healthy, no demo data
 - [ ] Ports show `127.0.0.1` only
+- [ ] `check:issued-stock` says everything adds up (stock floor in place)
 
 ---
 
@@ -431,6 +443,10 @@ npm run import:workbook -- --file /opt/afrinov/import/<workbook.xlsm> --reconcil
 npm run check:issued-stock && npm run check:catalogue && npm run check:units
 ```
 
+`check:issued-stock` must say "Everything adds up": every balance equals its
+ledger, none is below zero, and the stock floor constraint is in place
+(ADR-047). Keep its output with the go-live record.
+
 The reconciliation compares item counts and rand values per category with
 the workbook; every difference must be explained before going on. A mistake
 found after this is corrected with the count screen or an adjustment, never a
@@ -456,8 +472,9 @@ further entries.
 
 | When | Who | What |
 |---|---|---|
-| Every working day | Admin | Glance at the Dashboard: a **Backups** or **Admins** card means something needs doing |
+| Every working day | Admin | Glance at the Dashboard: a **Backups**, **Stock check** or **Admins** card means something needs doing |
 | Every week | Admin | `docker compose ps` all running; `df -h /mnt/backup` has room |
+| At each month close | Admin | Settings → Data & backup says the stock figures add up (the server checks once a day, ADR-047); note it with the close |
 | Every three months | Admin, then the owner | Restore test (8.3, second command); the owner signs it off under Settings → Data & backup |
 | Every year, before it lapses | Admin | Renew the backup service's Azure access: `ACCOUNT=<name> RG=rg-afrinov-backups bash backup/azure-setup.sh renew` |
 | Monthly | Admin | `sudo apt update && sudo apt -y upgrade`, then `sudo reboot` if asked; the containers start again on their own |
@@ -489,6 +506,11 @@ taken first (`backup-and-recovery.md`, "Restoring in earnest").
 | The site doesn't load | `docker compose ps`; `sudo systemctl status nginx`; `docker compose logs backend` |
 | Dashboard: backups failed or late | Settings → Data & backup shows the reason; `docker compose logs backup` |
 | The server is lost | A new server through Parts 1 to 6, then `backup-and-recovery.md`, "Restoring in earnest", from the newest off-site copy |
+| After an update the backend stops with "balance(s) below zero, which BR-009 forbids" | Only a database that already held a balance below zero (a pilot copy, say) stops here; nothing was changed. `npm run check:issued-stock` lists them: correct each with an adjustment, run `npx prisma migrate resolve --rolled-back 20260101000073_stock_floor`, then `docker compose up -d backend` again |
+| Dashboard: **Stock check** says figures don't add up | Settings → Data & backup lists them (`npm run check:issued-stock` lists every one). Nothing is lost: the movements are all there, but a stored balance differs from them. Report it as a defect with the list; don't correct it by hand until the cause is known. The card clears after the next daily check finds everything adding up |
+| Dashboard: **Stock check** late or failed | `docker compose logs backend \| grep stock-check-failed`; the check tries again each hour. Late with no failure logged means the backend hasn't been running |
+| The log shows "Stock floor constraint refused a movement" | The person was told there wasn't enough stock and nothing was saved, but a code path skipped its own check: report it as a defect with the request id. Stock is still correct |
+| The stock floor constraint has to come off | `npx prisma db execute --file prisma/rollbacks/20260101000073_stock_floor.sql` (changes no data). Put it back with `npx prisma db execute --file prisma/migrations/20260101000073_stock_floor/migration.sql`; until then `check:issued-stock` reports it missing |
 
 ## Evidence
 - `afrinov-platform/apps/backend/docker-compose.yml`, `docker-compose.prod.yml` — the stack and its production ports

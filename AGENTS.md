@@ -162,6 +162,22 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `parseQuantity` (`src/lib/quantity.ts`, with the same `remainder` option),
   never `type="number"`, for a stock quantity. A new spelling of a unit goes in
   `UNIT_ALIASES`.
+- **Stock never goes below zero: lock, then read (ADR-047).** A path that moves
+  stock takes `lockInventoryBalances` for every balance it touches *before*
+  reading any of them, then checks, writes the ledger line and calls
+  `recomputeBalance`; a reading taken before the lock is stale and passes a
+  check it shouldn't. `inventory_balances` has a `CHECK (quantity >= 0)`
+  behind it, answered as 422 `INSUFFICIENT_BALANCE` and logged as
+  `stock-floor-refused`, a defect. A new file that writes the ledger fails
+  `ledger-writers.test.ts` until it is added there; give it a race in
+  `integration/stock-floor-races.real-http.test.ts` with `overlapping`
+  (`integration/helpers.ts`), not a bare `Promise.all`. A migration's
+  rollback goes in `prisma/rollbacks/` and is tested inside an undone
+  transaction. The CHECK can't see a balance that differs from its ledger,
+  so the backend reconciles once a day (`stock-reconciliation.ts`, records in
+  `stock_reconciliation_runs`, logs `ledger-drift`, Dashboard card for
+  Admins); an integration suite that leaves figures not adding up fails
+  `stock-reconciliation.real-http.test.ts`.
 - **Materials counts items; Stock counts lines.** A line is an item at a location,
   so an item in two places is two lines, and an item never received has none.
   Tools lists active tools only. Don't add these totals together, and don't count

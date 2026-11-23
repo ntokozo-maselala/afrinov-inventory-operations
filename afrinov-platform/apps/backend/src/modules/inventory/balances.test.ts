@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../shared/db.js', () => ({
   prisma: {
+    $executeRaw: vi.fn(),
     inventoryTransaction: { aggregate: vi.fn() },
     inventoryBalance: { upsert: vi.fn() },
   },
@@ -15,6 +16,7 @@ vi.mock('../../shared/db.js', () => ({
 import { recomputeBalancesFor } from './balances.js';
 import { prisma } from '../../shared/db.js';
 
+const executeRaw = prisma.$executeRaw as unknown as ReturnType<typeof vi.fn>;
 const aggregate = prisma.inventoryTransaction.aggregate as unknown as ReturnType<typeof vi.fn>;
 const upsert = prisma.inventoryBalance.upsert as unknown as ReturnType<typeof vi.fn>;
 
@@ -63,6 +65,24 @@ describe('recomputeBalancesFor', () => {
     const arg = upsert.mock.calls[0]![0] as UpsertArg;
     expect(arg.where.materialId_locationId_heldForProject.heldForProject).toBe('AFRI-1325');
     expect(arg.create.heldForProject).toBe('AFRI-1325');
+  });
+
+  it('takes the balance lock before it sums the ledger (ADR-047)', async () => {
+    const order: string[] = [];
+    executeRaw.mockReset();
+    executeRaw.mockImplementation(async (sql: TemplateStringsArray, ...values: unknown[]) => {
+      order.push(`${sql.join('?')} ${values.join(',')}`);
+      return 1;
+    });
+    aggregate.mockImplementation(async () => { order.push('aggregate'); return { _sum: { quantity: null } }; });
+    upsert.mockResolvedValue(undefined);
+
+    await recomputeBalancesFor({ materialId: 'm-3', locationId: 'l-3', heldForProject: null });
+
+    expect(order).toHaveLength(2);
+    expect(order[0]).toMatch(/pg_advisory_xact_lock/);
+    expect(order[0]).toContain('afrinov:inventory-balance:m-3:l-3:');
+    expect(order[1]).toBe('aggregate');
   });
 
   it('treats a null aggregate sum as zero (no transactions)', async () => {

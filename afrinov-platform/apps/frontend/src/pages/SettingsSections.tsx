@@ -22,6 +22,7 @@ import { SignInLog } from '../components/SignInLog';
 import { useAuth } from '../auth';
 import { activeAdminCount, MIN_ADMINS } from '../lib/admins';
 import { backupNotice, formatSize, restoreTestNotice, type BackupHealth } from '../lib/backups';
+import { reconciliationNotice, type ReconciliationHealth } from '../lib/stockReconciliation';
 import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/client';
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
@@ -967,6 +968,34 @@ function BackupStatus() {
   );
 }
 
+/** Whether the daily check found every stock figure adding up, and what didn't (ADR-047). */
+export function StockCheckStatus() {
+  const status = useApi<ReconciliationHealth>('/stock-reconciliation/status');
+  const h = status.data;
+  if (status.loading && !h) return <Skeleton h={48} />;
+  if (status.error || !h?.state) return <Alert tone="warning" title="Couldn't load the stock check">{status.error?.message ?? 'Try again shortly.'}</Alert>;
+  const notice = reconciliationNotice(h);
+  const run = h.lastRun;
+  return (
+    <div className="space-y-2">
+      <Alert tone={notice.tone} title={notice.title}>{notice.text}</Alert>
+      {run && run.problems.length > 0 && (
+        <div>
+          <ul className="list-disc pl-5 text-sm text-surface-700 space-y-0.5" aria-label="Figures that don't add up">
+            {run.problems.map((p) => <li key={p}>{p}</li>)}
+          </ul>
+          {run.problemCount > run.problems.length && (
+            <p className="text-xs text-surface-500 mt-1">and {run.problemCount - run.problems.length} more. On the server, <code className="font-mono">npm run check:issued-stock</code> lists every one.</p>
+          )}
+        </div>
+      )}
+      <p className="text-xs text-surface-500">
+        Once a day the server checks that every stock balance equals the movements behind it, none is below zero and every issue adds up.
+      </p>
+    </div>
+  );
+}
+
 export function SettingsData() {
   const toast = useToast();
   const [busy, setBusy] = useState<null | 'xlsx' | 'pdf' | 'reset'>(null);
@@ -988,8 +1017,9 @@ export function SettingsData() {
     }
   }
   return (
-    <SectionPanel title="Data & backup" description="Whether backups are working, data exports, and your local session.">
+    <SectionPanel title="Data & backup" description="Whether backups are working, whether the stock figures add up, data exports, and your local session.">
       <BackupStatus />
+      <StockCheckStatus />
       <div className="p-3 rounded border border-surface-200 bg-surface-0 flex flex-wrap items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-surface-900">Export inventory report (XLSX)</div>

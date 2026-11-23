@@ -71,8 +71,27 @@ foreign-key violations (`P2003`) become 409 `CONFLICT`; a missing row
 message is never returned. Any other Prisma code falls through to the generic
 500 `INTERNAL_ERROR`.
 
+Two refusals by the database itself are answered before that, by
+`classifyDatabaseRefusal` (ADR-047), which reads the driver's cause
+(`meta.driverAdapterError.cause`) rather than the P-code alone:
+
+- The stock floor constraint `inventory_balances_quantity_non_negative`
+  (SQLSTATE 23514; Prisma P2039 in a model query, P2010 in raw SQL) becomes
+  422 `INSUFFICIENT_BALANCE`, "it would take the balance below zero, so
+  nothing was saved". The service normally refuses first, so this one is also
+  logged as the error-level event `stock-floor-refused`, a defect to follow up.
+- A deadlock or write conflict (driver kind `TransactionWriteConflict`,
+  SQLSTATE 40P01 or 40001; P2034 in a model query, P2010 when taking an
+  advisory lock) becomes 409 `CONFLICT`, "nothing was saved, try again". The
+  transaction rolled back, so the outcome is known (not `OUTCOME_UNKNOWN`) and
+  a retry with the same idempotency key is safe. Logged at error level as the
+  event `transaction-conflict`.
+
+Any other check-constraint or raw-query failure is still a 500.
+
 ## Evidence
-- `afrinov-platform/apps/backend/src/shared/errors.ts` — factory, `classifyPrismaError`, `toErrorEnvelope`
+- `afrinov-platform/apps/backend/src/shared/errors.ts` — factory, `classifyPrismaError`, `classifyDatabaseRefusal`, `toErrorEnvelope`
+- `afrinov-platform/apps/backend/src/shared/inventory/stock-floor.ts` — the stock floor constraint's name and message
 - `afrinov-platform/apps/backend/src/server.ts` — `onSend` request-id hook, `setNotFoundHandler`, central `setErrorHandler`
 - `afrinov-platform/apps/backend/src/openapi/document.ts` — `Error` schema (`code`, `message`, `details`, `requestId`)
 - `afrinov-platform/apps/backend/src/modules/inventory/inventory.service.ts` — insufficient-balance message

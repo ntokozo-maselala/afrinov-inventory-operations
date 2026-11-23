@@ -1,6 +1,7 @@
 // Read-only check that the numbers agree in the database (ADR-002, ADR-026):
 //
 // - every stored balance is the sum of its ledger lines, and none is negative;
+// - the stock floor constraint is in place (ADR-047);
 // - every issue: issued = returned + used up + broken + still out, with still
 //   out never negative; a reversed issue has nothing returned or marked left;
 // - used up and broken are marked only against an unreversed issue, with a
@@ -14,6 +15,7 @@
 // Run against any database with `npm run check:issued-stock`. The integration
 // tests run it after every operation.
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { STOCK_FLOOR_CONSTRAINT } from '../../shared/inventory/stock-floor.js';
 
 type Client = Pick<PrismaClient, '$queryRaw'> | Pick<Prisma.TransactionClient, '$queryRaw'>;
 
@@ -105,6 +107,16 @@ export async function checkIssuedStock(db: Client): Promise<IssuedStockCheck> {
     FROM consumable_outcomes w JOIN consumable_outcomes o ON o.id = w.withdraws_id
     WHERE o.withdraws_id IS NOT NULL OR o.issue_transaction_id <> w.issue_transaction_id OR o.outcome <> w.outcome OR o.quantity <> w.quantity`;
   for (const m of marks) problems.push(`Used up or broken record ${m.id} ${m.problem}`);
+
+  // The stock floor's constraint (ADR-047). A rollback drops it without Prisma
+  // noticing, and the migration-drift check can't see CHECK constraints, so a
+  // rollback nobody undid is found here.
+  const floor = await db.$queryRaw<Array<{ n: number }>>`
+    SELECT count(*)::int AS n FROM pg_constraint
+    WHERE conrelid = 'inventory_balances'::regclass AND conname = ${STOCK_FLOOR_CONSTRAINT}`;
+  if (floor[0]?.n !== 1) {
+    problems.push(`The stock floor constraint ${STOCK_FLOOR_CONSTRAINT} is missing: re-apply it with npx prisma db execute --file prisma/migrations/20260101000073_stock_floor/migration.sql`);
+  }
 
   return { balances: balances.length, issues: issues.length, problems };
 }

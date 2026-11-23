@@ -2585,6 +2585,11 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/backups/status') {
     return { backup: { state: 'NONE', lastSuccessAt: null, lastRun: null }, restoreTest: { state: 'NONE', lastSuccessAt: null, lastRun: null }, recent: [] };
   }
+  // The daily stock check (ADR-047): the demo's figures always add up.
+  if (method === 'GET' && p === '/stock-reconciliation/status') {
+    const at = new Date().toISOString();
+    return { state: 'OK', lastRun: { status: 'OK', startedAt: at, finishedAt: at, balances: 0, issues: 0, problemCount: 0, problems: [], detail: null } };
+  }
 
   // ── Settings ───────────────────────────────────────────────────────────
   if (method === 'GET' && p === '/settings') {
