@@ -178,7 +178,10 @@ export async function waitUntilReady(
     if (!stillRunning()) {
       throw new Error(`${what} exited (${ending(proc)}) before it was ready: another process may hold its port. See its output above.`);
     }
-    if (await Promise.race([ready(), exited])) {
+    // Bounded by the time left too, so a check that never settles can't hold
+    // setup past its limit while the server keeps running.
+    const timeLeft = pause(Math.max(timeoutMs - (Date.now() - start), 0)).then(() => false);
+    if (await Promise.race([ready(), exited, timeLeft])) {
       assertRunning(proc, what);
       return;
     }

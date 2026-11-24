@@ -97,7 +97,8 @@ describe('the browser suite\'s servers', () => {
       'stopServersOnExit(() => [proc]);',
       "const { connect } = await import('node:net');",
       `const up = () => new Promise((r) => { const s = connect({ port: ${port}, host: '127.0.0.1' }); s.once('connect', () => { s.destroy(); r(true); }); s.once('error', () => r(false)); });`,
-      'while (!(await up())) await new Promise((r) => setTimeout(r, 100));',
+      // Bounded: a server that never listens ends the runner (code 4) instead of leaving it polling.
+      'for (let i = 0; !(await up()); i += 1) { if (i > 150) process.exit(4); await new Promise((r) => setTimeout(r, 100)); }',
       // Ends without any teardown, as a runner does on an error.
       'process.exit(3);',
     ].join('\n'));
@@ -116,6 +117,19 @@ describe('the browser suite\'s servers', () => {
     await expect(waitUntilReady(proc, 'the backend', () => new Promise<boolean>(() => {}), 10_000))
       .rejects.toThrow(/the backend exited \(code 7\) before it was ready/);
   });
+
+  // Cubic, PR #211: a check that never settles must not hold setup past its limit.
+  it('gives up at its time limit even when a check never answers', async () => {
+    const proc = startServer('node', ['-e', `"setTimeout(() => {}, ${FIXTURE_LIFETIME_MS})"`], dir, {});
+    try {
+      const started = Date.now();
+      await expect(waitUntilReady(proc, 'the backend', () => new Promise<boolean>(() => {}), 500))
+        .rejects.toThrow(/the backend was not ready after 0.5 seconds/);
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally {
+      await stopServer(proc);
+    }
+  }, 10_000);
 
   it('is ready once the check passes while the server is still running', async () => {
     const port = await freePort();

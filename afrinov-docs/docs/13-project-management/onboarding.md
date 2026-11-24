@@ -146,10 +146,22 @@ Three specs (`apps/frontend/e2e/*.spec.ts`: signing in, signing out, and
 how failures look) run through the real stack. The global setup starts the
 backend on port 4000 and the frontend on port 5173 itself, so **stop your
 dev servers first**: if either port already answers, it refuses to start
-and names the port. It uses the local `*_test` database in
-`apps/backend/.env.test` (migrated and seeded with demo data), and the
-seeded admin's password from `SEED_ADMIN_PASSWORD`. It stops its servers
-when the run ends, Ctrl+C included (`e2e-testing.md`).
+and names the port. It stops its servers when the run ends, Ctrl+C
+included (`../11-testing/e2e-testing.md`).
+
+It needs a local `*_test` database, migrated and seeded with demo data,
+named in `apps/backend/.env.test` with the seeded admin's password. Once,
+from the test-only Compose database (`docker compose up -d test-db`, port
+5433):
+
+```sh
+cd apps/backend
+cp .env.test.example .env.test   # put POSTGRES_TEST_PASSWORD in the URL and add SEED_ADMIN_PASSWORD=<password>
+npm run db:test:migrate
+npm run db:test:seed             # demo data; refuses anything but a local *_test database
+```
+
+Then:
 
 ```sh
 cd apps/frontend
