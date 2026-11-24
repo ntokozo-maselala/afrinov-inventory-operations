@@ -496,6 +496,18 @@ Then sign in and open Stock and Movements. Migrations only go forward: going
 back to an older version across a database change means restoring the backup
 taken first (`backup-and-recovery.md`, "Restoring in earnest").
 
+**The first time you install a version with the stock floor (ADR-047)**,
+check before `git checkout` that no balance is already below zero: that
+version refuses to install over one, and its API then doesn't start.
+
+```sh
+cd /opt/afrinov/afrinov-platform/apps/backend
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT m.sku, l.name AS location, b.held_for_project, b.quantity FROM inventory_balances b JOIN materials m ON m.id = b.material_id JOIN locations l ON l.id = b.location_id WHERE b.quantity < 0"'
+```
+
+No rows: go ahead. Any rows: correct each with an adjustment (Found, with a
+note) in the version still running, then run it again.
+
 ### When something goes wrong
 
 | What you see | What to do |
@@ -506,7 +518,7 @@ taken first (`backup-and-recovery.md`, "Restoring in earnest").
 | The site doesn't load | `docker compose ps`; `sudo systemctl status nginx`; `docker compose logs backend` |
 | Dashboard: backups failed or late | Settings → Data & backup shows the reason; `docker compose logs backup` |
 | The server is lost | A new server through Parts 1 to 6, then `backup-and-recovery.md`, "Restoring in earnest", from the newest off-site copy |
-| After an update the backend stops with "balance(s) below zero, which BR-009 forbids" | Only a database that already held a balance below zero (a pilot copy, say) stops here; nothing was changed. `npm run check:issued-stock` lists them: correct each with an adjustment, run `npx prisma migrate resolve --rolled-back 20260101000073_stock_floor`, then `docker compose up -d backend` again |
+| After an update the backend stops with "balance(s) below zero, which BR-009 forbids" | Only a database that already held a balance below zero (a pilot copy, say) stops here. Nothing was changed, and the message names the balances. The new version's API can't start, and the previous version won't either until the failed record is cleared, so from `apps/backend`: (1) `npx prisma migrate resolve --rolled-back 20260101000073_stock_floor`; (2) go back to the previous version: `git checkout <the commit you came from>`, `npm ci`, `docker compose up -d --build`. No restore is needed, as the migration changed nothing; (3) in the app, correct each named balance with an adjustment (Found, with a note); (4) run the check under "Installing a new version" until it shows no rows; (5) install the new version again. The Prisma steps were followed end to end on a test database on 2026-11-24 |
 | Dashboard: **Stock check** says figures don't add up | Settings → Data & backup lists them (`npm run check:issued-stock` lists every one). Nothing is lost: the movements are all there, but a stored balance differs from them. Report it as a defect with the list; don't correct it by hand until the cause is known. The card clears after the next daily check finds everything adding up |
 | Dashboard: **Stock check** late or failed | `docker compose logs backend \| grep stock-check-failed`; the check tries again each hour. Late with no failure logged means the backend hasn't been running |
 | The log shows "Stock floor constraint refused a movement" | The person was told there wasn't enough stock and nothing was saved, but a code path skipped its own check: report it as a defect with the request id. Stock is still correct |

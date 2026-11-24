@@ -136,6 +136,7 @@ export async function overlapping<T>(requests: Array<() => Promise<T>>): Promise
   let started: Array<Promise<T>> = [];
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`LOCK TABLE inventory_transactions IN EXCLUSIVE MODE`;
+    const [{ pid: holder } = { pid: 0 }] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
     started = requests.map((request) => request());
     // A request that fails is reported by Promise.all below, not as unhandled.
     const settled: string[] = [];
@@ -146,10 +147,17 @@ export async function overlapping<T>(requests: Array<() => Promise<T>>): Promise
     const deadline = Date.now() + 15_000;
     for (;;) {
       // Polled outside the transaction: inside one, pg_stat_activity is a
-      // snapshot taken on first read and never refreshed.
+      // snapshot taken on first read and never refreshed. Counted are only the
+      // sessions queued behind this table lock, directly or behind a request
+      // that is (a second request waits on the first one's balance lock), so
+      // a lock wait elsewhere in the database can't let go too early.
       const [row] = await prisma.$queryRaw<Array<{ waiting: number }>>`
-        SELECT count(*)::int AS waiting FROM pg_stat_activity
-        WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`;
+        WITH RECURSIVE behind(pid) AS (
+          SELECT a.pid FROM pg_stat_activity a WHERE ${holder}::int = ANY(pg_blocking_pids(a.pid))
+          UNION
+          SELECT a.pid FROM pg_stat_activity a JOIN behind b ON b.pid = ANY(pg_blocking_pids(a.pid))
+        )
+        SELECT count(*)::int AS waiting FROM behind`;
       if ((row?.waiting ?? 0) >= requests.length) break;
       if (Date.now() > deadline) {
         throw new Error(`Only ${row?.waiting ?? 0} of ${requests.length} requests reached a lock. ${settled.join('; ') || 'None answered.'}`);

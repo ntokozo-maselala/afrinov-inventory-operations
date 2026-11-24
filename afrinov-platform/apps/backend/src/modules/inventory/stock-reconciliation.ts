@@ -25,6 +25,13 @@ const LOCK = 'afrinov:stock-reconciliation';
 const FAILED_DETAIL = 'The check could not finish, so the figures were not checked. The server log has the reason.';
 
 export type ReconciliationStatus = 'OK' | 'DRIFT' | 'FAILED';
+
+/**
+ * Runs that count as the day's check: the figures were compared. A FAILED run
+ * compared nothing, so it starts no 23-hour wait and the next hourly tick
+ * tries again.
+ */
+const CHECKED: ReconciliationStatus[] = ['OK', 'DRIFT'];
 export type ReconciliationState = 'NONE' | 'OK' | 'DRIFT' | 'FAILED' | 'LATE';
 
 /** A run as it is recorded. */
@@ -89,6 +96,13 @@ export function runFromCheck(check: IssuedStockCheck, startedAt: Date, finishedA
 
 const toRow = (run: ReconciliationRun) => ({ ...run, problems: run.problems as Prisma.InputJsonValue });
 
+/** Removes runs kept longer than a year, after a check and after a failure alike. */
+function removeExpired(db: Pick<Prisma.TransactionClient, 'stockReconciliationRun'>, now: Date) {
+  return db.stockReconciliationRun.deleteMany({
+    where: { finishedAt: { lt: new Date(now.getTime() - RECONCILIATION_KEEP_DAYS * 86_400_000) } },
+  });
+}
+
 function toView(row: {
   status: string; startedAt: Date; finishedAt: Date; balances: number; issues: number; problemCount: number; problems: Prisma.JsonValue; detail: string | null;
 }): ReconciliationRunView {
@@ -110,7 +124,9 @@ export const StockReconciliationService = {
    * transaction holds a try-lock, so two backend processes never both run it,
    * and reads at REPEATABLE READ, so balances, ledger and issues are compared
    * as they stood at one moment: a movement committing meanwhile can't look
-   * like drift. If the check fails, a FAILED run is recorded instead.
+   * like drift. If the check fails, a FAILED run is recorded instead, and
+   * the next hourly tick tries again: only a finished check (`CHECKED`)
+   * counts as the day's.
    */
   async runIfDue(now = new Date()): Promise<ReconciliationOutcome> {
     const startedAt = now;
@@ -118,14 +134,14 @@ export const StockReconciliationService = {
       return await prisma.$transaction(async (tx) => {
         const [lock] = await tx.$queryRaw<Array<{ got: boolean }>>`SELECT pg_try_advisory_xact_lock(hashtext(${LOCK})) AS got`;
         if (!lock?.got) return { kind: 'skipped', reason: 'busy' } as const;
-        const last = await tx.stockReconciliationRun.findFirst({ orderBy: { startedAt: 'desc' }, select: { startedAt: true } });
+        const last = await tx.stockReconciliationRun.findFirst({
+          where: { status: { in: CHECKED } }, orderBy: { startedAt: 'desc' }, select: { startedAt: true },
+        });
         if (!isReconciliationDue(last?.startedAt.toISOString() ?? null, now)) return { kind: 'skipped', reason: 'not-due' } as const;
 
         const run = runFromCheck(await checkIssuedStock(tx), startedAt, new Date());
         await tx.stockReconciliationRun.create({ data: toRow(run) });
-        await tx.stockReconciliationRun.deleteMany({
-          where: { finishedAt: { lt: new Date(now.getTime() - RECONCILIATION_KEEP_DAYS * 86_400_000) } },
-        });
+        await removeExpired(tx, now);
         return { kind: 'ran', run } as const;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 120_000 });
     } catch (error) {
@@ -133,8 +149,12 @@ export const StockReconciliationService = {
         status: 'FAILED', startedAt, finishedAt: new Date(), balances: 0, issues: 0, problemCount: 0, problems: [], detail: FAILED_DETAIL,
       };
       // Best effort: if the database is down this fails too, and the run
-      // stays unrecorded; the Dashboard then shows the check as late.
-      await prisma.stockReconciliationRun.create({ data: toRow(run) }).catch(() => undefined);
+      // stays unrecorded; the Dashboard then shows the check as late. A check
+      // failing every hour adds a run each hour, so the year's limit applies
+      // here as well.
+      await prisma.stockReconciliationRun.create({ data: toRow(run) })
+        .then(() => removeExpired(prisma, now))
+        .catch(() => undefined);
       return { kind: 'failed', run, error };
     }
   },

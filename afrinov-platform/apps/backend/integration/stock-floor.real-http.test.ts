@@ -143,7 +143,11 @@ describe('stock floor in the database (ADR-047)', () => {
     });
     const err = await attempt.then(() => null, (e: unknown) => e);
     expect(err).not.toBeInstanceOf(LookedOnly);
-    expect(String((err as Error).message)).toMatch(/1 balance\(s\) below zero.*check:issued-stock/s);
+    const message = String((err as Error).message);
+    expect(message).toMatch(/1 balance\(s\) below zero/);
+    // It names the balance, so the operator knows what to correct without another tool.
+    expect(message).toContain(`FLOOR-${run} at Floor bench ${run}: -2`);
+    expect(message).toMatch(/DATABASE_ASSURANCE/);
     expect(await constraintCount()).toBe(1);
     expect(await ledgerAndBalance(materialId, bench)).toEqual({ ledger: '5', balance: '5' });
   });

@@ -1,8 +1,9 @@
 // Every path that can take stock out, raced against itself or an issue, with
 // the requests held so they truly overlap (`overlapping`, ADR-047). Between
 // them the two would take more than there is: exactly one may succeed, the
-// other is refused with INSUFFICIENT_BALANCE, and the ledger and the stored
-// balance agree on what is left, never below zero (BR-009).
+// other is refused (INSUFFICIENT_BALANCE, or CONFLICT for a count whose stock
+// moved while it was open), and the ledger and the stored balance agree on
+// what is left, never below zero (BR-009).
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -128,9 +129,10 @@ describe('racing stock out of one balance (BR-009, ADR-047)', () => {
     const { ledger, balance } = await ledgerAndBalance(m, s);
     expect(ledger).toBe(balance);
     if (issued!.status === 201) {
-      // The issue went first: the count saw stock move under it and adjusted nothing.
+      // The issue went first: the count saw stock move under it, adjusted
+      // nothing, and asks for a recount (409, not 422: nothing was short).
       expect(balance).toBe('4');
-      expect(counted!.status).not.toBe(201);
+      expect([counted!.status, counted!.body.error!.code]).toEqual([409, 'CONFLICT']);
     } else {
       // The count went first and wrote 10 off: nothing was left to issue.
       expect([counted!.status, issued!.status, issued!.body.error!.code]).toEqual([201, 422, 'INSUFFICIENT_BALANCE']);

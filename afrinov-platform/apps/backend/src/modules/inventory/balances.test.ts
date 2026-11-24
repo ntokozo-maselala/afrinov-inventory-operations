@@ -5,20 +5,24 @@
 // with the `inventory_transactions` ledger.
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../shared/db.js', () => ({
-  prisma: {
+// The root client offers only $transaction: the lock, the sum and the write
+// must all run on the transaction's client, or the advisory lock (held only
+// until its transaction ends) would be gone before the sum is read.
+const { tx, transactions } = vi.hoisted(() => {
+  const tx = {
     $executeRaw: vi.fn(),
     inventoryTransaction: { aggregate: vi.fn() },
     inventoryBalance: { upsert: vi.fn() },
-  },
-}));
+  };
+  return { tx, transactions: vi.fn(async (work: (t: typeof tx) => unknown) => work(tx)) };
+});
+vi.mock('../../shared/db.js', () => ({ prisma: { $transaction: transactions } }));
 
 import { recomputeBalancesFor } from './balances.js';
-import { prisma } from '../../shared/db.js';
 
-const executeRaw = prisma.$executeRaw as unknown as ReturnType<typeof vi.fn>;
-const aggregate = prisma.inventoryTransaction.aggregate as unknown as ReturnType<typeof vi.fn>;
-const upsert = prisma.inventoryBalance.upsert as unknown as ReturnType<typeof vi.fn>;
+const executeRaw = tx.$executeRaw;
+const aggregate = tx.inventoryTransaction.aggregate;
+const upsert = tx.inventoryBalance.upsert;
 
 type UpsertArg = {
   where: { materialId_locationId_heldForProject: { materialId: string; locationId: string; heldForProject: string } };
@@ -83,6 +87,18 @@ describe('recomputeBalancesFor', () => {
     expect(order[0]).toMatch(/pg_advisory_xact_lock/);
     expect(order[0]).toContain('afrinov:inventory-balance:m-3:l-3:');
     expect(order[1]).toBe('aggregate');
+  });
+
+  it('holds the lock until the balance is written: lock, sum and write run in one transaction (ADR-047)', async () => {
+    transactions.mockClear();
+    aggregate.mockResolvedValue({ _sum: { quantity: null } });
+    upsert.mockClear();
+    upsert.mockResolvedValue(undefined);
+
+    await recomputeBalancesFor({ materialId: 'm-4', locationId: 'l-4', heldForProject: null });
+
+    expect(transactions).toHaveBeenCalledTimes(1);
+    expect(upsert).toHaveBeenCalledTimes(1);
   });
 
   it('treats a null aggregate sum as zero (no transactions)', async () => {

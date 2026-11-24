@@ -256,10 +256,10 @@ export function Dashboard() {
   const { data: users } = useApi<Array<{ active: boolean; roles: Array<{ role: { name: string } }> }>>(managesUsers ? '/users' : null);
   const admins = managesUsers && Array.isArray(users) ? activeAdminCount(users) : null;
   // Only Admins hold manage:users, and only they keep the system running, backups included.
-  const { data: backups } = useApi<BackupHealth>(managesUsers ? '/backups/status' : null);
+  const { data: backups, reload: reloadBackups } = useApi<BackupHealth>(managesUsers ? '/backups/status' : null);
   const backupWarning = backups?.backup && backups.restoreTest ? backupCard(backups) : null;
   // The daily check that every stock figure adds up (ADR-047), for the same Admins.
-  const { data: reconciliation } = useApi<ReconciliationHealth>(managesUsers ? '/stock-reconciliation/status' : null);
+  const { data: reconciliation, reload: reloadReconciliation } = useApi<ReconciliationHealth>(managesUsers ? '/stock-reconciliation/status' : null);
   const reconciliationWarning = reconciliationCard(reconciliation);
   // While either two-person check is off (system audit C9).
   const { data: checks } = useApi<Record<string, unknown>>(managesUsers ? '/settings/values?keys=inventory.requireWriteOffApproval,purchaseOrders.requireApprovalBeforeProcessing' : null);
@@ -344,7 +344,9 @@ export function Dashboard() {
     reloadTools();
     reloadLocations();
     if (canApprove) { reloadMine(); reloadPending(); }
-  }, [reload, reloadLowStock, reloadValue, reloadTools, reloadLocations, canApprove, reloadMine, reloadPending]);
+    // The Admins' health cards: a check or backup that ran since the page opened.
+    if (managesUsers) { reloadBackups(); reloadReconciliation(); }
+  }, [reload, reloadLowStock, reloadValue, reloadTools, reloadLocations, canApprove, reloadMine, reloadPending, managesUsers, reloadBackups, reloadReconciliation]);
 
   const inventoryRows = report?.inventory ?? [];
   const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);

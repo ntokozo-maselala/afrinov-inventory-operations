@@ -53,6 +53,25 @@ describe('daily stock reconciliation (ADR-047)', () => {
     expect(await prisma.stockReconciliationRun.count()).toBe(1);
   });
 
+  it('tries a failed check again at the next tick: a failure compared nothing, so it is not the day\'s check', async () => {
+    const failedAt = nextDay();
+    const failed = await prisma.stockReconciliationRun.create({
+      // finishedAt is the clock's, as runIfDue records it; startedAt is the test's day.
+      data: { status: 'FAILED', startedAt: failedAt, finishedAt: new Date(), balances: 0, issues: 0, problemCount: 0, detail: 'Test: the check could not finish' },
+    });
+    try {
+      expect((await api<ReconciliationHealth>('GET', '/stock-reconciliation/status')).body.state).toBe('FAILED');
+      const anHourLater = new Date(failedAt.getTime() + 60 * 60 * 1000);
+      const outcome = await StockReconciliationService.runIfDue(anHourLater);
+      expect(outcome.kind === 'ran' && outcome.run.status).toBe('OK');
+      expect((await api<ReconciliationHealth>('GET', '/stock-reconciliation/status')).body.state).toBe('OK');
+      // The clean check is now the day's: the tick after it waits.
+      expect(await StockReconciliationService.runIfDue(new Date(anHourLater.getTime() + 60 * 60 * 1000))).toEqual({ kind: 'skipped', reason: 'not-due' });
+    } finally {
+      await prisma.stockReconciliationRun.delete({ where: { id: failed.id } });
+    }
+  });
+
   it('finds a balance that has drifted from its ledger, and Admins see it', async () => {
     const material = await api<{ id: string }>('POST', '/materials', {
       sku: `RECON-${run}`, name: `Reconciliation ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: 0,

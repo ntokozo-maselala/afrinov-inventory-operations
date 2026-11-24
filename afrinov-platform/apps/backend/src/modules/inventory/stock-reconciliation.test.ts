@@ -3,11 +3,13 @@
 // integration suite runs it against a real database.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const db = vi.hoisted(() => ({ $transaction: vi.fn(), stockReconciliationRun: { create: vi.fn() } }));
+const db = vi.hoisted(() => ({ $transaction: vi.fn(), stockReconciliationRun: { create: vi.fn(), deleteMany: vi.fn() } }));
 vi.mock('../../shared/db.js', () => ({ prisma: db }));
+const { checkIssuedStock } = vi.hoisted(() => ({ checkIssuedStock: vi.fn() }));
+vi.mock('./issued-stock-check.js', () => ({ checkIssuedStock }));
 
 import {
-  MAX_STORED_PROBLEMS, RECONCILIATION_LATE_HOURS, StockReconciliationService, isReconciliationDue, reconciliationHealth, runFromCheck,
+  MAX_STORED_PROBLEMS, RECONCILIATION_KEEP_DAYS, RECONCILIATION_LATE_HOURS, StockReconciliationService, isReconciliationDue, reconciliationHealth, runFromCheck,
   type ReconciliationRunView,
 } from './stock-reconciliation.js';
 
@@ -77,7 +79,11 @@ describe('runFromCheck', () => {
 
 describe('StockReconciliationService.runIfDue when the check itself fails', () => {
   const driverError = Object.assign(new Error('Raw query failed: cannot reach db.internal:5432 as user afrinov'), { code: 'P2010' });
-  beforeEach(() => { db.$transaction.mockReset(); db.stockReconciliationRun.create.mockReset(); });
+  beforeEach(() => {
+    db.$transaction.mockReset();
+    db.stockReconciliationRun.create.mockReset();
+    db.stockReconciliationRun.deleteMany.mockReset().mockResolvedValue({ count: 0 });
+  });
 
   it('records a FAILED run in safe words, never the driver message, and does not throw', async () => {
     db.$transaction.mockRejectedValue(driverError);
@@ -96,5 +102,44 @@ describe('StockReconciliationService.runIfDue when the check itself fails', () =
     db.$transaction.mockRejectedValue(driverError);
     db.stockReconciliationRun.create.mockRejectedValue(driverError);
     await expect(StockReconciliationService.runIfDue()).resolves.toMatchObject({ kind: 'failed' });
+  });
+
+  it('removes runs older than a year after recording a failure too, so a check failing for months keeps a bounded table', async () => {
+    db.$transaction.mockRejectedValue(driverError);
+    db.stockReconciliationRun.create.mockResolvedValue({});
+    db.stockReconciliationRun.deleteMany.mockResolvedValue({ count: 0 });
+    const now = new Date('2026-11-23T02:00:00.000Z');
+    await StockReconciliationService.runIfDue(now);
+
+    const cutoff = new Date(now.getTime() - RECONCILIATION_KEEP_DAYS * 86_400_000);
+    expect(db.stockReconciliationRun.deleteMany).toHaveBeenCalledWith({ where: { finishedAt: { lt: cutoff } } });
+  });
+});
+
+describe('StockReconciliationService.runIfDue after a failed check', () => {
+  const tx = {
+    $queryRaw: vi.fn(),
+    stockReconciliationRun: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+  };
+  beforeEach(() => {
+    db.$transaction.mockReset();
+    db.$transaction.mockImplementation(async (work: (t: typeof tx) => unknown) => work(tx));
+    tx.$queryRaw.mockResolvedValue([{ got: true }]);
+    tx.stockReconciliationRun.findFirst.mockReset().mockResolvedValue(null);
+    tx.stockReconciliationRun.create.mockResolvedValue({});
+    tx.stockReconciliationRun.deleteMany.mockResolvedValue({ count: 0 });
+    checkIssuedStock.mockResolvedValue({ balances: 4, issues: 2, problems: [] });
+  });
+
+  // A failure is not the day's check: nothing was compared. Only a check that
+  // finished (OK or DRIFT) starts the next 23 hours, so a failed one is tried
+  // again at the next hourly tick, as the Dashboard and Settings say.
+  it('counts only a finished check as the day\'s, so a failure is tried again at the next tick', async () => {
+    const outcome = await StockReconciliationService.runIfDue(NOW);
+
+    expect(tx.stockReconciliationRun.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: { in: ['OK', 'DRIFT'] } },
+    }));
+    expect(outcome.kind).toBe('ran');
   });
 });

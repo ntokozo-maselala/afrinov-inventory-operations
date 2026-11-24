@@ -4,9 +4,15 @@
 // (lockInventoryBalances) before reading the balance, then check, write the
 // line and recompute. Once it does, add it to WRITERS with what it moves.
 //
-// A text search, so a review prompt rather than a proof: the race tests
-// (integration/stock-floor-races.real-http.test.ts) and the database
-// constraint are what hold the floor.
+// A text search, so a review prompt rather than a proof. It works file by
+// file: a listed file passes if it calls the lock and the recompute
+// somewhere, so a new path inside an existing file that skips them is not
+// caught here (helpers write under their callers' locks, which text can't
+// follow). It finds direct Prisma calls and raw SQL, not writes made through
+// an alias. The race tests (integration/stock-floor-races.real-http.test.ts)
+// cover the paths they name, the recompute takes the lock itself, and the
+// database constraint refuses a balance below zero. One posting function
+// every path goes through (TD-027) would replace this convention.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +20,8 @@ import { describe, it, expect } from 'vitest';
 
 const LEDGER_WRITE = /\binventoryTransaction\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/;
 const BALANCE_WRITE = /\binventoryBalance\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/;
-const RAW_WRITE = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+"?inventory_(transactions|balances)\b/i;
+/** Raw SQL, with or without a schema in front (`public.inventory_transactions`, `"public"."inventory_balances"`). */
+const RAW_WRITE = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"?[A-Za-z_]\w*"?\.)?"?inventory_(transactions|balances)\b/i;
 
 export interface SourceFile { path: string; text: string }
 
@@ -68,9 +75,11 @@ describe('findLedgerWriters', () => {
       { path: 'b.ts', text: 'await tx.inventoryBalance.upsert ({ where })' },
       { path: 'c.ts', text: 'await tx.$executeRaw`UPDATE "inventory_balances" SET quantity = 0`' },
       { path: 'd.ts', text: 'await tx.$executeRaw`insert into inventory_transactions (id) values (1)`' },
+      { path: 'e.ts', text: 'await tx.$executeRaw`UPDATE public.inventory_transactions SET quantity = 0`' },
+      { path: 'f.ts', text: 'await tx.$executeRaw`DELETE FROM "public"."inventory_balances"`' },
     ]);
     expect([...found.entries()].map(([p, k]) => [p, [...k]])).toEqual([
-      ['a.ts', ['ledger']], ['b.ts', ['balance']], ['c.ts', ['raw']], ['d.ts', ['raw']],
+      ['a.ts', ['ledger']], ['b.ts', ['balance']], ['c.ts', ['raw']], ['d.ts', ['raw']], ['e.ts', ['raw']], ['f.ts', ['raw']],
     ]);
   });
 

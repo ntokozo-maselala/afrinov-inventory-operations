@@ -191,12 +191,27 @@ ledger said −2. With the lock in the recompute, the second sums −2 and is
 refused.
 
 **Preflight.** The migration locks `inventory_balances`, counts balances
-below zero and refuses with that count before adding the constraint, so a
-populated database is never half changed. Prisma then records it failed
-(P3018, then P3009 on later deploys). Recovery, followed end to end on a test
-database on 2026-11-23: `npm run check:issued-stock` lists the balances;
-correct each with an adjustment; `npx prisma migrate resolve --rolled-back
-20260101000073_stock_floor`; deploy again.
+below zero and refuses before adding the constraint, naming the first ten
+(item, location, project, quantity) and how many more, so a populated
+database is never half changed. Prisma then records it failed (P3018, then
+P3009 on every later deploy). Because Compose starts the API only after
+`prisma migrate deploy` succeeds, the new version's API is down at that point
+and can't post the corrections, and the previous version's deploy stops on
+the same P3009 until the record is cleared. Recovery, followed end to end on
+a test database on 2026-11-24 (main's migrations 001–072, a balance of −2,
+this version refused; the previous version refused with P3009, then started
+after the resolve with "No pending migrations"; after the correction this
+version applied 073 and 074):
+
+1. `npx prisma migrate resolve --rolled-back 20260101000073_stock_floor`.
+2. Start the previous version again (`deployment.md`, Part 11). No restore is
+   needed: the migration changed nothing.
+3. Correct each named balance there with an adjustment.
+4. Install this version again; the record stays as rolled back beside the
+   new applied one.
+
+Check first, and this never happens: `deployment.md`, Part 11, "Installing a
+new version", lists any balance below zero before the update.
 
 **Rollback.** `npx prisma db execute --file prisma/rollbacks/20260101000073_stock_floor.sql`
 drops the constraint and changes no data. `migrate resolve --rolled-back`
@@ -211,8 +226,14 @@ constraints, so that check is how a forgotten rollback is found.
 and the preflight inside a transaction it undoes.
 
 **Guard.** `src/shared/inventory/ledger-writers.test.ts` fails when a file not
-on its list writes `inventory_transactions` or `inventory_balances`, or a
-listed writer stops taking the lock or recomputing the balance.
+on its list writes `inventory_transactions` or `inventory_balances` (a direct
+Prisma call or raw SQL, with or without a schema), when a listed production
+writer stops taking the lock, or when any listed writer stops recomputing the
+balance. The demo seed is the one writer not required to lock: it runs in a
+single process before the API starts. The guard works file by file, not path
+by path: a file passes if it calls the lock and the recompute anywhere, so a
+new path inside a listed file is only as safe as its review and its race
+test. One posting function (TD-027) would close that gap.
 
 **Daily reconciliation.** The constraint sees one row, so it cannot tell a
 balance that no longer equals its ledger (shown 2026-11-23: an absolute

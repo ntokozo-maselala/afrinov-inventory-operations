@@ -168,8 +168,11 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `recomputeBalance`; a reading taken before the lock is stale and passes a
   check it shouldn't. `inventory_balances` has a `CHECK (quantity >= 0)`
   behind it, answered as 422 `INSUFFICIENT_BALANCE` and logged as
-  `stock-floor-refused`, a defect. A new file that writes the ledger fails
-  `ledger-writers.test.ts` until it is added there; give it a race in
+  `stock-floor-refused`, a defect. A new file that writes the ledger with a
+  direct Prisma call or raw SQL fails `ledger-writers.test.ts` until it is
+  added there. That guard works file by file, so a new path in a file already
+  listed passes it whether or not it locks: follow the order by hand and give
+  it a race in
   `integration/stock-floor-races.real-http.test.ts` with `overlapping`
   (`integration/helpers.ts`), not a bare `Promise.all`. A migration's
   rollback goes in `prisma/rollbacks/` and is tested inside an undone

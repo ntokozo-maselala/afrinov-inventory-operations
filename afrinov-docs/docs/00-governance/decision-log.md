@@ -1832,13 +1832,19 @@ see, both stored 4, and the ledger said −2.
   is unchanged.
 - **Guards.** `src/shared/inventory/ledger-writers.test.ts` fails when a file
   not on its list writes the ledger or the balances, or a listed production
-  writer no longer takes the lock or no longer recomputes the balance (a line
-  written without a recompute leaves the stored balance stale, and the floor
-  can't see that). `integration/stock-floor-races.real-http.test.ts`
+  writer no longer takes the lock, or any listed writer no longer recomputes
+  the balance (a line written without a recompute leaves the stored balance
+  stale, and the floor can't see that). It is a text search, file by file: a
+  new path inside a listed file passes it whether or not that path locks, so
+  it prompts a review rather than proving every path (TD-027 would).
+  `integration/stock-floor-races.real-http.test.ts`
   races each of the seven paths that can overdraw (issue, transfer, write-off,
   reversal, count, tool check-out, return to supplier) with the requests held
   so they truly overlap (`overlapping`, `integration/helpers.ts`), and expects
-  one success, one 422 and the ledger and balance agreeing. It also races two
+  one success, one refusal and the ledger and balance agreeing. The refusal is
+  422 `INSUFFICIENT_BALANCE`, except when an issue posts while a count is
+  open: the count then finds its stock moved and is refused with 409
+  `CONFLICT`, to be counted again. It also races two
   transfers in opposite directions, which name the two balances in opposite
   orders: both must succeed, as `lockInventoryBalances` sorts its keys (without
   the sort they deadlock and one is refused with 409).
@@ -1865,8 +1871,10 @@ see, both stored 4, and the ledger said −2.
   DRIFT with up to 50 problems and the true count, or FAILED in safe words.
   Drift is logged at error level as `ledger-drift`, a check that could not run
   as `stock-check-failed`. `GET /stock-reconciliation/status`
-  (`manage:settings`) reads the newest run, LATE when none finished for 26
-  hours; Admins see a Dashboard card unless it is OK, and the list under
+  (`manage:settings`) reads the newest run: LATE when it is a clean run
+  older than 26 hours (DRIFT and FAILED keep their state however old). A
+  FAILED run is not the day's check, so the next hourly tick tries again.
+  Admins see a Dashboard card unless it is OK, and the list under
   Settings → Data & backup. Its rollback drops only that table.
 
 **Alternatives considered:** (1) Write this ADR only: records the choice, but
@@ -1888,7 +1896,10 @@ check: a drift was found only when someone remembered.
 (422, logged as `stock-floor-refused`) instead of leaving stock below zero or
 a balance that disagrees with its ledger. A deploy onto a database that
 already holds a balance below zero stops at the migration's preflight, which
-names `check:issued-stock` and the way back. A balance that drifts from its
+names the balances, changes nothing and points to the recovery: clear the
+failed record, correct them in the previous version, install again
+(`DATABASE_ASSURANCE.md`; `deployment.md` checks for them before an update).
+A balance that drifts from its
 ledger by any other route is on the Dashboard within a day. Correct paths
 behave as before. Tests: `errors.test.ts`, `server.database-refusals.test.ts`,
 `ledger-writers.test.ts`, `stock-reconciliation.test.ts`,

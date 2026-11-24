@@ -8,7 +8,7 @@
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ADMIN_EMAIL, client, letAdminSign, login, prisma, requireAdminPassword, runId, secondAdmin, startServer, type TestServer } from './helpers.js';
-import { recomputeBalance, storesStock } from '../src/shared/inventory/balances.js';
+import { lockInventoryBalances, recomputeBalance, storesStock } from '../src/shared/inventory/balances.js';
 
 type Failure = { error: { code: string; message: string } };
 interface MonthEnd {
@@ -42,13 +42,18 @@ describe('P5 reports over real HTTP', () => {
    * A ledger line written straight to the database, to date it, with its
    * balance recomputed as every writer does: a line left without one is a
    * balance that differs from its ledger, which the daily stock check reports
-   * (ADR-047), and the suites after this one share the database.
+   * (ADR-047), and the suites after this one share the database. Lock, write
+   * and recompute share one transaction, as in every writer: the lock lasts
+   * only until its transaction ends.
    */
-  const dated = async (materialId: string, locationId: string, type: 'RECEIPT' | 'ISSUE', quantity: number, postedAt: string) => {
-    const line = await prisma.inventoryTransaction.create({ data: { materialId, locationId, type, quantity, actorId: adminId, postedAt: new Date(postedAt) } });
-    await recomputeBalance(storesStock(materialId, locationId), prisma);
-    return line;
-  };
+  const dated = (materialId: string, locationId: string, type: 'RECEIPT' | 'ISSUE', quantity: number, postedAt: string) =>
+    prisma.$transaction(async (tx) => {
+      const stock = storesStock(materialId, locationId);
+      await lockInventoryBalances([stock], tx);
+      const line = await tx.inventoryTransaction.create({ data: { materialId, locationId, type, quantity, actorId: adminId, postedAt: new Date(postedAt) } });
+      await recomputeBalance(stock, tx);
+      return line;
+    });
 
   beforeAll(async () => {
     server = await startServer({ procurementEnabled: true });
