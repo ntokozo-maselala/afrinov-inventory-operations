@@ -40,7 +40,19 @@ export async function lockInventoryBalances(keys: InventoryBalanceKey[], tx: TxC
   }
 }
 
+/**
+ * Rewrites the stored balance as the sum of its ledger lines.
+ *
+ * It takes the balance lock itself (ADR-047). A path that moves stock has
+ * already taken it, before reading the balance, and taking it again in the
+ * same transaction returns at once. If a path ever skipped that lock, two
+ * copies of it would each sum only the lines they could see and store the
+ * same stale figure over a ledger below zero; with the lock here, the second
+ * sum waits for the first to commit, sees the true total, and the stock floor
+ * constraint refuses it.
+ */
 export async function recomputeBalance(key: InventoryBalanceKey, tx: TxClient): Promise<void> {
+  await lockInventoryBalances([key], tx);
   const { materialId, locationId, heldForProject } = key;
   const agg = await tx.inventoryTransaction.aggregate({
     where: { materialId, locationId, heldForProject },

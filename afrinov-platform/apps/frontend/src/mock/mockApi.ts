@@ -2585,6 +2585,14 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/backups/status') {
     return { backup: { state: 'NONE', lastSuccessAt: null, lastRun: null }, restoreTest: { state: 'NONE', lastSuccessAt: null, lastRun: null }, recent: [] };
   }
+  // The daily stock check (ADR-047): the demo's figures always add up.
+  if (method === 'GET' && p === '/stock-reconciliation/status') {
+    const at = new Date().toISOString();
+    // Counted as the server's check counts them: every stock line, and every
+    // issue that is not itself a reversal.
+    const issues = state.transactions.filter((t) => t.type === 'ISSUE' && !t.reversesId).length;
+    return { state: 'OK', lastRun: { status: 'OK', startedAt: at, finishedAt: at, balances: computeStockLines().length, issues, problemCount: 0, problems: [], detail: null } };
+  }
 
   // ── Settings ───────────────────────────────────────────────────────────
   if (method === 'GET' && p === '/settings') {

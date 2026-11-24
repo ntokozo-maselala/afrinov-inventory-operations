@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { ApiError, Errors, classifyPrismaError, toErrorEnvelope, withRequestId } from './errors.js';
+import { ApiError, Errors, classifyDatabaseRefusal, classifyPrismaError, toErrorEnvelope, withRequestId } from './errors.js';
+import { STOCK_FLOOR_CONSTRAINT } from './inventory/stock-floor.js';
+
+// The shapes Prisma 7 with the pg driver adapter really throws, as captured
+// against PostgreSQL 16 on 2026-11-23 (ADR-047): the P-code alone is not
+// enough, the driver's cause says what the database refused.
+const driverFault = (code: string, cause: Record<string, unknown>) => ({
+  code,
+  message: 'Invalid `tx.inventoryBalance.upsert()` invocation: cannot reach db.internal:5432 as user afrinov',
+  meta: { modelName: 'InventoryBalance', driverAdapterError: { name: 'DriverAdapterError', cause } },
+});
+const checkViolation = (constraint: string) => driverFault('P2039', {
+  originalCode: '23514', kind: 'postgres', code: '23514', severity: 'ERROR',
+  originalMessage: `new row for relation "inventory_balances" violates check constraint "${constraint}"`,
+  detail: 'Failing row contains (b3a4…, 0d4f…, -1.0000, 2026-11-23 08:34:34.506, ).',
+});
+const deadlock = { originalCode: '40P01', originalMessage: 'deadlock detected', kind: 'TransactionWriteConflict' };
+const serializationFailure = { originalCode: '40001', originalMessage: 'could not serialize access', kind: 'TransactionWriteConflict' };
 
 describe('shared/errors', () => {
   describe('Errors factory', () => {
@@ -129,6 +146,58 @@ describe('shared/errors', () => {
     });
   });
 
+  describe('classifyDatabaseRefusal (ADR-047)', () => {
+    it('answers the stock floor refusing a balance as not enough stock, never a 500', () => {
+      const refusal = classifyDatabaseRefusal(checkViolation(STOCK_FLOOR_CONSTRAINT));
+      expect(refusal?.event).toBe('stock-floor-refused');
+      expect(refusal?.error.statusCode).toBe(422);
+      expect(refusal?.error.code).toBe('INSUFFICIENT_BALANCE');
+      expect(refusal?.error.message).toMatch(/below zero/);
+    });
+
+    it('leaves another check constraint unclassified, so it is still logged as a defect', () => {
+      expect(classifyDatabaseRefusal(checkViolation('tool_repairs_quantity_check'))).toBeNull();
+      expect(classifyDatabaseRefusal(driverFault('P2039', { originalCode: '23514' }))).toBeNull();
+    });
+
+    it('answers a deadlock in a model query as a conflict to try again', () => {
+      const refusal = classifyDatabaseRefusal(driverFault('P2034', deadlock));
+      expect(refusal?.event).toBe('transaction-conflict');
+      expect(refusal?.error.statusCode).toBe(409);
+      expect(refusal?.error.code).toBe('CONFLICT');
+      expect(refusal?.error.message).toMatch(/nothing was saved/i);
+    });
+
+    it('answers a deadlock while taking the balance lock (a raw query) the same way', () => {
+      // pg_advisory_xact_lock runs through $executeRaw, so its deadlock is P2010, not P2034.
+      expect(classifyDatabaseRefusal(driverFault('P2010', deadlock))?.error.statusCode).toBe(409);
+      expect(classifyDatabaseRefusal(driverFault('P2010', serializationFailure))?.error.statusCode).toBe(409);
+    });
+
+    it('leaves any other raw-query failure unclassified', () => {
+      expect(classifyDatabaseRefusal(driverFault('P2010', { originalCode: '42601', kind: 'postgres' }))).toBeNull();
+      expect(classifyDatabaseRefusal({ code: 'P2010' })).toBeNull();
+    });
+
+    it('ignores anything that is not a Prisma error', () => {
+      expect(classifyDatabaseRefusal(new Error('deadlock detected'))).toBeNull();
+      expect(classifyDatabaseRefusal({ code: '40P01' })).toBeNull();
+      expect(classifyDatabaseRefusal(null)).toBeNull();
+    });
+
+    it('never leaks the driver message, the failing row or the connection string', () => {
+      for (const fault of [checkViolation(STOCK_FLOOR_CONSTRAINT), driverFault('P2034', deadlock)]) {
+        const text = JSON.stringify(classifyDatabaseRefusal(fault)?.error.message);
+        expect(text).not.toMatch(/inventory_balances|Failing row|db.internal|5432|deadlock detected/);
+      }
+    });
+
+    it('keeps P2034 out of classifyPrismaError, whose unmapped codes are defects', () => {
+      expect(classifyPrismaError(driverFault('P2034', deadlock))).toBeNull();
+      expect(classifyPrismaError(checkViolation(STOCK_FLOOR_CONSTRAINT))).toBeNull();
+    });
+  });
+
   describe('withRequestId', () => {
     it('adds the id to an error envelope that lacks one', () => {
       const body = JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'Invalid payload' } });
@@ -165,6 +234,13 @@ describe('shared/errors', () => {
       expect(env.error.code).toBe('SERVICE_UNAVAILABLE');
       expect(env.error.message).not.toContain('secret');
       expect(env.error.requestId).toBe('req-2');
+    });
+
+    it('answers a database refusal with its domain code, not a bare 500 (ADR-047)', () => {
+      const env = toErrorEnvelope(checkViolation(STOCK_FLOOR_CONSTRAINT), 'req-4');
+      expect(env.error.code).toBe('INSUFFICIENT_BALANCE');
+      expect(env.error.requestId).toBe('req-4');
+      expect(toErrorEnvelope(driverFault('P2010', deadlock)).error.code).toBe('CONFLICT');
     });
 
     it('answers an unrecognised throw with a generic internal error', () => {

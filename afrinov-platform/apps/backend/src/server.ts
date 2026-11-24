@@ -5,7 +5,7 @@ import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import type { StaticDocumentSpec } from '@fastify/swagger';
-import { ApiError, Errors, classifyPrismaError, toErrorEnvelope, withRequestId } from './shared/errors.js';
+import { ApiError, Errors, classifyDatabaseRefusal, classifyPrismaError, toErrorEnvelope, withRequestId } from './shared/errors.js';
 import {
   loadConfig,
   ConfigError,
@@ -21,6 +21,7 @@ import { accountInDb } from './shared/authorization.js';
 import { pruneIdempotencyKeys } from './shared/idempotency.js';
 import { pruneReceiptImages } from './modules/inventory/receipt-check.js';
 import { pruneSignIns } from './modules/identity/sign-in-log.js';
+import { startStockReconciliation } from './modules/inventory/stock-reconciliation.job.js';
 import { currentIdleSeconds, nowSeconds } from './modules/identity/session.js';
 import { authTimeOf, isIdleTooLong, signInPredatesPassword } from './modules/identity/session-policy.js';
 import { serviceName, serviceVersion } from './shared/version.js';
@@ -261,6 +262,20 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
         requestId,
       ));
     }
+    // The database itself refused: the stock floor (a path skipped its own
+    // check, so a defect to follow up) or a deadlock or write conflict (rolled
+    // back, safe to try again). The person reads a domain error; the log keeps
+    // error severity, with an event to alert on (ADR-047).
+    const refusal = classifyDatabaseRefusal(err);
+    if (refusal) {
+      app.log.error(
+        { requestId, event: refusal.event, code: refusal.error.code, statusCode: refusal.error.statusCode, err },
+        refusal.event === 'stock-floor-refused'
+          ? 'Stock floor constraint refused a movement: a path skipped its balance check'
+          : 'Transaction rolled back by a deadlock or write conflict',
+      );
+      return reply.code(refusal.error.statusCode).send(toErrorEnvelope(refusal.error, requestId));
+    }
     // A recognisable database fault (unreachable, unique clash, missing row) is
     // classified into the documented contract with a safe message; its raw
     // driver text — which can carry the connection string, schema and SQL — is
@@ -345,6 +360,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const { auditRoutes } = await import('./modules/audit/audit.routes.js');
     const { healthRoutes } = await import('./modules/health/health.routes.js');
     const { backupRoutes } = await import('./modules/backups/backup.routes.js');
+    const { stockReconciliationRoutes } = await import('./modules/inventory/stock-reconciliation.routes.js');
 
     await authRoutes(instance);
     await userRoutes(instance);
@@ -365,6 +381,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     await reportingRoutes(instance, { procurementEnabled });
     await settingsRoutes(instance);
     await backupRoutes(instance);
+    await stockReconciliationRoutes(instance);
     await auditRoutes(instance);
     await healthRoutes(instance);
   }, { prefix: '/api/v1' });
@@ -500,6 +517,11 @@ export async function start(): Promise<void> {
   void pruneKeys();
   const pruneTimer = setInterval(() => void pruneKeys(), 60 * 60 * 1000);
   pruneTimer.unref();
+
+  // The daily stock reconciliation (ADR-047): ticks now and hourly, checks once
+  // a day that every balance equals its ledger, and logs `ledger-drift` at
+  // error level when one doesn't. Never stops the server.
+  startStockReconciliation(app.log);
 
   // Graceful shutdown: stop accepting connections, drain in-flight requests,
   // close the database pool, then exit.

@@ -120,6 +120,55 @@ export async function ledgerAndBalance(materialId: string, locationId: string, h
 export { prisma };
 
 /**
+ * Runs requests so they truly overlap, instead of hoping two quick local
+ * requests happen to (ADR-047). It holds the ledger table in EXCLUSIVE mode,
+ * which lets reads through but no insert, starts every request, waits until
+ * PostgreSQL shows each one waiting on a lock, then lets go. By then each has
+ * either read its balance or is queued behind the balance lock, and none has
+ * written: the window a missing or misplaced lock would leave open is held
+ * wide open. Without the balance lock both read the same balance; with it,
+ * the second waits and reads what the first left.
+ *
+ * Every request must reach a ledger write (or a lock before one); a request
+ * refused earlier never waits, and the helper fails after 15 seconds.
+ */
+export async function overlapping<T>(requests: Array<() => Promise<T>>): Promise<T[]> {
+  let started: Array<Promise<T>> = [];
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`LOCK TABLE inventory_transactions IN EXCLUSIVE MODE`;
+    const [{ pid: holder } = { pid: 0 }] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+    started = requests.map((request) => request());
+    // A request that fails is reported by Promise.all below, not as unhandled.
+    const settled: string[] = [];
+    started.forEach((p, i) => p.then(
+      (res) => { settled.push(`#${i} answered ${JSON.stringify(res).slice(0, 200)}`); },
+      (err: unknown) => { settled.push(`#${i} threw ${String(err)}`); },
+    ));
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      // Polled outside the transaction: inside one, pg_stat_activity is a
+      // snapshot taken on first read and never refreshed. Counted are only the
+      // sessions queued behind this table lock, directly or behind a request
+      // that is (a second request waits on the first one's balance lock), so
+      // a lock wait elsewhere in the database can't let go too early.
+      const [row] = await prisma.$queryRaw<Array<{ waiting: number }>>`
+        WITH RECURSIVE behind(pid) AS (
+          SELECT a.pid FROM pg_stat_activity a WHERE ${holder}::int = ANY(pg_blocking_pids(a.pid))
+          UNION
+          SELECT a.pid FROM pg_stat_activity a JOIN behind b ON b.pid = ANY(pg_blocking_pids(a.pid))
+        )
+        SELECT count(*)::int AS waiting FROM behind`;
+      if ((row?.waiting ?? 0) >= requests.length) break;
+      if (Date.now() > deadline) {
+        throw new Error(`Only ${row?.waiting ?? 0} of ${requests.length} requests reached a lock. ${settled.join('; ') || 'None answered.'}`);
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }, { timeout: 20_000, maxWait: 5_000 });
+  return Promise.all(started);
+}
+
+/**
  * Gives the seeded admin the Procurement Manager's role, so a test can sign its
  * small orders with the one client: Admin alone doesn't sign (po-approval.ts).
  */

@@ -1779,3 +1779,130 @@ to one project again, and a new job gets its own items. Older items without a
 project keep working and are offered on every project's lines until given
 one. Tests: `projectItems.test.ts`, `MaterialsSections.test.tsx`,
 `Rfqs.test.tsx`, `PoNewItem.test.tsx`, `PoProjectMaterial.test.tsx`.
+
+### ADR-047 — The stock floor: a balance lock taken before the read, and a database constraint behind it
+**Date:** 2026-11-23 · **Status:** Accepted
+
+**Context:** BR-009 says no movement may take any balance below zero, with no
+override. Every path that moves stock checks the balance and refuses an
+overdraw, inside a transaction, after taking a transaction-scoped advisory
+lock on the balance (`lockInventoryBalances`, `src/shared/inventory/balances.ts`).
+That lock was never recorded as a decision, and it was the only thing holding
+the rule: under READ COMMITTED a balance read before another transaction
+commits is stale, and two inserts never wait for each other, so without the
+lock two issues of 10 from 15 both pass their check and leave −5 (shown with
+two PostgreSQL 16 sessions on 2026-11-23). An examination of the 14 paths that
+write the ledger found every one takes the lock before it reads, but nothing
+would notice a new path that didn't, or one that read first: no database
+constraint, one race test (issues only), and a deadlock answered as a 500.
+Removing the transfer's lock in a test then showed a constraint on the balance
+alone is not enough: each overlapping recompute summed only the lines it could
+see, both stored 4, and the ledger said −2.
+
+**Decision:**
+- **The balance lock is the consistency boundary.** A balance (an item at a
+  location, held for a project or for Stores) is changed only by a
+  transaction holding its advisory lock, keyed on that triple and taken in
+  sorted order. Every path follows one order: **lock, then read, check, write
+  the ledger line, recompute**. A reading taken before the lock is not used
+  for the check. An advisory lock rather than `SELECT … FOR UPDATE`, because
+  the balance row may not exist yet (the first movement creates it by
+  upsert) and a row that isn't there can't be locked; rather than
+  SERIALIZABLE, because that would need a retry loop on every write path and
+  change every transaction, not only stock.
+- **The database holds the floor too.** `inventory_balances` has
+  `CHECK (quantity >= 0)` (`inventory_balances_quantity_non_negative`,
+  migration `20260101000073_stock_floor`). It is on the balance, not on
+  ledger lines: a line is a signed movement, and a transfer writes −x then +x
+  before it recomputes, so only where the balance ends is checked.
+- **The recompute takes the balance lock itself.** `recomputeBalance` calls
+  `lockInventoryBalances` for its key. A correct path already holds it, and
+  the same transaction takes it again at once; a path that skipped it now
+  waits, sums the true total and is refused by the constraint, instead of
+  storing a stale figure.
+- **A refusal by the database reads as a domain error.** `classifyDatabaseRefusal`
+  (`src/shared/errors.ts`) answers the floor constraint (SQLSTATE 23514, Prisma
+  P2039 or P2010) with 422 `INSUFFICIENT_BALANCE`, the same code a service
+  refusal gives, and a deadlock or write conflict (driver kind
+  `TransactionWriteConflict`: P2034 in a model query, P2010 when taking the
+  advisory lock) with 409 `CONFLICT`, "nothing was saved, try again". Both stay
+  at error level in the log, as unmapped Prisma codes are, each with its own
+  event (`stock-floor-refused`, `transaction-conflict`): the first means a
+  path skipped its check and is a defect to follow up. `classifyPrismaError`
+  is unchanged.
+- **Guards.** `src/shared/inventory/ledger-writers.test.ts` fails when a file
+  not on its list writes the ledger or the balances, or a listed production
+  writer no longer takes the lock, or any listed writer no longer recomputes
+  the balance (a line written without a recompute leaves the stored balance
+  stale, and the floor can't see that). It is a text search, file by file: a
+  new path inside a listed file passes it whether or not that path locks, so
+  it prompts a review rather than proving every path (TD-027 would).
+  `integration/stock-floor-races.real-http.test.ts`
+  races each of the seven paths that can overdraw (issue, transfer, write-off,
+  reversal, count, tool check-out, return to supplier) with the requests held
+  so they truly overlap (`overlapping`, `integration/helpers.ts`), and expects
+  one success, one refusal and the ledger and balance agreeing. The refusal is
+  422 `INSUFFICIENT_BALANCE`, except when an issue posts while a count is
+  open: the count then finds its stock moved and is refused with 409
+  `CONFLICT`, to be counted again. It also races two
+  transfers in opposite directions, which name the two balances in opposite
+  orders: both must succeed, as `lockInventoryBalances` sorts its keys (without
+  the sort they deadlock and one is refused with 409).
+- **Rollback.** Migrations stay forward-only. The rollback is a reviewed
+  script beside the migration, `prisma/rollbacks/20260101000073_stock_floor.sql`,
+  run with `prisma db execute`; it changes no data. `prisma migrate resolve
+  --rolled-back` does not unmark a migration that succeeded (tried
+  2026-11-23), so the constraint is put back by running the migration's own
+  script again, which checks for balances below zero first. Until it is,
+  `check:issued-stock` reports it missing. The integration suite runs the
+  rollback and the migration inside a transaction it undoes, so a broken
+  rollback fails CI.
+- **A daily reconciliation finds what the floor can't.** A CHECK sees one row:
+  it refuses a balance below zero, not a balance that no longer equals the
+  sum of its ledger (shown 2026-11-23: an absolute recompute from a stale sum
+  stored 4 over a ledger of −2 and passed it). PostgreSQL can't check that
+  relationship, so the application keeps it (the lock and the recompute) and
+  the backend checks it. Once a day (`StockReconciliationService.runIfDue`,
+  ticked hourly from `server.ts`, due after 23 hours) it runs the
+  `check:issued-stock` check in one REPEATABLE READ transaction under a
+  try-lock, so balances and ledger are compared at one moment and two
+  processes never both run it, and records the result in
+  `stock_reconciliation_runs` (migration `20260101000074`, kept a year): OK,
+  DRIFT with up to 50 problems and the true count, or FAILED in safe words.
+  Drift is logged at error level as `ledger-drift`, a check that could not run
+  as `stock-check-failed`. `GET /stock-reconciliation/status`
+  (`manage:settings`) reads the newest run: LATE when it is a clean run
+  older than 26 hours (DRIFT and FAILED keep their state however old). A
+  FAILED run is not the day's check, so the next hourly tick tries again.
+  Admins see a Dashboard card unless it is OK, and the list under
+  Settings → Data & backup. Its rollback drops only that table.
+
+**Alternatives considered:** (1) Write this ADR only: records the choice, but
+a missing or misplaced lock still leaves stock below zero unseen. (2) One
+posting function every path goes through (`postMovements`): removes the
+convention, but rewrites 14 paths that work; deferred, TD-027. (3) A
+conditional `UPDATE … WHERE quantity >= x` on the balance row: replaces the
+ledger-first recompute (ADR-002) everywhere. (4) SERIALIZABLE isolation:
+retries on every write path. (5) A trigger that keeps and checks the balance:
+moves the recompute into SQL, harder to test and change; an incremental
+trigger (`quantity = quantity + NEW.quantity`) would make the database keep
+balance = Σ ledger even without the lock, and is the candidate when TD-027 is
+taken up, under its own ADR. (6) The constraint without the lock in the
+recompute — **rejected on evidence**: it does not catch two overlapping
+defective paths. (7) Reconciliation by hand each week — replaced by the daily
+check: a drift was found only when someone remembered.
+
+**Consequences:** A path that forgets the lock or reads before it is refused
+(422, logged as `stock-floor-refused`) instead of leaving stock below zero or
+a balance that disagrees with its ledger. A deploy onto a database that
+already holds a balance below zero stops at the migration's preflight, which
+names the balances, changes nothing and points to the recovery: clear the
+failed record, correct them in the previous version, install again
+(`DATABASE_ASSURANCE.md`; `deployment.md` checks for them before an update).
+A balance that drifts from its
+ledger by any other route is on the Dashboard within a day. Correct paths
+behave as before. Tests: `errors.test.ts`, `server.database-refusals.test.ts`,
+`ledger-writers.test.ts`, `stock-reconciliation.test.ts`,
+`stock-reconciliation.job.test.ts`, `stockReconciliation.test.ts`,
+`SettingsStockCheck.test.tsx`, `stock-floor.real-http.test.ts`,
+`stock-floor-races.real-http.test.ts`, `stock-reconciliation.real-http.test.ts`.

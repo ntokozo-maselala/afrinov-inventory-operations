@@ -18,6 +18,7 @@ import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { usePermissions } from '../hooks/usePermissions';
 import { activeAdminCount, MIN_ADMINS } from '../lib/admins';
 import { dashboardNotice, type BackupHealth } from '../lib/backups';
+import { reconciliationCard, type ReconciliationHealth } from '../lib/stockReconciliation';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { useReceiptMode } from '../lib/receipts';
 import { DashboardLocationDonut, DashboardValueBarChart, type RoomOf } from './DashboardCharts';
@@ -255,8 +256,11 @@ export function Dashboard() {
   const { data: users } = useApi<Array<{ active: boolean; roles: Array<{ role: { name: string } }> }>>(managesUsers ? '/users' : null);
   const admins = managesUsers && Array.isArray(users) ? activeAdminCount(users) : null;
   // Only Admins hold manage:users, and only they keep the system running, backups included.
-  const { data: backups } = useApi<BackupHealth>(managesUsers ? '/backups/status' : null);
+  const { data: backups, reload: reloadBackups } = useApi<BackupHealth>(managesUsers ? '/backups/status' : null);
   const backupWarning = backups?.backup && backups.restoreTest ? backupCard(backups) : null;
+  // The daily check that every stock figure adds up (ADR-047), for the same Admins.
+  const { data: reconciliation, reload: reloadReconciliation } = useApi<ReconciliationHealth>(managesUsers ? '/stock-reconciliation/status' : null);
+  const reconciliationWarning = reconciliationCard(reconciliation);
   // While either two-person check is off (system audit C9).
   const { data: checks } = useApi<Record<string, unknown>>(managesUsers ? '/settings/values?keys=inventory.requireWriteOffApproval,purchaseOrders.requireApprovalBeforeProcessing' : null);
   const checksOff = checksOffCard(checks, PROCUREMENT_ENABLED);
@@ -296,6 +300,7 @@ export function Dashboard() {
       ...(unconfirmed && correctsSlips && unconfirmed.disputed > 0 ? [disputedCard(unconfirmed)] : []),
       ...(admins !== null && admins < MIN_ADMINS ? [adminsCard(admins)] : []),
       ...(backupWarning ? [backupWarning] : []),
+      ...(reconciliationWarning ? [reconciliationWarning] : []),
       ...(checksOff ? [checksOff] : []),
       ...(selfIssuedWarning ? [selfIssuedWarning] : []),
       ...(writeOffsSentBack ? [writeOffsSentBack] : []),
@@ -308,7 +313,7 @@ export function Dashboard() {
           ? [approvalCard(Array.isArray(mine) ? mine : [], Array.isArray(pending) ? pending : null, { projects: approvesProjects, stores: approvesStores })]
           : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning, checksOff, selfIssuedWarning, writeOffsWaiting, writeOffsSentBack, issuesWaiting]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning, reconciliationWarning, checksOff, selfIssuedWarning, writeOffsWaiting, writeOffsSentBack, issuesWaiting]);
 
   const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [
@@ -339,7 +344,9 @@ export function Dashboard() {
     reloadTools();
     reloadLocations();
     if (canApprove) { reloadMine(); reloadPending(); }
-  }, [reload, reloadLowStock, reloadValue, reloadTools, reloadLocations, canApprove, reloadMine, reloadPending]);
+    // The Admins' health cards: a check or backup that ran since the page opened.
+    if (managesUsers) { reloadBackups(); reloadReconciliation(); }
+  }, [reload, reloadLowStock, reloadValue, reloadTools, reloadLocations, canApprove, reloadMine, reloadPending, managesUsers, reloadBackups, reloadReconciliation]);
 
   const inventoryRows = report?.inventory ?? [];
   const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);

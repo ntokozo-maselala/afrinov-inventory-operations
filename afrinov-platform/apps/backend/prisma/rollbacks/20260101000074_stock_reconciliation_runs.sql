@@ -1,0 +1,20 @@
+-- Rollback of 20260101000074_stock_reconciliation_runs (ADR-047).
+--
+-- Drops the record of daily stock checks. No stock data is touched: each row
+-- only says what a check found, and the next run records a fresh one. Needed
+-- only when rolling the application back to a version before this table; the
+-- older version never reads it, so leaving it in place is also safe.
+--
+-- Roll back (from apps/backend, with DATABASE_URL set as for a deploy):
+--
+--   npx prisma db execute --file prisma/rollbacks/20260101000074_stock_reconciliation_runs.sql
+--
+-- Prisma still lists the migration as applied afterwards (`migrate resolve
+-- --rolled-back` only changes a failed migration), so put it back with its
+-- own script before running a version that has it:
+--
+--   npx prisma db execute --file prisma/migrations/20260101000074_stock_reconciliation_runs/migration.sql
+--
+-- Safe to run twice. integration/stock-reconciliation.real-http.test.ts runs
+-- it inside a transaction it then undoes.
+DROP TABLE IF EXISTS "stock_reconciliation_runs";

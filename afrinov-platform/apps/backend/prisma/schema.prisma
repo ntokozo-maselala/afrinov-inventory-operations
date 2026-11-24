@@ -1613,6 +1613,28 @@ model BackupRun {
   @@map("backup_runs")
 }
 
+// The daily stock reconciliation (ADR-047): whether every stored balance still
+// equals its ledger, none is below zero, every issue adds up and the stock
+// floor constraint is in place. The backend records one row a day; Admins see
+// the newest on the Dashboard. Kept a year.
+model StockReconciliationRun {
+  id           String   @id @default(uuid())
+  // OK, DRIFT (something does not add up) or FAILED (the check could not run); checked in the migration.
+  status       String
+  startedAt    DateTime @map("started_at")
+  finishedAt   DateTime @default(now()) @map("finished_at")
+  balances     Int      @default(0)
+  issues       Int      @default(0)
+  // How many things did not add up; `problems` keeps at most the first 50.
+  problemCount Int      @default(0) @map("problem_count")
+  problems     Json     @default("[]")
+  // Why a FAILED check could not run, in safe words (never the driver's message).
+  detail       String?
+
+  @@index([finishedAt])
+  @@map("stock_reconciliation_runs")
+}
+
 // A change of an item's unit cost, with why (system audit C3, ADR-039). Unit
 // cost values stock and decides whether a write-off needs someone else's
 // approval, so each change is kept and shown on the item.

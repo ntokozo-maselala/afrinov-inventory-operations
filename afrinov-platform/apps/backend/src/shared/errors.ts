@@ -7,6 +7,8 @@
 // already safe to show (never a raw driver/ORM/exception message). The
 // requestId ties a client-visible error to the server log line for the same
 // request.
+import { STOCK_FLOOR_CONSTRAINT, STOCK_FLOOR_MESSAGE } from './inventory/stock-floor.js';
+
 export class ApiError extends Error {
   constructor(
     public readonly statusCode: number,
@@ -125,6 +127,59 @@ export function classifyPrismaError(err: unknown): ApiError | null {
   }
 }
 
+/** The log event for a database refusal: each is a distinct line to alert on. */
+export type DatabaseRefusalEvent = 'stock-floor-refused' | 'transaction-conflict';
+
+export interface DatabaseRefusal {
+  error: ApiError;
+  event: DatabaseRefusalEvent;
+}
+
+/**
+ * The driver's own account of a Prisma failure. With the pg driver adapter,
+ * Prisma 7 carries it as `meta.driverAdapterError.cause`: the SQLSTATE in
+ * `originalCode` and a `kind` such as `TransactionWriteConflict`.
+ */
+function driverCause(err: unknown): { originalCode?: unknown; originalMessage?: unknown; kind?: unknown } | null {
+  const cause = (err as { meta?: { driverAdapterError?: { cause?: unknown } } } | null)?.meta?.driverAdapterError?.cause;
+  return typeof cause === 'object' && cause !== null ? cause as Record<string, unknown> : null;
+}
+
+/**
+ * Two refusals by the database itself that have a known meaning for the
+ * person, unlike other unmapped failures (ADR-047):
+ *
+ * - The stock floor constraint refused a balance below zero. The service
+ *   should have refused first, so this is also a defect to follow up; the
+ *   person reads the same "not enough stock" a service refusal gives.
+ * - A deadlock or write conflict (SQLSTATE 40P01 or 40001). PostgreSQL rolled
+ *   the whole transaction back, so the outcome is known and nothing was
+ *   saved: try again, with the same idempotency key. A deadlock taking the
+ *   balance lock comes through `$executeRaw` as P2010, one in a model query
+ *   as P2034, so the driver's `kind` decides, not the P-code.
+ *
+ * Kept apart from `classifyPrismaError`, whose unmapped codes are defects
+ * logged at error level: these are still logged at error level by the
+ * central handler, each under its own event. Returns null for anything else.
+ */
+export function classifyDatabaseRefusal(err: unknown): DatabaseRefusal | null {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (typeof code !== 'string' || !/^P\d{4}$/.test(code)) return null;
+  const cause = driverCause(err);
+  if (!cause) return null;
+  if (cause.originalCode === '23514' && typeof cause.originalMessage === 'string'
+    && cause.originalMessage.includes(`"${STOCK_FLOOR_CONSTRAINT}"`)) {
+    return { event: 'stock-floor-refused', error: Errors.insufficientBalance(STOCK_FLOOR_MESSAGE) };
+  }
+  if ((code === 'P2034' || code === 'P2010') && cause.kind === 'TransactionWriteConflict') {
+    return {
+      event: 'transaction-conflict',
+      error: Errors.conflict('Someone else changed the same records at the same moment, so nothing was saved. Try again.'),
+    };
+  }
+  return null;
+}
+
 /**
  * Add a requestId to an already-serialised error body that lacks one, leaving
  * anything that is not a recognised envelope untouched. Used at the response
@@ -163,7 +218,7 @@ export function toErrorEnvelope(err: unknown, requestId?: string): ErrorEnvelope
       },
     };
   }
-  const classified = classifyPrismaError(err);
+  const classified = classifyDatabaseRefusal(err)?.error ?? classifyPrismaError(err);
   if (classified) {
     return {
       error: {
