@@ -18,6 +18,7 @@ import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { idempotentMutation } from '../../shared/idempotency.js';
 import { Errors } from '../../shared/errors.js';
+import { pageLimit } from '../../shared/paging.js';
 
 /**
  * The locations a report covers: with inside=true, the location and the ones
@@ -259,7 +260,7 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     return InventoryService.queryHistory({
       ...(await historyFilter(q)),
       before: q['before'],
-      limit: q['limit'] ? Number(q['limit']) : undefined,
+      limit: pageLimit(q['limit'], 1000),
     });
   });
 
@@ -521,7 +522,7 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     const q = req.query as Record<string, string | undefined>;
     // receipt=confirmed or unconfirmed: by whether the person collecting confirmed the slip (ADR-034).
     const receipt = (['confirmed', 'unconfirmed', 'disputed'] as const).find((r) => r === q['receipt']);
-    return InventoryService.issueSlips({ ...(await historyFilter(q)), receipt, before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined });
+    return InventoryService.issueSlips({ ...(await historyFilter(q)), receipt, before: q['before'], limit: pageLimit(q['limit'], 200) });
   });
 
   // The received-stock report: deliveries with their lines, newest first.
@@ -530,7 +531,7 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     const q = req.query as Record<string, string | undefined>;
     return StockReceiptService.list({
       from: q['from'], to: q['to'], supplierId: q['supplierId'], locationId: q['locationId'], locationIds: await locationScope(q), q: q['q'],
-      before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined,
+      before: q['before'], limit: pageLimit(q['limit'], 200),
     });
   });
 
@@ -540,7 +541,7 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     const q = req.query as Record<string, string | undefined>;
     return StockCountService.list({
       from: q['from'], to: q['to'], locationId: q['locationId'], locationIds: await locationScope(q), actorId: q['actorId'],
-      before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined,
+      before: q['before'], limit: pageLimit(q['limit'], 200),
     });
   });
 

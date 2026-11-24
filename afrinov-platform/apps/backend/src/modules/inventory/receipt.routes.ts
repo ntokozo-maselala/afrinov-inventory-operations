@@ -77,11 +77,11 @@ export async function receiptRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // How many images a shorter keep period would remove, so Settings can say before it is saved (edge case E8).
-  app.get('/slips/images/past-keep', { preHandler: [app.authenticate] }, async (req, reply) => {
+  app.get('/slips/images/past-keep', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ManageSettings);
     const months = Number((req.query as { months?: string }).months);
     if (!Number.isInteger(months) || months < 0 || months > 240) {
-      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'months must be a whole number from 0 to 240' } });
+      throw Errors.validation('months must be a whole number from 0 to 240');
     }
     return { months, count: await imagesPastKeep(months) };
   });

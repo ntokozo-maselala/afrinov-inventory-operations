@@ -100,6 +100,18 @@ update the pins.
 Re-check these with `npm outdated --workspaces --long` before assuming they are
 still blocked.
 
+### Security overrides
+
+`overrides` in the root `package.json` patch transitive dependencies that an
+upstream release still pins. Fix an audit finding with a scoped, exact-version
+override or an in-range bump, never `npm audit fix --force` (it proposed
+downgrading Prisma to 6.x). After changing an override, run `npm update <pkg>`
+so the lockfile picks it up, then verify from a clean `npm ci`.
+
+- **`@prisma/config` → `effect` 3.22.4** — GHSA-7589-6fvf-x4pw (ReDoS, high);
+  prisma 7.10.1 pins `effect` 3.20.0. Remove once a prisma release depends on
+  `effect` ≥ 3.22.1 (`npm view @prisma/config@latest dependencies.effect`).
+
 ### API conventions introduced by the current majors
 
 Use these forms; the older spellings still work but are deprecated or removed.
@@ -127,6 +139,11 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `err.message` cannot leak server text. Never render a raw exception message.
   See `afrinov-docs/docs/12-operations/error-handling.md` and
   `afrinov-docs/docs/08-api/error-model.md`.
+- **Read a query parameter through a check before it reaches Prisma.** A list
+  route that reads `?limit` by hand uses `pageLimit(raw, max)`
+  (`src/shared/paging.ts`), never `Number(q['limit'])`: `abc` became `take: NaN`
+  (a 500) and `-1` the oldest rows. An enum filter is checked against its list
+  first (as `GET /settings?category` is against `SETTING_SECTIONS`).
 - **A failed refresh keeps data only for availability failures.** `useApi`
   marks `stale` for `SERVICE_UNAVAILABLE`/`NETWORK_ERROR`/`TIMEOUT`; `FORBIDDEN`
   and `UNAUTHENTICATED` clear it, so a permission loss is never shown as "here

@@ -17,7 +17,7 @@
 
 1. Run `npm.cmd ci` from `afrinov-platform/` on the standard developer machine and CI to confirm npm's install-script policy honors the recorded `allowScripts` entries. Keep `afrinov-platform/package-lock.json` authoritative; do not run install commands at repository root.
 2. Add a short PowerShell-specific onboarding note that uses `npm.cmd`, or let developers choose a local policy for `npm.ps1`. No machine execution-policy change is required for project correctness.
-3. Decide whether the root `package-lock.json` without a root manifest is intentionally retained. Do not delete it as part of this recovery.
+3. Decide whether the root `package-lock.json` without a root manifest is intentionally retained. Do not delete it as part of this recovery. *Decided 2026-11-23: removed, as it was empty and nothing read it (F-13).*
 
 ### P1 — Demonstrate application execution
 
