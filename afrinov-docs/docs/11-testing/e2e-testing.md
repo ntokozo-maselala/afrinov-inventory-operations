@@ -1,6 +1,6 @@
 # End-to-End Testing
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 1b6cec1, 2026-11-24
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 6a122ff, 2026-11-24
 
 Target: automate the critical journeys from `01-product/user-journeys.md`
 (technician issues material against a project; store controller receives
@@ -21,10 +21,21 @@ the run, and stops them after, through `e2e/servers.ts`:
   server, or one left by an earlier run), since the readiness check would
   take that server's answer for its own and the suite would test it, and
   whatever database it uses. Stop it and run again.
+- The ports are checked once, before the start, so another process could
+  still take one in the moments between. A server counts as ready only
+  while it is still running, and the backend is checked again once Vite is
+  up: a server of ours that couldn't listen has exited by then, and setup
+  fails with how it ended instead of testing whatever answered.
 - Each server is stopped with everything it started (it runs through a
   shell, and the server listening is a grandchild): `taskkill /T` on
-  Windows, its process group elsewhere. Teardown waits until they have
-  gone, and a setup that fails half way stops what it started.
+  Windows; elsewhere each process below it, found through `/proc` (Linux)
+  or `ps` (macOS). Teardown waits until they have gone, and a setup that
+  fails half way stops what it started.
+- The servers stay in the runner's process group, so the terminal's Ctrl+C
+  reaches them as it reaches the runner, however the runner handles it. A
+  runner that exits before its teardown (an error) stops them from an exit
+  hook. Only a runner killed outright (SIGKILL, Task Manager) leaves them
+  running.
 
 Browser specs are `e2e/*.spec.ts`; `e2e/*.test.ts` are Vitest tests of these
 helpers, run with the frontend's unit tests (project `e2e-helpers`, Node).
