@@ -481,6 +481,18 @@ further entries.
 
 ### Installing a new version
 
+**The first time you install a version with the stock floor (ADR-047)**,
+check before `git checkout` that no balance is already below zero: that
+version refuses to install over one, and its API then doesn't start.
+
+```sh
+cd /opt/afrinov/afrinov-platform/apps/backend
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT m.sku, l.name AS location, b.held_for_project, b.quantity FROM inventory_balances b JOIN materials m ON m.id = b.material_id JOIN locations l ON l.id = b.location_id WHERE b.quantity < 0"'
+```
+
+No rows: go ahead with the steps below. Any rows: correct each with an adjustment (Found, with a
+note) in the version still running, then run it again.
+
 ```sh
 cd /opt/afrinov/afrinov-platform/apps/backend
 docker compose run --rm backup now                  # a backup before every change
@@ -495,18 +507,6 @@ sudo rsync -a --delete apps/frontend/dist/ /srv/afrinov/frontend/
 Then sign in and open Stock and Movements. Migrations only go forward: going
 back to an older version across a database change means restoring the backup
 taken first (`backup-and-recovery.md`, "Restoring in earnest").
-
-**The first time you install a version with the stock floor (ADR-047)**,
-check before `git checkout` that no balance is already below zero: that
-version refuses to install over one, and its API then doesn't start.
-
-```sh
-cd /opt/afrinov/afrinov-platform/apps/backend
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT m.sku, l.name AS location, b.held_for_project, b.quantity FROM inventory_balances b JOIN materials m ON m.id = b.material_id JOIN locations l ON l.id = b.location_id WHERE b.quantity < 0"'
-```
-
-No rows: go ahead. Any rows: correct each with an adjustment (Found, with a
-note) in the version still running, then run it again.
 
 ### When something goes wrong
 

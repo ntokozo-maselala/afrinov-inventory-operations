@@ -117,29 +117,47 @@ describe('StockReconciliationService.runIfDue when the check itself fails', () =
 });
 
 describe('StockReconciliationService.runIfDue after a failed check', () => {
+  // The runs table, kept in memory: findFirst honours a status filter and
+  // returns the newest by startedAt, as the real query does.
+  type Row = { status: string; startedAt: Date };
+  let rows: Row[];
+  const newest = (args: { where?: { status?: { in: string[] } } }) =>
+    rows.filter((r) => !args.where?.status || args.where.status.in.includes(r.status))
+      .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0] ?? null;
+  const save = async ({ data }: { data: Row }) => { rows.push(data); return data; };
   const tx = {
-    $queryRaw: vi.fn(),
-    stockReconciliationRun: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+    $queryRaw: vi.fn(async () => [{ got: true }]),
+    stockReconciliationRun: { findFirst: vi.fn(async (args: Parameters<typeof newest>[0]) => newest(args)), create: vi.fn(save), deleteMany: vi.fn(async () => ({ count: 0 })) },
   };
+  const later = (hours: number) => new Date(NOW.getTime() + hours * 3_600_000);
+
   beforeEach(() => {
-    db.$transaction.mockReset();
-    db.$transaction.mockImplementation(async (work: (t: typeof tx) => unknown) => work(tx));
-    tx.$queryRaw.mockResolvedValue([{ got: true }]);
-    tx.stockReconciliationRun.findFirst.mockReset().mockResolvedValue(null);
-    tx.stockReconciliationRun.create.mockResolvedValue({});
-    tx.stockReconciliationRun.deleteMany.mockResolvedValue({ count: 0 });
-    checkIssuedStock.mockResolvedValue({ balances: 4, issues: 2, problems: [] });
+    rows = [];
+    db.$transaction.mockReset().mockImplementation(async (work: (t: typeof tx) => unknown) => work(tx));
+    db.stockReconciliationRun.create.mockReset().mockImplementation(save);
+    db.stockReconciliationRun.deleteMany.mockReset().mockResolvedValue({ count: 0 });
+    checkIssuedStock.mockReset();
   });
 
   // A failure is not the day's check: nothing was compared. Only a check that
   // finished (OK or DRIFT) starts the next 23 hours, so a failed one is tried
   // again at the next hourly tick, as the Dashboard and Settings say.
-  it('counts only a finished check as the day\'s, so a failure is tried again at the next tick', async () => {
-    const outcome = await StockReconciliationService.runIfDue(NOW);
+  it('records the failure, then runs at the next hourly tick, and only then waits a day', async () => {
+    checkIssuedStock.mockRejectedValueOnce(new Error('connection reset'));
+    expect((await StockReconciliationService.runIfDue(NOW)).kind).toBe('failed');
+    expect(rows.map((r) => r.status)).toEqual(['FAILED']);
 
-    expect(tx.stockReconciliationRun.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { status: { in: ['OK', 'DRIFT'] } },
-    }));
-    expect(outcome.kind).toBe('ran');
+    checkIssuedStock.mockResolvedValue({ balances: 4, issues: 2, problems: [] });
+    const retried = await StockReconciliationService.runIfDue(later(1));
+    expect(retried.kind === 'ran' && retried.run.status).toBe('OK');
+
+    expect(await StockReconciliationService.runIfDue(later(2))).toEqual({ kind: 'skipped', reason: 'not-due' });
+    expect(rows.map((r) => r.status)).toEqual(['FAILED', 'OK']);
+  });
+
+  it('keeps trying each hour while the check keeps failing', async () => {
+    checkIssuedStock.mockRejectedValue(new Error('connection reset'));
+    for (const h of [0, 1, 2]) expect((await StockReconciliationService.runIfDue(later(h))).kind).toBe('failed');
+    expect(rows.map((r) => r.status)).toEqual(['FAILED', 'FAILED', 'FAILED']);
   });
 });

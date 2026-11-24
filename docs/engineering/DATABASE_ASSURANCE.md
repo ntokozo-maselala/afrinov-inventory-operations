@@ -225,9 +225,12 @@ constraints, so that check is how a forgotten rollback is found.
 `integration/stock-floor.real-http.test.ts` runs the rollback, the migration
 and the preflight inside a transaction it undoes.
 
-**Guard.** `src/shared/inventory/ledger-writers.test.ts` fails when a file not
-on its list writes `inventory_transactions` or `inventory_balances` (a direct
-Prisma call or raw SQL, with or without a schema), when a listed production
+**Guard.** `src/shared/inventory/ledger-writers.test.ts` fails when a
+TypeScript file under `src/` that is not on its list writes
+`inventory_transactions` or `inventory_balances` in a form it recognises (a
+direct Prisma call, or raw `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` with or
+without a schema; a write through an alias or a variable holding the table
+name, or from a file outside `src/`, is not seen), when a listed production
 writer stops taking the lock, or when any listed writer stops recomputing the
 balance. The demo seed is the one writer not required to lock: it runs in a
 single process before the API starts. The guard works file by file, not path

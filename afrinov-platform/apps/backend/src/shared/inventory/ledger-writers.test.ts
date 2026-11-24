@@ -20,8 +20,8 @@ import { describe, it, expect } from 'vitest';
 
 const LEDGER_WRITE = /\binventoryTransaction\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/;
 const BALANCE_WRITE = /\binventoryBalance\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/;
-/** Raw SQL, with or without a schema in front (`public.inventory_transactions`, `"public"."inventory_balances"`). */
-const RAW_WRITE = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"?[A-Za-z_]\w*"?\.)?"?inventory_(transactions|balances)\b/i;
+/** Raw SQL, TRUNCATE included, with or without a schema in front (`public.inventory_transactions`, `"public"."inventory_balances"`). */
+const RAW_WRITE = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?)\s+(?:"?[A-Za-z_]\w*"?\.)?"?inventory_(transactions|balances)\b/i;
 
 export interface SourceFile { path: string; text: string }
 
@@ -77,9 +77,12 @@ describe('findLedgerWriters', () => {
       { path: 'd.ts', text: 'await tx.$executeRaw`insert into inventory_transactions (id) values (1)`' },
       { path: 'e.ts', text: 'await tx.$executeRaw`UPDATE public.inventory_transactions SET quantity = 0`' },
       { path: 'f.ts', text: 'await tx.$executeRaw`DELETE FROM "public"."inventory_balances"`' },
+      { path: 'g.ts', text: 'await tx.$executeRaw`TRUNCATE inventory_balances`' },
+      { path: 'h.ts', text: 'await tx.$executeRawUnsafe(`truncate table public.inventory_transactions cascade`)' },
     ]);
     expect([...found.entries()].map(([p, k]) => [p, [...k]])).toEqual([
       ['a.ts', ['ledger']], ['b.ts', ['balance']], ['c.ts', ['raw']], ['d.ts', ['raw']], ['e.ts', ['raw']], ['f.ts', ['raw']],
+      ['g.ts', ['raw']], ['h.ts', ['raw']],
     ]);
   });
 
