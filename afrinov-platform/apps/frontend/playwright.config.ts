@@ -17,6 +17,8 @@ export { frontendDir, backendDir };
 
 export default defineConfig({
   testDir: resolve(frontendDir, 'e2e'),
+  // Browser specs only: e2e/*.test.ts are Vitest unit tests of the suite's helpers.
+  testMatch: '**/*.spec.ts',
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: true,
