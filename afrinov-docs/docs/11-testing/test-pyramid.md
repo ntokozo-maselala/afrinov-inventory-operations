@@ -1,23 +1,24 @@
 # Test Pyramid
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 1b6cec1, 2026-11-24
 
 ```
         /  E2E (few)  \        target: issue stock, receive against PO, low-stock alert
-       /----------------\      actual: 1 file, 2 tests (login only)
+       /----------------\      actual: 3 files, 8 tests (sign-in, sign-out, failures); run in CI
       / API / Contract    \    actual: integration suites call the real HTTP API;
      /----------------------\          OpenAPI test checks documented = registered routes
-    /  Integration           \  actual: 11 files, about 55 tests, real PostgreSQL
+    /  Integration           \  actual: 41 files, 400 tests, real PostgreSQL
    /----------------------------\
-  /  Unit (many)                 \ actual: backend 37 files / 492 tests;
- /--------------------------------\        frontend 35 files / 389 tests
+  /  Unit (many)                 \ actual: backend 89 files / 1426 tests;
+ /--------------------------------\        frontend 144 files / 1664 tests
 ```
 Most tests at the bottom (fast, numerous), fewest at the top. Counts are
-from a local run on 2026-10-09 at commit 4e6d76f (`npm test` in
-`afrinov-platform/`); the integration count is from the test files, as the
-suite needs a database and was not run.
+from local runs on 2026-11-24 at commit 1b6cec1, after a clean `npm ci`:
+`npm test` in `afrinov-platform/`, the integration suite on a fresh
+migrated and seeded database, and `npx playwright test`. Counts move with
+every feature; run the suites rather than trusting these.
 
 ## Evidence
-- `afrinov-platform/apps/backend/integration/` — 11 `*.real-http.test.ts` files
-- `afrinov-platform/apps/frontend/e2e/login.spec.ts`
+- `afrinov-platform/apps/backend/integration/` — 41 `*.real-http.test.ts` files
+- `afrinov-platform/apps/frontend/e2e/*.spec.ts` (`login`, `sign-out`, `error-handling`)
 - `afrinov-platform/apps/backend/src/openapi/openapi.test.ts:37-39`
