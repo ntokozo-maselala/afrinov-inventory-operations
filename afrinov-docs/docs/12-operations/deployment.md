@@ -330,6 +330,12 @@ and sites stock is issued to; set each worker's and contractor's counter PIN.
 Once every PIN is set and the counter is ready, change receipt confirmation
 from **Ask** to **Required** (Inventory settings).
 
+A slip moves the stock the moment it is posted, whether or not anyone
+confirms it: the goods have left the shelf, so the stock figures say so. The
+confirmation records who took them (ADR-034, kept on 25 Nov 2026). On
+**Required** the hand-over step can't be skipped without a reason, and the
+Dashboard shows **Slips not confirmed**; on **Ask** it doesn't.
+
 Recipients, suppliers and projects in the workbook are also created by the
 import in Part 10; anything created here first is kept, not duplicated.
 
@@ -453,18 +459,27 @@ found after this is corrected with the count screen or an adjustment, never a
 second import.
 
 **10.6** In Settings → Inventory, set where project deliveries are booked, now
-that the locations exist. Open the store: from this moment every entry goes
-into the app.
+that the locations exist.
 
-**10.7** Save the workbook read-only with the go-live date in its name. No
+**10.7 Receipt confirmation.** Set any PIN still noted from 7.4 (Recipients),
+then check receipt confirmation is on **Required** (Settings → Inventory).
+Agree one rule with the store staff: goods are handed over only while the
+hand-over step is on screen, so the person collecting confirms there and
+then. A slip confirmed later from Movements is the exception, not the habit.
+
+Open the store: from this moment every entry goes into the app.
+
+**10.8** Save the workbook read-only with the go-live date in its name. No
 further entries.
 
-**10.8** Take a backup: `docker compose run --rm backup now`.
+**10.9** Take a backup: `docker compose run --rm backup now`.
 
 - [ ] Count done, dry run clean, mapping reviewed
 - [ ] Backup before the import
 - [ ] Import applied, reconciled, checks clean
-- [ ] Project delivery location set, workbook archived, backup after
+- [ ] Project delivery location set
+- [ ] Every PIN set, receipt confirmation on Required, hand-over rule agreed with the store
+- [ ] Workbook archived, backup after
 
 ---
 
@@ -474,6 +489,7 @@ further entries.
 |---|---|---|
 | Every working day | Admin | Glance at the Dashboard: a **Backups**, **Stock check** or **Admins** card means something needs doing |
 | Every week | Admin | `docker compose ps` all running; `df -h /mnt/backup` has room |
+| Every week | Store controller | Dashboard **Slips not confirmed**: have each person confirm their slip (open it from the card), or ask why not. **Disputed slips**: check each one and reverse a line that was wrong. A slip that stays unconfirmed is still issued stock; it is a question of who took it, not of whether the stock is there |
 | At each month close | Admin | Settings → Data & backup says the stock figures add up (the server checks once a day, ADR-047); note it with the close |
 | Every three months | Admin, then the owner | Restore test (8.3, second command); the owner signs it off under Settings → Data & backup |
 | Every year, before it lapses | Admin | Renew the backup service's Azure access: `ACCOUNT=<name> RG=rg-afrinov-backups bash backup/azure-setup.sh renew` |
@@ -514,6 +530,7 @@ taken first (`backup-and-recovery.md`, "Restoring in earnest").
 |---|---|
 | Someone forgot their password | The other Admin sets a temporary one (Settings → Users → Temporary password) |
 | Every Admin is locked out | On the server: put a new `SEED_ADMIN_PASSWORD` in `.env`, then `npm run db:rotate-admin --workspace=@afrinov/backend` (resets `admin@afrinov.local` only) |
+| A worker forgot their counter PIN, or it locked after too many wrong tries | Hand the goods over anyway and post the slip; they confirm with a signature or a photo of the signed paper slip instead. Then, in Recipients, **Unlock** the PIN (locked) or **Reset** it so they set a new one (forgotten). An unlock badge that keeps growing means someone is guessing: check the activity log |
 | "Too many sign-in attempts" | Wait 15 minutes, or an Admin sets a temporary password for that account |
 | The site doesn't load | `docker compose ps`; `sudo systemctl status nginx`; `docker compose logs backend` |
 | Dashboard: backups failed or late | Settings → Data & backup shows the reason; `docker compose logs backup` |
