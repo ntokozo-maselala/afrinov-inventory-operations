@@ -105,6 +105,27 @@ describe('Tools page', () => {
     expect(await screen.findByText(/waits for someone else to approve it under Write-offs to approve; until then it stays held/)).toBeInTheDocument();
   });
 
+  // ADR-045: a tool's write-off shows where it stands, and nothing about the tool can be changed until it is decided.
+  it('shows a held tool\'s write-off sent back for changes, linked to it, with no repair buttons', async () => {
+    const held = { ...TOOLS[2]!, heldForRepair: '1', locations: [{ locationId: 'l-1', locationName: 'Stores', quantity: '1', heldForRepair: '1' }],
+      repairs: [{ id: 'rep-1', locationId: 'l-1', locationName: 'Stores', quantity: '1', note: null, reportedAt: `${at(-1)}T08:00:00.000Z`, reportedBy: 'Vusi', writeOffWaiting: true, writeOffStatus: 'CHANGES_REQUESTED' }] };
+    mockGet.mockImplementation(async (path: string) => (path === '/tools' ? [held] : path.startsWith('/settings/values') ? settings : []));
+    renderPage();
+    await screen.findByText('Saw Cutter');
+    const link = within(row('Saw Cutter')).getByRole('link', { name: 'Write-off sent back for changes: Saw Cutter at Stores' });
+    expect(link).toHaveAttribute('href', '/stock/write-offs?status=CHANGES_REQUESTED');
+    expect(within(row('Saw Cutter')).queryByRole('button', { name: /repaired|Write off/ })).not.toBeInTheDocument();
+  });
+
+  it('shows a loan\'s lost tools waiting and sent back apart', async () => {
+    const lost = { ...TOOLS[1]!, loans: [{ ...loan('t-2', 'Bukho', '3', 5, 'OVERDUE'), lostWaiting: '3', lostSentBack: '1' }] };
+    mockGet.mockImplementation(async (path: string) => (path === '/tools' ? [lost] : path.startsWith('/settings/values') ? settings : []));
+    renderPage();
+    await screen.findByText('Scraper');
+    expect(within(row('Scraper')).getByRole('link', { name: '2 lost: write-off waiting for approval: Scraper with Bukho' })).toHaveAttribute('href', '/stock/write-offs?status=PENDING');
+    expect(within(row('Scraper')).getByRole('link', { name: '1 lost: write-off sent back for changes: Scraper with Bukho' })).toHaveAttribute('href', '/stock/write-offs?status=CHANGES_REQUESTED');
+  });
+
   it('shows what is in store, who has the rest, until when, and the serial numbers', async () => {
     renderPage();
     await screen.findByText('Scraper');

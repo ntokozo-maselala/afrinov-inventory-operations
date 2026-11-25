@@ -20,7 +20,7 @@ async function lockOpen(tx: Tx, id: string) {
   const repair = await tx.toolRepair.findUnique({ where: { id }, include: { material: { select: { sku: true } } } });
   if (!repair) throw Errors.notFound('Tool repair');
   if (repair.resolvedAt) throw Errors.invalidState('This repair was dealt with already. Refresh the page.');
-  const waiting = await tx.adjustmentRequest.findFirst({ where: { status: 'PENDING', referenceType: TOOL_REPAIR_REFERENCE, referenceId: id }, select: { id: true } });
+  const waiting = await tx.adjustmentRequest.findFirst({ where: { status: { in: ['PENDING', 'CHANGES_REQUESTED'] }, referenceType: TOOL_REPAIR_REFERENCE, referenceId: id }, select: { id: true } });
   if (waiting) throw Errors.invalidState(`Writing off ${repair.material.sku} waits for approval under Write-offs to approve. Approve or reject it there first.`, { requestId: waiting.id });
   return repair;
 }

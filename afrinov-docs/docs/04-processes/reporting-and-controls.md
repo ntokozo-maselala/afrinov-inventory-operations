@@ -67,6 +67,13 @@ daylight saving): a movement at 00:30 on the 1st belongs to the new month.
 - Waiting write-offs show on the Dashboard with the oldest's days waited
   (`GET /adjustment-requests/summary`), and each says how long it has waited
   (ADR-041).
+- An approver may send a waiting write-off back for changes; whoever asked
+  sees it on the Dashboard, amends it and sends it again, and each request
+  keeps its history of submissions, changes and decisions (ADR-044).
+- A tool written off (lost on loan, or held for repair) goes through the same
+  workflow; the Tools page shows whether its write-off waits or was sent
+  back, and an approved request's history shows its posting as a step of its
+  own (ADR-045).
 - Figures are derived from the ledger or the balance table recomputed from
   it — no parallel summary numbers are stored.
 - Known inconsistency: the inventory report's currency comes from the

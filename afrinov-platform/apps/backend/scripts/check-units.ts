@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   const [{ requests }] = await prisma.$queryRaw<[{ requests: boolean }]>`SELECT to_regclass('adjustment_requests') IS NOT NULL AS requests`;
   const lostWaiting = requests
     ? Prisma.sql`- CASE WHEN t.type = 'LOAN' THEN COALESCE((SELECT -SUM(q.quantity) FROM adjustment_requests q
-            WHERE q.status = 'PENDING' AND q.reference_type = 'ToolLoan' AND q.reference_id = t.id), 0) ELSE 0 END`
+            WHERE q.status::text IN ('PENDING', 'CHANGES_REQUESTED') AND q.reference_type = 'ToolLoan' AND q.reference_id = t.id), 0) ELSE 0 END`
     : Prisma.empty;
   const out = (await prisma.$queryRaw<Row[]>`
     WITH open_out AS (

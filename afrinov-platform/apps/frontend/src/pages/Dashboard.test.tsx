@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
@@ -302,5 +302,30 @@ describe('Dashboard: pending approvals card', () => {
     const card = await approvalCard();
     expect(card).toHaveAttribute('href', '/purchase-orders?status=mine');
     expect(await within(card).findByText('waiting for your approval (1 purchase, 1 stock)')).toBeInTheDocument();
+  });
+});
+
+describe('Dashboard: Refresh', () => {
+  // Cubic, PR #209: the Admins' health cards are read on mount; Refresh must
+  // read them again, or a check that ran since the page opened stays unseen.
+  it('reads the stock check and the backups again, as well as the stock figures', async () => {
+    auth.roles = ['ADMIN'];
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/reports/stock-value') return VALUE;
+      if (path === '/stock-reconciliation/status') return { state: 'OK', lastRun: null };
+      if (path === '/backups/status') return null;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await screen.findByText('Stock value');
+    const calls = (path: string) => mockGet.mock.calls.filter(([p]) => p === path).length;
+    expect(calls('/stock-reconciliation/status')).toBe(1);
+    expect(calls('/backups/status')).toBe(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh dashboard data' }));
+
+    await waitFor(() => expect(calls('/stock-reconciliation/status')).toBe(2));
+    expect(calls('/backups/status')).toBe(2);
+    expect(calls('/reports/stock-value')).toBe(2);
   });
 });

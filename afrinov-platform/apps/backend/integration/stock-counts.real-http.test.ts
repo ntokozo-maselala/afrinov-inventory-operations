@@ -96,23 +96,22 @@ describe('stock counts over real HTTP', () => {
     expect(await onHand(items.disc)).toBe('16');
   });
 
-  // The app never takes stock below zero, but data from before those guards can be
-  // (the first demo seed issued from Boiler Shop with nothing moved there). The count
-  // screen flags it, and counting it is how it is put right.
-  it('puts a balance below zero right', async () => {
+  // Data from before the guards could hold a balance below zero (the first demo
+  // seed issued from Boiler Shop with nothing moved there), and a count was how it
+  // was put right. Since ADR-047 the database refuses such a balance: the old
+  // seed's write fails, and a database that still holds one stops at migration
+  // 73's preflight until it is corrected (stock-floor.real-http.test.ts). So a
+  // count never meets a balance below zero any more.
+  it('never meets a balance below zero: the old seed\'s write is refused (ADR-047)', async () => {
     const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-CNT-below-${run}`, name: `Count below ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each' });
     expect(m.status).toBe(200);
-    // Booked straight into the ledger, as the old seed did: the API refuses it.
+    // Booked straight into the database, as the old seed did.
     const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
-    await prisma.inventoryTransaction.create({ data: { materialId: m.body.id, locationId: rackId, type: 'ADJUSTMENT', quantity: -4, reasonCode: 'OTHER', actorId: admin.id } });
-    await prisma.inventoryBalance.create({ data: { materialId: m.body.id, locationId: rackId, quantity: -4 } });
-    expect(await onHand(m.body.id)).toBe('-4');
-
-    const res = await api<{ lines: Array<{ variance: string }> }>('POST', '/stock-counts', {
-      locationId: rackId, lines: [{ materialId: m.body.id, expectedQuantity: -4, countedQuantity: 0 }],
-    });
-    expect(res.status).toBe(201);
-    expect(res.body.lines[0]!.variance).toBe('4');
+    const oldSeedWrite = prisma.$transaction([
+      prisma.inventoryTransaction.create({ data: { materialId: m.body.id, locationId: rackId, type: 'ADJUSTMENT', quantity: -4, reasonCode: 'OTHER', actorId: admin.id } }),
+      prisma.inventoryBalance.create({ data: { materialId: m.body.id, locationId: rackId, quantity: -4 } }),
+    ]);
+    await expect(oldSeedWrite).rejects.toMatchObject({ code: 'P2039' });
     expect(await onHand(m.body.id)).toBe('0');
   });
 

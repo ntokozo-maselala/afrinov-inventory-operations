@@ -115,6 +115,7 @@ describe('write-off approval over real HTTP', () => {
     expect(asked.body.value).toBeNull();
     expect((await storeman('POST', `/adjustment-requests/${asked.body.requestId}/reject`, { reason: 'Booked on the wrong item' })).status).toBe(200);
     expect(await onHand(unpricedId)).toBe('20');
+    expect((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: asked.body.requestId! } })).status).toBe('WITHDRAWN');
   });
 
   it('checks the stock again when approving, and refuses what is no longer there', async () => {
@@ -295,6 +296,174 @@ describe('write-off approval over real HTTP', () => {
     expect(refused.body.error.message).toMatch(/is inactive\. Ask a Store Controller to reactivate it first\.$/);
     expect((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: requestId! } })).status).toBe('PENDING');
     expect(await prisma.inventoryTransaction.count({ where: { type: 'LOAN_RETURN', referenceId: loanId } })).toBe(0);
+  });
+
+  // ADR-044 (FR-INV-WF-001): an approver sends one back, whoever asked amends
+  // it and sends it again, and every step is kept.
+  it('sends one back for changes, takes the amended one for approval again, and keeps its history', async () => {
+    interface Event { kind: string; quantity: string; note: string | null; actor: { name: string } }
+    const item = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-CHG-${run}`, name: `Valve ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', unitCost: 500 });
+    await setting('inventory.requireWriteOffApproval', false);
+    expect((await adjust(api, { materialId: item.body.id, quantity: 10, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
+    await setting('inventory.requireWriteOffApproval', true);
+
+    const asked = await adjust(storeman, { materialId: item.body.id, quantity: -6, reasonCode: 'LOSS', reasonNote: 'Missing' }); // R 3 000
+    expect(asked.status).toBe(202);
+    const id = asked.body.requestId!;
+    expect((await storeman('POST', `/adjustment-requests/${id}/request-changes`, { reason: 'Recount' })).status).toBe(403);
+    expect((await api('POST', `/adjustment-requests/${id}/request-changes`, { reason: ' ' })).status).toBe(400);
+    expect((await api('POST', `/adjustment-requests/${id}/request-changes`, { reason: 'Recount the bin: I make it 4 missing' })).status).toBe(200);
+
+    // Nothing moved, and it still holds its stock: not approved as it stands, not adjusted round it.
+    expect(await onHand(item.body.id)).toBe('10');
+    expect((await api('POST', `/adjustment-requests/${id}/approve`)).status).toBe(409);
+    expect((await adjust(storeman, { materialId: item.body.id, quantity: -1, reasonCode: 'LOSS', reasonNote: 'Another' })).status).toBe(409);
+    const sentBack = (await storeman<Array<Request & { events: Event[] }>>('GET', '/adjustment-requests?status=CHANGES_REQUESTED&mine=true')).body.find((r) => r.id === id);
+    expect(sentBack).toMatchObject({ status: 'CHANGES_REQUESTED', decisionNote: 'Recount the bin: I make it 4 missing' });
+    expect((await storeman<{ sentBackToMe: number }>('GET', '/adjustment-requests/summary')).body.sentBackToMe).toBeGreaterThanOrEqual(1);
+    expect((await api<{ sentBackToMe: number }>('GET', '/adjustment-requests/summary')).body.sentBackToMe).toBe(0);
+
+    // Only whoever asked amends it, and the amended one is checked as a new one is.
+    expect((await api('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -4 })).status).toBe(403);
+    expect((await storeman('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -40 })).status).toBe(422);
+    const again = await storeman<{ status: string; value: string }>('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -4, reasonNote: 'Recounted: 4 missing', comment: 'Recounted with Sipho' });
+    expect([again.status, again.body.status, again.body.value]).toEqual([202, 'PENDING_APPROVAL', '2000.00']);
+    expect((await storeman('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -3 })).status).toBe(409);
+    expect(await onHand(item.body.id)).toBe('10');
+
+    const waiting = (await api<Array<Request & { events: Event[] }>>('GET', '/adjustment-requests')).body.find((r) => r.id === id)!;
+    expect(waiting).toMatchObject({ status: 'PENDING', quantity: '-4', value: '2000.00', decisionNote: null, decidedBy: null });
+    expect(waiting).toMatchObject({ amendable: 'ALL' });
+    expect(waiting.events.map((e) => [e.kind, e.quantity, e.note])).toEqual([
+      ['SUBMITTED', '-6', null],
+      ['CHANGES_REQUESTED', '-6', 'Recount the bin: I make it 4 missing'],
+      ['RESUBMITTED', '-4', 'Recounted with Sipho'],
+    ]);
+
+    const approved = await api<{ transactionId: string }>('POST', `/adjustment-requests/${id}/approve`);
+    expect(approved.status).toBe(201);
+    expect(await onHand(item.body.id)).toBe('6');
+    expect((await prisma.inventoryTransaction.findUniqueOrThrow({ where: { id: approved.body.transactionId } })).quantity.toString()).toBe('-4');
+    expect((await prisma.adjustmentRequestEvent.findMany({ where: { requestId: id }, orderBy: [{ at: 'asc' }, { seq: 'asc' }] })).map((e) => e.kind))
+      .toEqual(['SUBMITTED', 'CHANGES_REQUESTED', 'RESUBMITTED', 'APPROVED', 'COMPLETED']);
+
+    // A count's difference sent back takes a new note only: its quantity is the count's.
+    const count = await storeman<{ lines: Array<{ requestId: string | null }> }>('POST', '/stock-counts', {
+      locationId, lines: [{ materialId: item.body.id, expectedQuantity: 6, countedQuantity: 0 }],
+    });
+    const countRequest = count.body.lines[0]!.requestId!;
+    expect((await api('POST', `/adjustment-requests/${countRequest}/request-changes`, { reason: 'Who counted, and when?' })).status).toBe(200);
+    const changed = await storeman<{ error: { message: string } }>('POST', `/adjustment-requests/${countRequest}/resubmit`, { quantity: -5 });
+    expect(changed.status).toBe(400);
+    expect(changed.body.error.message).toMatch(/comes from a stock count.*Only its note can be changed here\.$/);
+    expect((await storeman('POST', `/adjustment-requests/${countRequest}/resubmit`, { reasonNote: 'Stock count: Thandi and Sipho, Tuesday' })).status).toBe(202);
+    // Withdrawn while sent back, too.
+    expect((await api('POST', `/adjustment-requests/${countRequest}/request-changes`, { reason: 'Still unclear' })).status).toBe(200);
+    expect((await storeman('POST', `/adjustment-requests/${countRequest}/reject`, { reason: 'Will count again' })).status).toBe(200);
+    // A withdrawal is its own status, audit action and history step, by whoever withdrew: never a rejection.
+    const withdrawn = (await storeman<Array<Request & { events: Event[] }>>('GET', '/adjustment-requests?status=WITHDRAWN')).body.find((r) => r.id === countRequest)!;
+    expect(withdrawn).toMatchObject({ status: 'WITHDRAWN', decisionNote: 'Will count again' });
+    expect(withdrawn.decidedBy?.name).toBe(withdrawn.requestedBy.name);
+    expect(withdrawn.events.at(-1)).toMatchObject({ kind: 'WITHDRAWN', note: 'Will count again', actor: { name: withdrawn.requestedBy.name } });
+    expect((await storeman<Request[]>('GET', '/adjustment-requests?status=REJECTED')).body.some((r) => r.id === countRequest)).toBe(false);
+    const audit = await prisma.auditLogEntry.findMany({ where: { entityType: 'AdjustmentRequest', entityId: countRequest }, orderBy: { createdAt: 'asc' } });
+    expect(audit.map((a) => a.action)).toEqual(['WRITE_OFF_REQUEST', 'WRITE_OFF_CHANGES_REQUESTED', 'WRITE_OFF_RESUBMIT', 'WRITE_OFF_CHANGES_REQUESTED', 'WRITE_OFF_WITHDRAW']);
+    expect(audit.at(-1)).toMatchObject({ before: { status: 'CHANGES_REQUESTED' }, after: { status: 'WITHDRAWN', reason: 'Will count again' } });
+    expect(audit.at(-1)!.actorId).toBe((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: countRequest } })).requestedById);
+    expect(audit.some((a) => a.action === 'WRITE_OFF_REJECT')).toBe(false);
+    expect((await prisma.adjustmentRequestEvent.findMany({ where: { requestId: countRequest }, orderBy: [{ at: 'asc' }, { seq: 'asc' }] })).map((e) => e.kind))
+      .toEqual(['SUBMITTED', 'CHANGES_REQUESTED', 'RESUBMITTED', 'CHANGES_REQUESTED', 'WITHDRAWN']);
+    expect(await onHand(item.body.id)).toBe('6');
+  });
+
+  // ADR-045: a tool's write-off goes through the same workflow as any other,
+  // and the tool record doesn't change until it is approved.
+  it('sends a lost tool\'s write-off back, takes a smaller amended one, and posts only that on approval', async () => {
+    interface Event { kind: string; quantity: string; note: string | null; transactionId: string | null }
+    interface ToolLoanRow { materialId: string; loans: Array<{ loanId: string; out: string; lostWaiting: string; lostSentBack: string }> }
+    const drill = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-TDRILL-${run}`, name: `Hammer drill ${run}`, category: 'TOOLS', unitOfMeasure: 'each', unitCost: 1800 });
+    await setting('inventory.requireWriteOffApproval', false);
+    expect((await adjust(api, { materialId: drill.body.id, quantity: 3, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
+    await setting('inventory.requireWriteOffApproval', true);
+    const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT WO tool fitter ${run}`, type: 'WORKER' });
+    const out = await storeman<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId: recipient.body.id, lines: [{ materialId: drill.body.id, locationId, quantity: 3 }] });
+    const [loanId] = out.body.loanIds;
+    const loanOf = async () => (await storeman<ToolLoanRow[]>('GET', '/tools')).body.find((t) => t.materialId === drill.body.id)!.loans.find((l) => l.loanId === loanId)!;
+
+    const lost = await storeman<{ writeOffRequestIds: string[] }>('POST', '/tools/check-in', { lines: [{ loanId, quantity: 2, condition: 'LOST', note: 'Left at the Durban site' }] }); // R 3 600
+    const [id] = lost.body.writeOffRequestIds;
+    expect(id).toBeDefined();
+    expect((await api('POST', `/adjustment-requests/${id}/request-changes`, { reason: 'Phone the site: are both really gone?' })).status).toBe(200);
+
+    // Sent back: the tools are still on loan, shown as sent back, and nothing moved.
+    expect(await loanOf()).toMatchObject({ out: '3', lostWaiting: '2', lostSentBack: '2' });
+    expect(await onHand(drill.body.id)).toBe('0');
+    expect((await storeman('POST', '/tools/check-in', { lines: [{ loanId, quantity: 2, condition: 'GOOD' }] })).status).toBe(400);
+    expect((await api('POST', `/adjustment-requests/${id}/approve`)).status).toBe(409);
+
+    // Amended: one turned up. Only the quantity and note change; its reason and borrower are the loan's.
+    expect((await storeman('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -1, reasonCode: 'DAMAGE' })).status).toBe(400);
+    expect((await storeman('POST', `/adjustment-requests/${id}/resubmit`, { quantity: 1 })).status).toBe(400);
+    expect((await storeman('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -4 })).status).toBe(422);
+    expect((await api('POST', `/adjustment-requests/${id}/resubmit`, { quantity: -1 })).status).toBe(403);
+    const again = await storeman<{ value: string }>('POST', `/adjustment-requests/${id}/resubmit`, {
+      quantity: -1, reasonNote: 'Lost while checked out: one left at the Durban site', comment: 'The site found one',
+    });
+    expect([again.status, again.body.value]).toEqual([202, '1800.00']);
+    expect(await loanOf()).toMatchObject({ out: '3', lostWaiting: '1', lostSentBack: '0' });
+
+    const approved = await api<{ transactionId: string }>('POST', `/adjustment-requests/${id}/approve`);
+    expect(approved.status).toBe(201);
+    // One written off against the loan; the other two still out, to be checked in.
+    expect(await loanOf()).toMatchObject({ out: '2', lostWaiting: '0' });
+    expect((await prisma.inventoryTransaction.findUniqueOrThrow({ where: { id: approved.body.transactionId } })).quantity.toString()).toBe('-1');
+    expect((await storeman('POST', '/tools/check-in', { lines: [{ loanId, quantity: 2, condition: 'GOOD' }] })).status).toBe(201);
+    expect(await onHand(drill.body.id)).toBe('2');
+
+    const done = (await storeman<Array<Request & { events: Event[] }>>('GET', '/adjustment-requests?status=APPROVED&mine=true')).body.find((r) => r.id === id)!;
+    expect(done.events.map((e) => [e.kind, e.quantity])).toEqual([
+      ['SUBMITTED', '-2'], ['CHANGES_REQUESTED', '-2'], ['RESUBMITTED', '-1'], ['APPROVED', '-1'], ['COMPLETED', '-1'],
+    ]);
+    expect(done.events.at(-1)).toMatchObject({ transactionId: approved.body.transactionId, note: 'Posted: the tool\'s return and its write-off, against its loan.' });
+    expect(done.events.slice(0, -1).every((e) => e.transactionId === null)).toBe(true);
+    // The person who asked is told it was approved.
+    expect((await storeman<{ approvedForMe: number }>('GET', '/adjustment-requests/summary')).body.approvedForMe).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps a tool held for repair until its write-off is decided, and records a withdrawal as one', async () => {
+    interface ToolRepairRow { materialId: string; repairs: Array<{ id: string; writeOffWaiting: boolean; writeOffStatus: string | null }> }
+    const saw = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-TSAW-${run}`, name: `Circular saw ${run}`, category: 'TOOLS', unitOfMeasure: 'each', unitCost: 2500 });
+    await setting('inventory.requireWriteOffApproval', false);
+    expect((await adjust(api, { materialId: saw.body.id, quantity: 1, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
+    await setting('inventory.requireWriteOffApproval', true);
+    const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT WO carpenter ${run}`, type: 'WORKER' });
+    const out = await storeman<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId: recipient.body.id, lines: [{ materialId: saw.body.id, locationId, quantity: 1 }] });
+    expect((await storeman('POST', '/tools/check-in', { lines: [{ loanId: out.body.loanIds[0], quantity: 1, condition: 'DAMAGED', note: 'Blade guard snapped' }] })).status).toBe(201);
+    const repairOf = async () => (await storeman<ToolRepairRow[]>('GET', '/tools')).body.find((t) => t.materialId === saw.body.id)!.repairs[0];
+    const repairId = (await repairOf())!.id;
+
+    const asked = await storeman<{ requestId: string }>('POST', `/tools/repairs/${repairId}/write-off`, { note: 'Motor burnt out too' }); // R 2 500
+    expect(asked.status).toBe(202);
+    expect(await repairOf()).toMatchObject({ writeOffWaiting: true, writeOffStatus: 'PENDING' });
+    expect((await api('POST', `/adjustment-requests/${asked.body.requestId}/request-changes`, { reason: 'Get a repair quote first' })).status).toBe(200);
+    expect(await repairOf()).toMatchObject({ writeOffWaiting: true, writeOffStatus: 'CHANGES_REQUESTED' });
+
+    // The tool record can't change while it is open: not marked repaired, not written off twice, not amended in part.
+    expect((await storeman('POST', `/tools/repairs/${repairId}/repaired`, {})).status).toBe(409);
+    expect((await storeman('POST', `/tools/repairs/${repairId}/write-off`, { note: 'Again' })).status).toBe(409);
+    const partial = await storeman<{ error: { message: string } }>('POST', `/adjustment-requests/${asked.body.requestId}/resubmit`, { quantity: -0.5 });
+    expect(partial.status).toBe(400);
+    expect(partial.body.error.message).toMatch(/held for repair, written off whole.*Only its note can be changed here\.$/);
+    expect(await onHand(saw.body.id)).toBe('1');
+
+    // Withdrawn by whoever asked: WITHDRAWN, with the reason, never a rejection; the repair is open to deal with again.
+    expect((await storeman('POST', `/adjustment-requests/${asked.body.requestId}/reject`, { reason: 'Quote came in: it can be repaired' })).status).toBe(200);
+    const row = await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: asked.body.requestId }, include: { events: { orderBy: [{ at: 'asc' }, { seq: 'asc' }] } } });
+    expect(row).toMatchObject({ status: 'WITHDRAWN', decisionNote: 'Quote came in: it can be repaired', decidedById: row.requestedById });
+    expect(row.events.map((e) => e.kind)).toEqual(['SUBMITTED', 'CHANGES_REQUESTED', 'WITHDRAWN']);
+    expect(await repairOf()).toMatchObject({ writeOffWaiting: false, writeOffStatus: null });
+    expect((await storeman('POST', `/tools/repairs/${repairId}/repaired`, { note: 'New blade guard' })).status).toBe(200);
+    expect(await onHand(saw.body.id)).toBe('1');
   });
 
   // Qodo, PR #151: a count is no way round the write-off limit.

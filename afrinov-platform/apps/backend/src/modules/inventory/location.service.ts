@@ -152,7 +152,7 @@ async function blockersOf(db: Db, id: string): Promise<LocationBlocker[]> {
       orderBy: { material: { sku: 'asc' } },
     }),
     toolsOutOn(db, { locationId: id }),
-    db.adjustmentRequest.count({ where: { locationId: id, status: 'PENDING' } }),
+    db.adjustmentRequest.count({ where: { locationId: id, status: { in: ['PENDING', 'CHANGES_REQUESTED'] } } }),
     SettingsService.getValue<string>(PROJECT_RECEIVING_SETTING, db),
   ]);
   const blockers: LocationBlocker[] = balances.map((b) => ({

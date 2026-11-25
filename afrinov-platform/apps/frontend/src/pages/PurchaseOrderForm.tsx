@@ -38,12 +38,13 @@ import { api, type ApiError } from '../api/client';
 import { useAuth } from '../auth';
 import { Drawer } from '../components/Modal';
 import { MaterialForm } from '../components/MaterialForm';
+import { GROUPS, itemGroupLabels, itemsForProject } from '../lib/projectItems';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
 import { sectionOf, suggestedProject } from '../lib/categories';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
-import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
+import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
 import { QuantityInput } from '../components/QuantityInput';
 import { useUnits } from '../hooks/useUnits';
 import { firstLineQuantityError, readQuantity } from '../lib/quantity';
@@ -171,8 +172,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const [added, setAdded] = useState<Material[]>([]);
   const catalogue = [...(materialsReq.data ?? []), ...added.filter((a) => !materialsReq.data?.some((m) => m.id === a.id))];
   // A Stores order holds Stores items only, a project order Projects items only:
-  // any of them, whatever project an item was tagged with, as the order says
-  // which project it is for (Project on the Order Roadmap, Phase 2).
+  // those added for its project, then those with no project yet (ADR-046).
   const materials = catalogue.filter((m) => sectionOf(m.category) === (stores ? 'STORES' : 'PROJECTS'));
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
@@ -193,7 +193,13 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const preview = priceLines(lines.filter((l) => l.materialId && readQuantity(l.orderedQty) > 0).map((l) => ({ ...l, orderedQty: String(readQuantity(l.orderedQty)) })), Number(vatRate) || 0);
   // The order's project is the buyer's choice; no line fixes it.
   const orderProject = stores ? '' : details.projectNumber;
-  const lineMaterials = materials;
+  // A Stores order offers every Stores item. A project order narrows to its
+  // project's items once it has one (ADR-046); until then it offers them all.
+  const grouped = !stores && !!orderProject;
+  // Each line's own list: another project's item is offered only on the line
+  // that holds it now, never on the others, and not once it is changed.
+  const lineMaterials = (materialId: string) => (grouped ? itemsForProject(materials, orderProject, new Set([materialId])) : { own: materials, unassigned: [] as Material[], held: [] as Material[] });
+  const groups = itemGroupLabels(orderProject);
   // Each row's subtotal, for its Subtotal column (blank until it has a quantity and a price).
   const rowMoney = priceLines(lines.map((l) => ({ ...l, orderedQty: readQuantity(l.orderedQty) > 0 ? readQuantity(l.orderedQty) : 0 })), Number(vatRate) || 0).lines;
 
@@ -267,7 +273,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const [newItemFor, setNewItemFor] = useState<NewItemSession | null>(null);
   const openFor = useRef<NewItemSession | null>(null);
   function openNewItem(key: number) { const s = { key, session: nextSession++ }; openFor.current = s; setNewItemFor(s); }
-  // The new item is a Projects item with no project of its own: the order says which project it is for.
+  // The new item is a Projects item for the order's project, or none yet if the order has none (ADR-046).
   function startNewItem(key: number) {
     openNewItem(key);
   }
@@ -439,9 +445,18 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                 <div className="col-span-12 md:col-span-1">
                   <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
-                    {/* Not in the catalogue yet: added from the line, the one place to add it (a Projects item with no project of its own). */}
+                    {/* Not in the catalogue yet: added from the line, for the order's project (ADR-046). */}
                     {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
-                    {lineMaterials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
+                    {(() => {
+                      const offered = lineMaterials(l.materialId);
+                      return !grouped
+                        ? offered.own.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)
+                        : GROUPS.map((key) => (offered[key].length === 0 ? null : (
+                          <optgroup key={key} label={groups[key]}>
+                            {offered[key].map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
+                          </optgroup>
+                        )));
+                    })()}
                   </Select>
                 </div>
                 <div className="col-span-3 md:col-span-1">
@@ -515,13 +530,14 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
             open
             onClose={closeNewItem}
             title="New item"
-            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item, and goes on line ${lineNo}; this order says which project it is for.`}
+            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item ${orderProject ? `for ${orderProject}` : 'with no project yet'}, and goes on line ${lineNo}.`}
             width="md"
           >
             <MaterialForm
               key={from.session}
               section="PROJECTS"
               fixedBy="the purchase order"
+              project={orderProject}
               onCancel={closeNewItem}
               // The server answers with the whole item, its section and project included.
               onSaved={(saved) => itemAdded(saved as unknown as Material, from)}

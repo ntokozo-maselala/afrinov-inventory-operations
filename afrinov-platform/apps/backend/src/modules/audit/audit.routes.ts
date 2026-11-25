@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { prisma } from '../../shared/db.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { PermissionCode } from '../../shared/permissions.js';
+import { pageLimit } from '../../shared/paging.js';
 import { ActivityService } from './activity.service.js';
 
 export const auditQuerySchema = z.object({
@@ -64,7 +65,7 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as Record<string, string | undefined>;
     return ActivityService.list({
       from: q['from'], to: q['to'], entityType: q['entityType'], actorId: q['actorId'],
-      before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined,
+      before: q['before'], limit: pageLimit(q['limit'], 500),
     });
   });
 

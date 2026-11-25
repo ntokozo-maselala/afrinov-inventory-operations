@@ -63,6 +63,8 @@ export type IdempotencyEndpoint =
   | 'POST /slips/:slipId/confirmation'
   | 'POST /adjustment-requests/:id/approve'
   | 'POST /adjustment-requests/:id/reject'
+  | 'POST /adjustment-requests/:id/request-changes'
+  | 'POST /adjustment-requests/:id/resubmit'
   | 'POST /projects/:projectNumber/schedules'
   | 'POST /project-schedules/:id/next-month'
   | 'POST /project-schedules/:id/steps'

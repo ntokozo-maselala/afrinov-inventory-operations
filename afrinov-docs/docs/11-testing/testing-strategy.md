@@ -20,7 +20,8 @@ Layers as implemented (see `test-pyramid.md` for counts):
 | Acceptance (plain-language business scenarios) | — | `acceptance-testing.md` | Mapped to integration tests |
 
 CI runs backend unit + integration and frontend unit tests on every
-relevant pull request; the Playwright test is not run in CI (TD-017).
+relevant pull request, and the Playwright browser suite as "Browser tests
+(Playwright, real backend)" in `frontend-ci.yml` (`e2e-testing.md`).
 
 ## Evidence
 - `afrinov-platform/apps/backend/integration/helpers.ts:74-88`

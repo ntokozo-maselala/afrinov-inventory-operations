@@ -165,13 +165,16 @@ export function MaterialDetail() {
             <CostHistory materialId={material.data.id} />
             {!storesItem ? (
               // Project material comes through the store, held for the project its
-              // order is for: it has no stock status, and no project of its own
-              // (Project on the Order Roadmap, Phase 3; Project Material Through
-              // the Store Roadmap, Phase 2).
+              // order is for, and has no stock status. The item is added for one
+              // project and offered on its RFQs and orders (ADR-046; Project
+              // Material Through the Store Roadmap, Phase 2).
               <section className="surface-card p-4 space-y-2">
                 <h2 className="text-h3 text-surface-900">Ordering</h2>
                 <p className="text-meta">
-                  Bought for a project on its purchase order, which says which project it is for. The store receives it against that order and holds it for that project.
+                  {material.data?.projectNumber
+                    ? `Added for project ${material.data.projectNumber} and offered on its RFQs and orders.`
+                    : 'Added before items had a project: offered on every project’s RFQs and orders until it is given one.'}
+                  {' '}The store receives it against its purchase order and holds it for the order&rsquo;s project.
                   {leftoverRows.length > 0 && ' What is shown as left in the store was received before project material came through the store.'}
                 </p>
               </section>

@@ -46,8 +46,13 @@ npx playwright install chromium   # once, or after a Playwright upgrade
 npx playwright test
 ```
 
-On Windows the servers can outlive the run; stop anything left on 4000 or
-5173 before the next one.
+If something already answers on 4000 or 5173 (your dev servers), the suite
+refuses to start and names the port: stop it and run again. The suite stops
+its own servers with everything they started: at teardown, from an exit
+hook if the run ends before teardown (an error), and through the terminal
+on Ctrl+C, as they share the runner's process group. Only a runner killed
+outright (SIGKILL, Task Manager) leaves them behind
+(`apps/frontend/e2e/servers.ts`).
 
 The harness refuses any non-loopback or non-`_test` database
 (`requireIsolatedTestDatabaseUrl`), so a misconfiguration cannot point the suite

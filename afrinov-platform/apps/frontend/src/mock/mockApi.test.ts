@@ -118,3 +118,17 @@ describe('mock API demo data flow', () => {
     expect(list.map((l) => l.name)).toEqual(expect.arrayContaining(['Main Storeroom', 'Boiler Shop', 'D-1']));
   });
 });
+
+describe('GET /stock-reconciliation/status (ADR-047)', () => {
+  // Cubic, PR #209: the demo's stock check reported 0 balances and 0 issues
+  // over a ledger that has both.
+  it('counts the demo\'s stock lines and issues, as the server\'s check does', async () => {
+    const status = await api.get<{ state: string; lastRun: { balances: number; issues: number; problemCount: number } }>('/stock-reconciliation/status');
+    const movements = await api.get<Array<{ type: string; reversesId?: string | null }>>('/inventory-transactions');
+    expect(status.state).toBe('OK');
+    expect(status.lastRun.balances).toBeGreaterThan(0);
+    expect(status.lastRun.issues).toBe(movements.filter((t) => t.type === 'ISSUE' && !t.reversesId).length);
+    expect(status.lastRun.issues).toBeGreaterThan(0);
+    expect(status.lastRun.problemCount).toBe(0);
+  });
+});

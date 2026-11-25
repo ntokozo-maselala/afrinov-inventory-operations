@@ -58,7 +58,7 @@ async function blockersOf(m: { id: string; unitOfMeasure: string }, db: Prisma.T
       select: { quantity: true, heldForProject: true, location: { select: { name: true } } },
     }),
     onLoanByMaterial(db, [m.id]),
-    db.adjustmentRequest.count({ where: { materialId: m.id, status: 'PENDING' } }),
+    db.adjustmentRequest.count({ where: { materialId: m.id, status: { in: ['PENDING', 'CHANGES_REQUESTED'] } } }),
     db.purchaseOrderLine.findMany({
       where: { materialId: m.id, purchaseOrder: { status: { in: [...OPEN_ORDER_STATUSES] } } },
       select: { orderedQty: true, receivedQty: true, purchaseOrder: { select: { id: true, number: true, projectNumber: true } } },

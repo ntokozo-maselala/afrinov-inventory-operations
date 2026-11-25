@@ -19,7 +19,7 @@ import { changePasswordSchema, loginSchema } from '../modules/identity/auth.rout
 import { createUserSchema, signInQuerySchema, temporaryPasswordSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import {
   issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema, countSheetQuerySchema,
-  consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema,
+  consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema, adjustmentResubmitSchema,
   issueRequestSchema, issueRequestQuerySchema, issueApprovalSchema, issueDecisionSchema,
 } from '../modules/inventory/inventory.routes.js';
 import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema, toolRepairedSchema, toolRepairWriteOffSchema } from '../modules/inventory/tool.routes.js';
@@ -57,7 +57,7 @@ import {
   createLabourRateSchema, createSalesRfqSchema, listLabourRatesQuerySchema, listSalesRfqQuerySchema, salesQuoteOptionsQuerySchema, sendBackSalesRfqSchema,
   updateLabourRateSchema, updateSalesRfqSchema,
 } from '../modules/sales/sales-rfq.routes.js';
-import { setOneSchema, setManySchema, resetSectionQuerySchema, resetSectionSchema } from '../modules/settings/settings.routes.js';
+import { setOneSchema, setManySchema, resetSectionQuerySchema, resetSectionSchema, SETTING_SECTIONS } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
   materialCategorySchema,
@@ -370,7 +370,9 @@ export const OPERATIONS: Operation[] = [
     description: 'Per tool: inStore (on the shelf, by location), onLoan, owned (in store + on loan) and its open loans '
       + '(recipient, project, where it came from, how many were lent and how many are still out), each with its due date '
       + '(dueOn), daysLate (negative while days are left), state (ON_LOAN, DUE_SOON, OVERDUE, or NEEDS_DECISION once '
-      + 'inventory.toolEscalateDays past due), overdue (past its due date) and its extensions, oldest first.',
+      + 'inventory.toolEscalateDays past due), overdue (past its due date) and its extensions, oldest first. '
+      + 'A loan\'s lostWaiting is what waits to be written off as lost, lostSentBack the part of it sent back for changes; a repair\'s '
+      + 'writeOffStatus is PENDING or CHANGES_REQUESTED while its write-off is open, else null (ADR-045).',
     permissions: [P.ViewReports],
   },
   {
@@ -556,12 +558,16 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/adjustment-requests', tag: 'Stock movements', summary: 'Adjustments waiting for approval, or decided',
     description: 'Newest first, a page at a time (?limit up to 200, ?before the last row\'s cursor): PENDING unless another status is asked for, each with its item, location, '
-      + 'who asked and who decided, and daysWaiting: South African days waited, or waited before it was decided (system audit C8). Needs approve:write_off or adjust:inventory.',
+      + 'who asked and who decided, and daysWaiting: South African days waited, or waited before it was decided (system audit C8). ?mine=true keeps the caller\'s own. '
+      + 'Each carries events, its history in order (SUBMITTED, CHANGES_REQUESTED, RESUBMITTED, APPROVED, COMPLETED, REJECTED, WITHDRAWN) with the request as it stood then (ADR-044); '
+      + 'COMPLETED follows APPROVED and names the movement posted in transactionId (ADR-045). amendable says what whoever asked may change once it is sent back: ALL, QUANTITY or NOTE. '
+      + 'Needs approve:write_off or adjust:inventory.',
     query: adjustmentRequestQuerySchema, errors: [403],
   },
   {
     method: 'get', path: '/adjustment-requests/summary', tag: 'Stock movements', summary: 'How many adjustments wait, and the oldest',
-    description: '{ waiting, oldestRequestedAt, oldestDays }, for the Dashboard (system audit C8). Needs approve:write_off or adjust:inventory.',
+    description: '{ waiting, oldestRequestedAt, oldestDays, sentBackToMe, rejectedForMe, approvedForMe }, for the Dashboard (system audit C8): the last three are the caller\'s own, '
+      + 'sent back for changes, or rejected or approved by someone else in the last 7 days (ADR-044, ADR-045). Needs approve:write_off or adjust:inventory.',
     errors: [403],
   },
   {
@@ -572,9 +578,23 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/adjustment-requests/:id/reject', tag: 'Stock movements', summary: 'Reject or withdraw an adjustment waiting for approval',
-    description: 'Posts nothing. Whoever asked for it may withdraw it with adjust:inventory; anyone else needs approve:write_off. '
+    description: 'Posts nothing. Whoever asked for it may withdraw it with adjust:inventory, which makes it WITHDRAWN; anyone else needs approve:write_off and makes it REJECTED. '
       + '409 INVALID_STATE once decided. Retry-safe with an Idempotency-Key header.',
     body: adjustmentRejectionSchema, success: 200, errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/adjustment-requests/:id/request-changes', tag: 'Stock movements', summary: 'Send an adjustment back to whoever asked, for changes',
+    description: 'Posts nothing: the request becomes CHANGES_REQUESTED and stays open, holding its stock, until whoever asked sends it again or withdraws it (ADR-044). '
+      + 'reason says what to change. 403 for your own request, 409 INVALID_STATE unless it is waiting. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ApproveWriteOff], body: adjustmentRejectionSchema, success: 200, errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/adjustment-requests/:id/resubmit', tag: 'Stock movements', summary: 'Amend an adjustment sent back to you and send it again',
+    description: 'Only whoever asked for it (403 otherwise), and only while it is CHANGES_REQUESTED (409 INVALID_STATE otherwise). A field left out stays as it is. '
+      + 'An adjustment made by hand is checked as a new one is (422 with too little stock). A tool lost on loan takes a new (negative) quantity and reasonNote, '
+      + 'at most what is still out on its loan (422 otherwise), keeping its reason and borrower (ADR-045); a stock count\'s difference or a tool held for repair takes a new reasonNote only. '
+      + 'It always waits for approval again: 202 { id, status: PENDING_APPROVAL, value }. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.AdjustInventory], body: adjustmentResubmitSchema, success: 202, errors: [403, 404, 409, 422],
   },
   {
     method: 'post', path: '/inventory-transactions/:id/returns', tag: 'Stock movements',
@@ -843,7 +863,7 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/slips/images/past-keep', tag: 'Settings', summary: 'How many signatures a keep period would remove now',
     description: 'For Settings to say, before inventory.receiptImageKeepMonths is saved, how many signatures and slip photos the new period removes within the hour. months 0 (keep always) counts none.',
-    permissions: [P.ManageSettings], query: z.object({ months: z.coerce.number().int().min(0).max(240) }), errors: [400],
+    permissions: [P.ManageSettings], query: z.object({ months: z.coerce.number().int().min(0).max(240).openapi({ param: { required: true } }) }), errors: [400],
   },
   {
     method: 'get', path: '/slips/:slipId/confirmation/image', tag: 'Reports', summary: 'The signature or signed-slip photo a slip was confirmed with',
@@ -1234,7 +1254,8 @@ export const OPERATIONS: Operation[] = [
   // Settings
   {
     method: 'get', path: '/settings', tag: 'Settings', summary: 'List settings with their metadata',
-    query: z.object({ category: z.string().optional() }),
+    query: z.object({ category: z.enum(SETTING_SECTIONS).optional() }),
+    errors: [400],
   },
   {
     method: 'get', path: '/settings/values', tag: 'Settings', summary: 'Current values of selected settings',
@@ -1269,6 +1290,13 @@ export const OPERATIONS: Operation[] = [
     description: 'From the runs the backup service records (ADR-037): the last backup and restore test, each with a state '
       + '(backup: NONE, OK, LATE after 26 hours, FAILED, LOCAL_ONLY when it never left the server; restore test: NONE, OK, DUE after 92 days, FAILED), '
       + 'and the latest runs.',
+    permissions: [P.ManageSettings],
+  },
+  {
+    method: 'get', path: '/stock-reconciliation/status', tag: 'Settings', summary: 'Whether the daily stock check found the figures adding up',
+    description: 'From the check the backend runs once a day (ADR-047): every stored balance equals its ledger, none is below zero, every issue adds up '
+      + 'and the stock floor constraint is in place. State NONE (never run), OK, DRIFT (something does not add up; the run lists up to 50 problems '
+      + 'and the true count), FAILED (the check could not run) or LATE (the newest run is a clean one that finished more than 26 hours ago: the job may have stopped; DRIFT and FAILED keep their state however old). A FAILED check is tried again at the next hourly tick. Returns the newest run.',
     permissions: [P.ManageSettings],
   },
 

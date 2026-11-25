@@ -100,6 +100,18 @@ update the pins.
 Re-check these with `npm outdated --workspaces --long` before assuming they are
 still blocked.
 
+### Security overrides
+
+`overrides` in the root `package.json` patch transitive dependencies that an
+upstream release still pins. Fix an audit finding with a scoped, exact-version
+override or an in-range bump, never `npm audit fix --force` (it proposed
+downgrading Prisma to 6.x). After changing an override, run `npm update <pkg>`
+so the lockfile picks it up, then verify from a clean `npm ci`.
+
+- **`@prisma/config` → `effect` 3.22.4** — GHSA-7589-6fvf-x4pw (ReDoS, high);
+  prisma 7.10.1 pins `effect` 3.20.0. Remove once a prisma release depends on
+  `effect` ≥ 3.22.1 (`npm view @prisma/config@latest dependencies.effect`).
+
 ### API conventions introduced by the current majors
 
 Use these forms; the older spellings still work but are deprecated or removed.
@@ -127,6 +139,11 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `err.message` cannot leak server text. Never render a raw exception message.
   See `afrinov-docs/docs/12-operations/error-handling.md` and
   `afrinov-docs/docs/08-api/error-model.md`.
+- **Read a query parameter through a check before it reaches Prisma.** A list
+  route that reads `?limit` by hand uses `pageLimit(raw, max)`
+  (`src/shared/paging.ts`), never `Number(q['limit'])`: `abc` became `take: NaN`
+  (a 500) and `-1` the oldest rows. An enum filter is checked against its list
+  first (as `GET /settings?category` is against `SETTING_SECTIONS`).
 - **A failed refresh keeps data only for availability failures.** `useApi`
   marks `stale` for `SERVICE_UNAVAILABLE`/`NETWORK_ERROR`/`TIMEOUT`; `FORBIDDEN`
   and `UNAUTHENTICATED` clear it, so a permission loss is never shown as "here
@@ -162,6 +179,25 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `parseQuantity` (`src/lib/quantity.ts`, with the same `remainder` option),
   never `type="number"`, for a stock quantity. A new spelling of a unit goes in
   `UNIT_ALIASES`.
+- **Stock never goes below zero: lock, then read (ADR-047).** A path that moves
+  stock takes `lockInventoryBalances` for every balance it touches *before*
+  reading any of them, then checks, writes the ledger line and calls
+  `recomputeBalance`; a reading taken before the lock is stale and passes a
+  check it shouldn't. `inventory_balances` has a `CHECK (quantity >= 0)`
+  behind it, answered as 422 `INSUFFICIENT_BALANCE` and logged as
+  `stock-floor-refused`, a defect. A new file that writes the ledger with a
+  direct Prisma call or raw SQL fails `ledger-writers.test.ts` until it is
+  added there. That guard works file by file, so a new path in a file already
+  listed passes it whether or not it locks: follow the order by hand and give
+  it a race in
+  `integration/stock-floor-races.real-http.test.ts` with `overlapping`
+  (`integration/helpers.ts`), not a bare `Promise.all`. A migration's
+  rollback goes in `prisma/rollbacks/` and is tested inside an undone
+  transaction. The CHECK can't see a balance that differs from its ledger,
+  so the backend reconciles once a day (`stock-reconciliation.ts`, records in
+  `stock_reconciliation_runs`, logs `ledger-drift`, Dashboard card for
+  Admins); an integration suite that leaves figures not adding up fails
+  `stock-reconciliation.real-http.test.ts`.
 - **Materials counts items; Stock counts lines.** A line is an item at a location,
   so an item in two places is two lines, and an item never received has none.
   Tools lists active tools only. Don't add these totals together, and don't count
@@ -192,6 +228,23 @@ Use these forms; the older spellings still work but are deprecated or removed.
   stock count, takes the balance lock and is refused while any adjustment of
   that material, location and project stock is waiting for approval; approving
   both would correct the same difference twice.
+- **An adjustment sent back for changes is still open (ADR-044).** An approver
+  approves, rejects or sends a waiting adjustment back
+  (`CHANGES_REQUESTED`); whoever asked amends it and sends it again
+  (`WriteOffApprovalService.resubmit`), and it always waits for approval again.
+  A check for a waiting adjustment uses `OPEN_ADJUSTMENT_STATUSES`
+  (`write-off-requests.ts`), never `PENDING` alone, and every step of a
+  request goes through `recordRequestEvent`, which keeps the request as it
+  stood: the rows of `adjustment_request_events` are only added. Whoever
+  asked withdraws their own (`WITHDRAWN`); `REJECTED` is only someone else's
+  decision, so never show a withdrawal as a rejection.
+- **A tool's write-off is an adjustment request like any other (ADR-045).**
+  Lost on loan (`ToolLoan`) or held for repair (`ToolRepair`), it goes
+  through the same steps; what may change when it is sent back is
+  `amendableOf` (a lost tool's quantity is checked by
+  `ToolLoanService.checkLostAmendment`). Approving writes `APPROVED` then
+  `COMPLETED` with the posted movement; read history ordered by `at`, then
+  `seq`, as steps of one transaction share a time.
 - **A slip posts first; the person collecting confirms it beside the ledger.**
   An issue or tool loan slip (one `issueId`) is confirmed in
   `receipt_confirmations` by counter PIN, signature or a photo of the signed

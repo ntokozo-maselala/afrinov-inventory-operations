@@ -141,12 +141,27 @@ A `DATABASE_URL` set in the shell wins over the one in `.env`. The tests
 sign in as the seeded admin, so `SEED_ADMIN_PASSWORD` must be the password
 the seed used for that database.
 
-### End-to-end test (Playwright)
-One test (`apps/frontend/e2e/login.spec.ts`) signs in through the real
-stack. Its global setup starts the backend on port 4000 and the frontend on
-port 5173 itself, so **stop your dev servers first**. It uses the backend
-`.env` database, and it expects the admin password written in the spec
-file to be the one the seed used (TD-017).
+### End-to-end tests (Playwright)
+Three specs (`apps/frontend/e2e/*.spec.ts`: signing in, signing out, and
+how failures look) run through the real stack. The global setup starts the
+backend on port 4000 and the frontend on port 5173 itself, so **stop your
+dev servers first**: if either port already answers, it refuses to start
+and names the port. It stops its servers when the run ends, Ctrl+C
+included (`../11-testing/e2e-testing.md`).
+
+It needs a local `*_test` database, migrated and seeded with demo data,
+named in `apps/backend/.env.test` with the seeded admin's password. Once,
+from the test-only Compose database (`docker compose up -d test-db`, port
+5433):
+
+```sh
+cd apps/backend
+cp .env.test.example .env.test   # put POSTGRES_TEST_PASSWORD in the URL and add SEED_ADMIN_PASSWORD=<password>
+npm run db:test:migrate
+npm run db:test:seed             # demo data; refuses anything but a local *_test database
+```
+
+Then:
 
 ```sh
 cd apps/frontend
@@ -158,7 +173,7 @@ npx playwright test
 On every pull request that touches an app (and on pushes to `main`):
 backend — typecheck, lint, unit tests, build, and the integration tests
 against a throwaway PostgreSQL; frontend — typecheck, lint, tests and a
-production build. Playwright is not run in CI. Details:
+production build, and the Playwright browser tests against a seeded test database. Details:
 `../12-operations/ci-cd.md`.
 
 ### Database changes
@@ -236,7 +251,7 @@ None are configured; the compose stack keeps data in the Docker volume
 | `429 TOO_MANY_REQUESTS` on login | Over 5 login attempts per minute from your IP; wait a minute or raise `RATE_LIMIT_AUTH` locally |
 | Purchase-order pages or routes missing | Set both `PROCUREMENT_ENABLED` and `VITE_PROCUREMENT_ENABLED` to `"true"` and restart |
 | `npm run build` (frontend) refuses to run | `VITE_FRONTEND_ONLY` or `VITE_DEMO_AUTH_ENABLED` is `true` in the shell or a `.env` file |
-| Playwright fails to start servers | Ports 4000/5173 are in use by your dev servers |
+| Playwright says "Port 4000 (or 5173) is already in use" | Your dev servers, or another run, hold the port: stop them and run again |
 
 ## Evidence
 - `afrinov-platform/package.json:10-19` — root scripts

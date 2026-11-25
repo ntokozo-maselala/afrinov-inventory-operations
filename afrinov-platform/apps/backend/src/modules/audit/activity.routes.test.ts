@@ -71,4 +71,16 @@ describe('GET /api/v1/activity', () => {
       from: '2026-10-12', to: '2026-10-12', entityType: 'Material', actorId: 'u-1', before: 'c', limit: 5,
     });
   });
+
+  // limit=abc reached Prisma as take: NaN, a 500.
+  it('refuses a limit that is not a whole number above 0, and caps one above 500', async () => {
+    for (const limit of ['abc', '-1', '0', '2.5']) {
+      const res = await app.inject({ method: 'GET', url: `/api/v1/activity?limit=${limit}`, headers: as('STORE_CONTROLLER') });
+      expect(res.statusCode, limit).toBe(400);
+      expect(res.json().error.code, limit).toBe('VALIDATION_ERROR');
+    }
+    expect(mockedList).not.toHaveBeenCalled();
+    await app.inject({ method: 'GET', url: '/api/v1/activity?limit=9999', headers: as('STORE_CONTROLLER') });
+    expect(mockedList).toHaveBeenCalledWith(expect.objectContaining({ limit: 500 }));
+  });
 });

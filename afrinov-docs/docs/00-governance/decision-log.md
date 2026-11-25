@@ -1610,3 +1610,299 @@ Tests: `issue-request` flows in `project-issue-approval.real-http.test.ts`,
 `project-leftovers.service.test.ts`, `project.service.test.ts`,
 `IssueApprovals.test.tsx`, `IssueStock.test.tsx`, `DashboardControls.test.ts`,
 `mockStoresToProject.test.ts`.
+
+### ADR-044 — An adjustment waiting for approval can be sent back for changes, amended and sent again, with its history kept
+**Date:** 2026-11-17 · **Status:** Accepted
+
+**Context:** An adjustment over the write-off limit waits for someone other
+than whoever asked (ADR-028). The approver could only approve or reject it:
+one that was nearly right (the wrong quantity, a thin note) had to be rejected
+and asked for from scratch, and what linked the two was in nobody's records.
+Whoever asked learned of a rejection only by looking under "Rejected or
+withdrawn". FR-INV-WF-001 asks for a third decision, request changes; that the
+initiator is told the decision and its comments; that they can amend and
+resubmit; and for a complete history of submissions, revisions and decisions.
+It also restates what ADR-028 already holds: the balance changes only on
+approval.
+
+**Decision:**
+- **A third decision: request changes.** `POST /adjustment-requests/:id/request-changes`
+  (approve:write_off, never on one's own request, a comment required) sets the
+  request to `CHANGES_REQUESTED`. Nothing is posted.
+- **A request sent back is still open.** It holds its stock as a waiting one
+  does: no other adjustment or count of that stock, its item, location and
+  project can't be closed, and a lost tool stays on loan
+  (`OPEN_ADJUSTMENT_STATUSES`). Otherwise the same difference could be
+  corrected twice, once round the request and once when it is sent again.
+  Whoever asked may withdraw it; an approver may reject it.
+- **Whoever asked amends it and sends it again.** `POST /adjustment-requests/:id/resubmit`
+  (only the person who asked) takes a new quantity, reason, note and person
+  responsible for an adjustment made by hand, checked as a new one is. One
+  from a stock count or a tool takes a new note only: its quantity is the
+  count's or the tool's, so to change it the request is withdrawn and the
+  count or check-in done again.
+- **A request sent again always waits for approval**, even if it is now worth
+  less than the limit: an approver asked about it.
+- **Every step is kept.** `adjustment_request_events` has a row for each time
+  a request is asked for, sent back, sent again, approved, rejected or
+  withdrawn, with who, when, their comment, and the request as it stood
+  (quantity, reason, note, value). Rows are only added
+  (`recordRequestEvent`). The list returns them, and Write-offs to approve
+  shows them under History. The audit log still records each step too.
+- **Whoever asked is told in the app.** The Dashboard shows "Sent back to
+  you", and Write-offs to approve says how many of the person's own were sent
+  back, and how many were rejected by someone else in the last 7 days
+  (`sentBackToMe`, `rejectedForMe` on `GET /adjustment-requests/summary`).
+  There is no email or other message outside the app: the platform sends
+  none.
+- **A withdrawal is not a rejection.** A request its own asker takes back,
+  while it waits or after it was sent back, becomes `WITHDRAWN`, with the
+  `WRITE_OFF_WITHDRAW` audit action (the status before, `WITHDRAWN` after,
+  and the reason) and a `WITHDRAWN` history step by that person. `REJECTED`
+  is only ever someone else's decision. Before this a withdrawal was stored
+  as `REJECTED`, and the list showed "Rejected" beside the name of the person
+  who had withdrawn it.
+- **No saved draft.** The adjustment form is the draft; it is recorded when it
+  is submitted.
+
+Migration `20260101000068_adjustment_changes_requested` adds the status, the
+events table, and an event for each request already there (asked for, and
+approved, rejected or withdrawn where decided).
+`20260101000069_adjustment_withdrawn_status` adds `WITHDRAWN` and
+`20260101000070_adjustment_withdrawn_backfill` moves to it the requests their
+own asker had turned down.
+
+**Consequences:** A request sent back and then forgotten blocks counting and
+adjusting that stock until it is sent again, withdrawn or rejected; the
+Dashboard card is there so it isn't forgotten. A rejection is pointed out for
+7 days only, with no "seen" mark. Days waited are still counted from when the
+request was first asked for.
+Tests: `write-off-approval.real-http.test.ts`, `WriteOffApprovals.test.tsx`.
+
+### ADR-045 — A tool's write-off follows the write-off workflow step for step; posting is a step of its own
+**Date:** 2026-11-17 · **Status:** Accepted
+
+**Context:** A tool is adjusted in two ways of its own: checked in as lost
+(written off against its loan) or, held for repair, written off as damaged.
+Both already became an adjustment request (ADR-028) and so had approval,
+rejection, sending back, withdrawal and history (ADR-044). The owner asked
+for full parity with internal stock write-offs, and the gaps were these: a
+lost tool's request sent back could only take a new note, so one that partly
+turned up had to be withdrawn and the tool checked in again; the Tools page
+said "Write-off waiting for approval" even when it had been sent back, and a
+loan didn't say so at all; the history showed the approval and the posting as
+one step; and whoever asked was told of a rejection or a send-back but not of
+an approval.
+
+**Decision:**
+- **A lost tool's write-off sent back takes a new quantity and note.** Its
+  reason (Loss) and borrower are the loan's and don't change. The quantity is
+  at most what is still out on the loan less other write-offs of it waiting,
+  in whole units, checked under the locks a check-in takes
+  (`ToolLoanService.checkLostAmendment`). Fewer lost means the rest stay on
+  loan, to be checked in. `amendable` on the list says what may change: `ALL`
+  (made by hand), `QUANTITY` (lost on loan) or `NOTE` (a stock count's
+  difference, or a tool held for repair, which is written off whole).
+- **The tool record doesn't change before approval.** As before: a lost tool
+  stays on loan and can't be checked in again; a repair stays held and can't
+  be marked repaired or written off again; this holds while the request is
+  sent back, too (`OPEN_ADJUSTMENT_STATUSES`).
+- **Posting is a step of its own.** Approving writes `APPROVED` and then
+  `COMPLETED` in the same transaction; `COMPLETED` names the movement posted
+  (`transaction_id`) and says what was done (the loan's return and write-off,
+  or the repair closed). Steps written in one transaction share a time, so
+  `seq` keeps them in the order written. Each request already approved gets
+  its `COMPLETED` step by migration.
+- **The steps are distinct.** A request's status is one of `PENDING`,
+  `CHANGES_REQUESTED`, `APPROVED`, `REJECTED` or `WITHDRAWN`; `RESUBMITTED`
+  and `COMPLETED` are steps in its history (a request sent again waits, so its
+  status is `PENDING`; one completed is `APPROVED`).
+- **Every decision reaches whoever asked.** `GET /adjustment-requests/summary`
+  adds `approvedForMe` (approved by someone else in the last 7 days) beside
+  `sentBackToMe` and `rejectedForMe`, and Write-offs to approve points out
+  each.
+- **The Tools page shows where a write-off stands.** A loan shows its lost
+  tools waiting and sent back apart (`lostSentBack`), a repair its
+  `writeOffStatus`, each linking to Write-offs to approve with that status
+  (`?status=`). Write-offs to approve labels a request from a tool ("Tool lost
+  on loan", "Tool held for repair").
+
+Migrations `20260101000071_adjustment_completed_step` (the `COMPLETED` value,
+`seq` and `transaction_id`) and `20260101000072_adjustment_completed_backfill`.
+
+**Consequences:** The same rules, steps and notices apply to a tool's
+write-off and any other adjustment: the workflow is one, not two. A repair
+write-off still can't be reduced in part, as a repair is written off whole.
+`check:units` now counts lost tools sent back as still waiting.
+Tests: `write-off-approval.real-http.test.ts`, `WriteOffApprovals.test.tsx`,
+`Tools.test.tsx`.
+
+### ADR-046 — A Projects item is added for one project; a project's RFQ and order lines offer its items
+**Date:** 2026-11-17 · **Status:** Accepted
+
+**Context:** Since ADR-023 a Projects item was a plain catalogue entry with no
+project of its own, any project order could use it, and the screens never
+asked for one: the order said which project it was for. In practice project
+material is bought for one job, and the owner asked on 17 Nov 2026 that it be
+added for its project on Materials, that a project's items not be ordered or
+issued for other jobs, and that the buyer find the item by its project when
+picking a line on an RFQ. With every Projects item listed on every RFQ, the
+buyer would scroll through every job's material once the platform is in use.
+
+**Decision:**
+- **Added for its project.** Adding a Projects item on Materials asks for its
+  project (open projects only), and saves it on the item's existing
+  `project_number`; it is required there. Edit item can change it until the
+  item has any stock movements, for whichever project (`checkMaterialChange` refuses a
+  change after, as before), and can't take it off. An older item with no
+  project can be given its first one at any time, even after stock has moved:
+  its history names no project, so there is none to keep. An item added from an RFQ or order line (+ New item)
+  takes that RFQ's or order's project; one added before an order has its
+  project has none until it is given one.
+- **Lines offer the project's items.** On New request for quotation a line's
+  item list waits for the RFQ's project ("Choose the project first"), then
+  lists the items for that project, then those with no project yet (added
+  before items had one), never another project's. Another project's item a
+  line already holds stays listed under its own heading, so a draft can still
+  show it. New purchase order narrows to the project's items the same way
+  once the order has its project.
+- **Materials shows it.** The Projects tab has a **Project** column: the
+  project each item was added for, or "No project yet".
+- **What doesn't change.** The server's rules are as they were: it already
+  checks an item's project is open when given and refuses a project on a
+  Stores item, and it still lets an order use any Projects item (ADR-023,
+  Phase 1). Issuing already holds an item tagged with a project to that
+  project (ADR-043). No migration.
+
+**Consequences:** This refines ADR-023 for new items: a Projects item belongs
+to one project again, and a new job gets its own items. Older items without a
+project keep working and are offered on every project's lines until given
+one. Tests: `projectItems.test.ts`, `MaterialsSections.test.tsx`,
+`Rfqs.test.tsx`, `PoNewItem.test.tsx`, `PoProjectMaterial.test.tsx`.
+
+### ADR-047 — The stock floor: a balance lock taken before the read, and a database constraint behind it
+**Date:** 2026-11-23 · **Status:** Accepted
+
+**Context:** BR-009 says no movement may take any balance below zero, with no
+override. Every path that moves stock checks the balance and refuses an
+overdraw, inside a transaction, after taking a transaction-scoped advisory
+lock on the balance (`lockInventoryBalances`, `src/shared/inventory/balances.ts`).
+That lock was never recorded as a decision, and it was the only thing holding
+the rule: under READ COMMITTED a balance read before another transaction
+commits is stale, and two inserts never wait for each other, so without the
+lock two issues of 10 from 15 both pass their check and leave −5 (shown with
+two PostgreSQL 16 sessions on 2026-11-23). An examination of the 14 paths that
+write the ledger found every one takes the lock before it reads, but nothing
+would notice a new path that didn't, or one that read first: no database
+constraint, one race test (issues only), and a deadlock answered as a 500.
+Removing the transfer's lock in a test then showed a constraint on the balance
+alone is not enough: each overlapping recompute summed only the lines it could
+see, both stored 4, and the ledger said −2.
+
+**Decision:**
+- **The balance lock is the consistency boundary.** A balance (an item at a
+  location, held for a project or for Stores) is changed only by a
+  transaction holding its advisory lock, keyed on that triple and taken in
+  sorted order. Every path follows one order: **lock, then read, check, write
+  the ledger line, recompute**. A reading taken before the lock is not used
+  for the check. An advisory lock rather than `SELECT … FOR UPDATE`, because
+  the balance row may not exist yet (the first movement creates it by
+  upsert) and a row that isn't there can't be locked; rather than
+  SERIALIZABLE, because that would need a retry loop on every write path and
+  change every transaction, not only stock.
+- **The database holds the floor too.** `inventory_balances` has
+  `CHECK (quantity >= 0)` (`inventory_balances_quantity_non_negative`,
+  migration `20260101000073_stock_floor`). It is on the balance, not on
+  ledger lines: a line is a signed movement, and a transfer writes −x then +x
+  before it recomputes, so only where the balance ends is checked.
+- **The recompute takes the balance lock itself.** `recomputeBalance` calls
+  `lockInventoryBalances` for its key. A correct path already holds it, and
+  the same transaction takes it again at once; a path that skipped it now
+  waits, sums the true total and is refused by the constraint, instead of
+  storing a stale figure.
+- **A refusal by the database reads as a domain error.** `classifyDatabaseRefusal`
+  (`src/shared/errors.ts`) answers the floor constraint (SQLSTATE 23514, Prisma
+  P2039 or P2010) with 422 `INSUFFICIENT_BALANCE`, the same code a service
+  refusal gives, and a deadlock or write conflict (driver kind
+  `TransactionWriteConflict`: P2034 in a model query, P2010 when taking the
+  advisory lock) with 409 `CONFLICT`, "nothing was saved, try again". Both stay
+  at error level in the log, as unmapped Prisma codes are, each with its own
+  event (`stock-floor-refused`, `transaction-conflict`): the first means a
+  path skipped its check and is a defect to follow up. `classifyPrismaError`
+  is unchanged.
+- **Guards.** `src/shared/inventory/ledger-writers.test.ts` fails when a file
+  not on its list writes the ledger or the balances, or a listed production
+  writer no longer takes the lock, or any listed writer no longer recomputes
+  the balance (a line written without a recompute leaves the stored balance
+  stale, and the floor can't see that). It is a text search, file by file: a
+  new path inside a listed file passes it whether or not that path locks, so
+  it prompts a review rather than proving every path (TD-027 would).
+  `integration/stock-floor-races.real-http.test.ts`
+  races each of the seven paths that can overdraw (issue, transfer, write-off,
+  reversal, count, tool check-out, return to supplier) with the requests held
+  so they truly overlap (`overlapping`, `integration/helpers.ts`), and expects
+  one success, one refusal and the ledger and balance agreeing. The refusal is
+  422 `INSUFFICIENT_BALANCE`, except when an issue posts while a count is
+  open: the count then finds its stock moved and is refused with 409
+  `CONFLICT`, to be counted again. It also races two
+  transfers in opposite directions, which name the two balances in opposite
+  orders: both must succeed, as `lockInventoryBalances` sorts its keys (without
+  the sort they deadlock and one is refused with 409).
+- **Rollback.** Migrations stay forward-only. The rollback is a reviewed
+  script beside the migration, `prisma/rollbacks/20260101000073_stock_floor.sql`,
+  run with `prisma db execute`; it changes no data. `prisma migrate resolve
+  --rolled-back` does not unmark a migration that succeeded (tried
+  2026-11-23), so the constraint is put back by running the migration's own
+  script again, which checks for balances below zero first. Until it is,
+  `check:issued-stock` reports it missing. The integration suite runs the
+  rollback and the migration inside a transaction it undoes, so a broken
+  rollback fails CI.
+- **A daily reconciliation finds what the floor can't.** A CHECK sees one row:
+  it refuses a balance below zero, not a balance that no longer equals the
+  sum of its ledger (shown 2026-11-23: an absolute recompute from a stale sum
+  stored 4 over a ledger of −2 and passed it). PostgreSQL can't check that
+  relationship, so the application keeps it (the lock and the recompute) and
+  the backend checks it. Once a day (`StockReconciliationService.runIfDue`,
+  ticked hourly from `server.ts`, due after 23 hours) it runs the
+  `check:issued-stock` check in one REPEATABLE READ transaction under a
+  try-lock, so balances and ledger are compared at one moment and two
+  processes never both run it, and records the result in
+  `stock_reconciliation_runs` (migration `20260101000074`, kept a year): OK,
+  DRIFT with up to 50 problems and the true count, or FAILED in safe words.
+  Drift is logged at error level as `ledger-drift`, a check that could not run
+  as `stock-check-failed`. `GET /stock-reconciliation/status`
+  (`manage:settings`) reads the newest run: LATE when it is a clean run
+  older than 26 hours (DRIFT and FAILED keep their state however old). A
+  FAILED run is not the day's check, so the next hourly tick tries again.
+  Admins see a Dashboard card unless it is OK, and the list under
+  Settings → Data & backup. Its rollback drops only that table.
+
+**Alternatives considered:** (1) Write this ADR only: records the choice, but
+a missing or misplaced lock still leaves stock below zero unseen. (2) One
+posting function every path goes through (`postMovements`): removes the
+convention, but rewrites 14 paths that work; deferred, TD-027. (3) A
+conditional `UPDATE … WHERE quantity >= x` on the balance row: replaces the
+ledger-first recompute (ADR-002) everywhere. (4) SERIALIZABLE isolation:
+retries on every write path. (5) A trigger that keeps and checks the balance:
+moves the recompute into SQL, harder to test and change; an incremental
+trigger (`quantity = quantity + NEW.quantity`) would make the database keep
+balance = Σ ledger even without the lock, and is the candidate when TD-027 is
+taken up, under its own ADR. (6) The constraint without the lock in the
+recompute — **rejected on evidence**: it does not catch two overlapping
+defective paths. (7) Reconciliation by hand each week — replaced by the daily
+check: a drift was found only when someone remembered.
+
+**Consequences:** A path that forgets the lock or reads before it is refused
+(422, logged as `stock-floor-refused`) instead of leaving stock below zero or
+a balance that disagrees with its ledger. A deploy onto a database that
+already holds a balance below zero stops at the migration's preflight, which
+names the balances, changes nothing and points to the recovery: clear the
+failed record, correct them in the previous version, install again
+(`DATABASE_ASSURANCE.md`; `deployment.md` checks for them before an update).
+A balance that drifts from its
+ledger by any other route is on the Dashboard within a day. Correct paths
+behave as before. Tests: `errors.test.ts`, `server.database-refusals.test.ts`,
+`ledger-writers.test.ts`, `stock-reconciliation.test.ts`,
+`stock-reconciliation.job.test.ts`, `stockReconciliation.test.ts`,
+`SettingsStockCheck.test.tsx`, `stock-floor.real-http.test.ts`,
+`stock-floor-races.real-http.test.ts`, `stock-reconciliation.real-http.test.ts`.

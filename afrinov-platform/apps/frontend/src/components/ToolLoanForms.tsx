@@ -16,7 +16,7 @@ import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import { formatDate, formatNumber } from '../lib/format';
 import { useIdempotencyKey } from '../lib/idempotency';
-import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, movedWay, overdueBlocks, suggestedDueOn, useLoanTerms } from '../lib/toolLoans';
+import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, lostWriteOffStates, movedWay, overdueBlocks, suggestedDueOn, useLoanTerms } from '../lib/toolLoans';
 import { today } from '../lib/dates';
 import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
 import { lendable, type OpenLoan, type ToolRepairRow, type ToolRow } from '../api/types';
@@ -320,7 +320,9 @@ export function CheckInForm({ tool, onCancel, onDone }: {
             <div className="text-sm">
               <span className="font-medium text-surface-900">{l.recipientName ?? 'Not recorded'}</span>
               <span className="text-surface-600"> · {formatNumber(Number(l.out))} out since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
-              {Number(l.lostWaiting ?? 0) > 0 && <div className="text-xs text-surface-500">{formatNumber(Number(l.lostWaiting))} lost, waiting for the write-off to be approved under Write-offs to approve.</div>}
+              {lostWriteOffStates(l).map((s) => (
+                <div key={s.to} className="text-xs text-surface-500">{s.text}, under Write-offs to approve: not checked in again.</div>
+              ))}
               <div><LoanDue loan={l} /></div>
               <div className="text-xs text-surface-500">From {l.locationName}{l.locationActive === false ? ', which has closed since' : '; it goes back there'}. Checked out by {l.checkedOutBy}.{l.note ? ` ${l.note}` : ''}</div>
             </div>
