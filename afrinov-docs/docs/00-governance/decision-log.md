@@ -1034,6 +1034,22 @@ with the owner's choices, added these rules:
   comes only with the confirmation that settles it, and a confirmed slip can't
   be disputed again. Removing images on schedule can't touch an open dispute.
 
+**Reviewed (25 Nov 2026):** the owner asked whether an issue or tool loan
+should move stock only once the person collecting confirms it. Kept as
+decided: the slip posts first. The goods have left the shelf whether or not
+anyone signs. Holding the stock back would show it as available when it isn't,
+so reorder rules wouldn't fire, the next issue would pass the stock floor
+(ADR-047) on stock that isn't there, and the next count would show a loss. It
+would also leave a tool handed over without a PIN on loan to nobody. ERPs post
+a goods issue the same way, with proof of delivery as a later step. Project
+material is the one case with a control before stock leaves: the Workshop
+Manager's approval (ADR-043), which is also its slip's confirmation. Stores
+issues and tool loans have no approval step. Their confirmation records who
+took the stock, and an unconfirmed slip is chased. The deployment guide's
+go-live day sets every PIN, switches the setting to Required and agrees that
+Stores issues and tool loans go over only on the hand-over step. Its upkeep
+reviews unconfirmed and disputed slips weekly.
+
 ### ADR-035 — Every setting has an effect: idle sign-out is enforced, unread settings are retired
 **Date:** 2026-11-11 · **Status:** Accepted
 
