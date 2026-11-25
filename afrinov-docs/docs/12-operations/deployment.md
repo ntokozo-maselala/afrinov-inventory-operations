@@ -489,7 +489,7 @@ further entries.
 |---|---|---|
 | Every working day | Admin | Glance at the Dashboard: a **Backups**, **Stock check** or **Admins** card means something needs doing |
 | Every week | Admin | `docker compose ps` all running; `df -h /mnt/backup` has room |
-| Every week | Store controller | Dashboard **Slips not confirmed**: have each person confirm their slip (open it from the card), or ask why not. **Disputed slips**: check each one and reverse a line that was wrong. A slip that stays unconfirmed is still issued stock; it is a question of who took it, not of whether the stock is there |
+| Every week | Store controller | Dashboard **Slips not confirmed** counts the last 30 days only: open it from the card, then set an earlier start date in Movements → Issued stock → **Not confirmed** to see older ones. Have each person confirm their slip, or ask why not. **Disputed slips**: check each one, reverse any line that was wrong, then have the person confirm the lines that remain. It stays on the Dashboard until then, or until every line is reversed. A slip that stays unconfirmed is still issued stock: the question is who took it, not whether the stock is there |
 | At each month close | Admin | Settings → Data & backup says the stock figures add up (the server checks once a day, ADR-047); note it with the close |
 | Every three months | Admin, then the owner | Restore test (8.3, second command); the owner signs it off under Settings → Data & backup |
 | Every year, before it lapses | Admin | Renew the backup service's Azure access: `ACCOUNT=<name> RG=rg-afrinov-backups bash backup/azure-setup.sh renew` |
@@ -530,7 +530,7 @@ taken first (`backup-and-recovery.md`, "Restoring in earnest").
 |---|---|
 | Someone forgot their password | The other Admin sets a temporary one (Settings → Users → Temporary password) |
 | Every Admin is locked out | On the server: put a new `SEED_ADMIN_PASSWORD` in `.env`, then `npm run db:rotate-admin --workspace=@afrinov/backend` (resets `admin@afrinov.local` only) |
-| A worker forgot their counter PIN, or it locked after too many wrong tries | Hand the goods over anyway and post the slip; they confirm with a signature or a photo of the signed paper slip instead. Then, in Recipients, **Unlock** the PIN (locked) or **Reset** it so they set a new one (forgotten). An unlock badge that keeps growing means someone is guessing: check the activity log |
+| A worker forgot their counter PIN, or it locked after too many wrong tries | Post the slip while they are at the counter; on the hand-over step they confirm with a signature, or a photo of the signed paper slip, instead of the PIN, and then take the goods. Then, in Recipients, **Unlock** the PIN (locked) or **Reset** it so they set a new one (forgotten). An unlock badge that keeps growing means someone is guessing: check the activity log |
 | "Too many sign-in attempts" | Wait 15 minutes, or an Admin sets a temporary password for that account |
 | The site doesn't load | `docker compose ps`; `sudo systemctl status nginx`; `docker compose logs backend` |
 | Dashboard: backups failed or late | Settings → Data & backup shows the reason; `docker compose logs backup` |
