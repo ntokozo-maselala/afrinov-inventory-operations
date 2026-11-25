@@ -463,9 +463,11 @@ that the locations exist.
 
 **10.7 Receipt confirmation.** Set any PIN still noted from 7.4 (Recipients),
 then check receipt confirmation is on **Required** (Settings → Inventory).
-Agree one rule with the store staff: goods are handed over only while the
-hand-over step is on screen, so the person collecting confirms there and
-then. A slip confirmed later from Movements is the exception, not the habit.
+Agree one rule with the store staff: a Stores issue or a tool loan is handed
+over only while the hand-over step is on screen, so the person collecting
+confirms there and then. A slip confirmed later from Movements is the
+exception, not the habit. Project material has no hand-over step: the
+Workshop Manager's approval is its slip's confirmation (ADR-043).
 
 Open the store: from this moment every entry goes into the app.
 

@@ -1041,12 +1041,14 @@ anyone signs. Holding the stock back would show it as available when it isn't,
 so reorder rules wouldn't fire, the next issue would pass the stock floor
 (ADR-047) on stock that isn't there, and the next count would show a loss. It
 would also leave a tool handed over without a PIN on loan to nobody. ERPs post
-a goods issue the same way, with proof of delivery as a later step. The
-control before stock leaves is approval (ADR-043 for project material). After
-that, the confirmation records who took the stock, and an unconfirmed slip is
-chased. The deployment guide's go-live day sets every PIN, switches the setting
-to Required and agrees that goods go over only on the hand-over step. Its
-upkeep reviews unconfirmed and disputed slips weekly.
+a goods issue the same way, with proof of delivery as a later step. Project
+material is the one case with a control before stock leaves: the Workshop
+Manager's approval (ADR-043), which is also its slip's confirmation. Stores
+issues and tool loans have no approval step. Their confirmation records who
+took the stock, and an unconfirmed slip is chased. The deployment guide's
+go-live day sets every PIN, switches the setting to Required and agrees that
+Stores issues and tool loans go over only on the hand-over step. Its upkeep
+reviews unconfirmed and disputed slips weekly.
 
 ### ADR-035 — Every setting has an effect: idle sign-out is enforced, unread settings are retired
 **Date:** 2026-11-11 · **Status:** Accepted
