@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-07-003 updated=2026-11-26 by="Ntokozo Maselala" body=cf4a82785916 -->
+<!-- /afrinov:document-control id=AFRI-OMS-07-003 updated=2026-11-26 by="Ntokozo Maselala" body=e21cc01e15a7 -->
 
 # Migration Strategy
 
@@ -33,7 +33,7 @@ starts and in the CI integration job).
 | `20260101000005_recipients` | Creates `recipients` (case-insensitive unique name), converts any user ids already in `inventory_transactions.recipient_id` into WORKER recipients, nulls the rest, adds the FK |
 | `20260101000006_inventory_returns` | Adds `RETURN` to `InventoryTransactionType` |
 
-The two gaps once recorded here are closed: the `inventory_balances` foreign
+The two gaps once recorded here are closed (checked against the code at `f659e5d`, 2026-11-26): the `inventory_balances` foreign
 keys are created by migration `20260101000027` (TD-005), and
 `20260101000000_initial/README.md` names the right folder (TD-016). Prisma
 migrations only go forward; there are no down migrations. A migration that

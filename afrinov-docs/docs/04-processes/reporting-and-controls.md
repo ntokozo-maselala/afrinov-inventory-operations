@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-04-004 updated=2026-11-26 by="Ntokozo Maselala" body=d1c24c2e9817 -->
+<!-- /afrinov:document-control id=AFRI-OMS-04-004 updated=2026-11-26 by="Ntokozo Maselala" body=1b4aae38d33f -->
 
 # Process: Reporting & Controls
 
@@ -90,7 +90,7 @@ daylight saving): a movement at 00:30 on the 1st belongs to the new month.
 - Known inconsistency: the inventory report's currency comes from the
   `REPORT_CURRENCY` environment variable, the other reports' from the
   `general.defaultCurrency` setting (TD-012). (The dashboard's tile notes
-  now show the stock status bands as set; TD-025 is resolved.)
+  now show the stock status bands as set; TD-025 is resolved, checked against the code at `f659e5d`, 2026-11-26.)
 
 ## Evidence
 - `afrinov-platform/apps/backend/src/modules/reporting/reporting.routes.ts:26-198`
@@ -98,5 +98,5 @@ daylight saving): a movement at 00:30 on the 1st belongs to the new month.
 - `afrinov-platform/apps/backend/src/shared/inventory/stock-status.ts:1-54`
 - `afrinov-platform/apps/backend/src/modules/reporting/consumption.service.ts:1-9`
 - `afrinov-platform/apps/backend/src/modules/reporting/month-end.service.ts:1-84`
-- `afrinov-platform/apps/backend/src/modules/reporting/report.service.ts:138`
-- `afrinov-platform/apps/frontend/src/pages/Dashboard.tsx:61-62`
+- `afrinov-platform/apps/backend/src/modules/reporting/report.service.ts:168`
+- `afrinov-platform/apps/frontend/src/pages/Dashboard.tsx:295-296`

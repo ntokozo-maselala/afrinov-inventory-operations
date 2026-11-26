@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-12-001 updated=2026-11-26 by="Ntokozo Maselala" body=4a116afa551f -->
+<!-- /afrinov:document-control id=AFRI-OMS-12-001 updated=2026-11-26 by="Ntokozo Maselala" body=b58ce0c52627 -->
 
 # Alerting
 
@@ -25,6 +25,6 @@ switch comes back with an alerts feature that reads it. The two audiences
 should not share a channel.
 
 ## Evidence
-- `afrinov-platform/apps/frontend/src/pages/Dashboard.tsx:61-62`
+- `afrinov-platform/apps/frontend/src/pages/Dashboard.tsx:295-296`
 - `afrinov-platform/apps/backend/src/modules/reporting/reporting.service.ts:263-266`
 - `afrinov-platform/apps/backend/src/modules/settings/settings.service.ts:183-185`

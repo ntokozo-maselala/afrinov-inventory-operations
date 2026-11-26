@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-07-002 updated=2026-11-26 by="Ntokozo Maselala" body=ed27c226e5d8 -->
+<!-- /afrinov:document-control id=AFRI-OMS-07-002 updated=2026-11-26 by="Ntokozo Maselala" body=db35e4a2c77c -->
 
 # Database Schema
 
@@ -45,7 +45,7 @@ SHOP_FLOOR_AREA, CONTAINER, OFF_SITE · `RackStatus` ACTIVE, INACTIVE, FULL ·
 `RecipientType` WORKER, MACHINE, SITE, CONTRACTOR. Project status values
 (PLANNING, ACTIVE, ON_HOLD, COMPLETED, CANCELLED) are checked by the database
 (`projects_status_check`, migration `20260101000057_project_status_decides`;
-TD-024 resolved).
+TD-024 resolved; checked against the code at `f659e5d`, 2026-11-26).
 
 ## Procurement
 | Table (model) | Key columns | Constraints and notes |
