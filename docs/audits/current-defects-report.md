@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-26 by="Ntokozo Maselala" body=3541c7f8ffc9 -->
+<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-26 by="Ntokozo Maselala" body=6d6407b25d8f -->
 
 # Current Defects Report
 
@@ -27,9 +27,10 @@ whether the defect is still there. Nothing here comes from outside the repositor
   business decision, a deployment, or work the owner deferred. This group includes
   the two High items: the credential in git history (SEC-07 / TD-026) and the
   missing production evidence (OPS-01).
-- **6 closed since edition 1** (section 3): AUD-006 is fixed in the code and recorded
-  as TD-028 (PR #215), and the registers now close TD-016, TD-024, TD-025 and ARCH-01
-  and record TD-011 as partly resolved (PR #216).
+- **5 closed and 1 narrowed since edition 1** (section 3): AUD-006 is fixed in the
+  code and recorded as TD-028 (PR #215), and the registers now close TD-016, TD-024,
+  TD-025 and ARCH-01 (PR #216). TD-011 is recorded as partly resolved; its remaining
+  parts stay open in section 1.
 - **6 documentation defects** come from the 26 Nov 2026 standardisation.
 
 ## Scope and method
@@ -96,11 +97,13 @@ whether the defect is still there. Nothing here comes from outside the repositor
 | TD-019 | Lists other than `/reports/inventory` are unbounded or `limit`-capped | "Large lists" | Partly resolved 2026-10-29 | A route-by-route review. Not re-checked | `technical-debt.md` |
 | ARCH-02 | No idempotency contract for repeated POSTs beyond inventory movements | Low | Partly resolved 2026-10-29 — inventory covered; rest open | Not re-checked. A later record (ADR-042, `AGENTS.md`) extends the key to creating suppliers, purchase orders and RFQs | `RISK_REGISTER.md` |
 
-## 3. Closed since edition 1
+## 3. Closed or narrowed since edition 1
 
 Edition 1 (`d1f25a3`) listed AUD-006 as present in the code, and five register entries
-as recorded open though the repository showed them fixed. All six are now closed in
-the code and in the registers.
+as recorded open though the repository showed them fixed, wholly or in part. Five are
+now closed in the code and in the registers. TD-011 changed status only: the register
+records it as partly resolved, and its unused `purchase_orders.shipped_*` columns and
+`GoodsReceiptStatus.DRAFT` stay open (section 1).
 
 | ID | Edition 1 said | Now (`9d01ef5`) | Closed by |
 |---|---|---|---|
