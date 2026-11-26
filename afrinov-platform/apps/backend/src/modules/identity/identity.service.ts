@@ -142,10 +142,11 @@ export interface UpdateUserInput {
 }
 
 /**
- * The fields of a user any response may carry: never the password hash, nor
- * the sign-in bookkeeping (when the password changed, the sign-out cut-off).
- * Every user read that is sent to a client selects these (AUD-006: the update
- * once re-read the whole row and sent its passwordHash back).
+ * The fields of a user the user-management answers (/users) carry: never the
+ * password hash, nor the sign-in bookkeeping (when the password changed, the
+ * sign-out cut-off). list, getById and update all select these (AUD-006: the
+ * update once re-read the whole row and sent its passwordHash back). Sign-in
+ * answers go through toSessionUser instead, which builds its own fields.
  */
 export const USER_FIELDS = {
   id: true,

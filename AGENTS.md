@@ -287,9 +287,11 @@ Use these forms; the older spellings still work but are deprecated or removed.
   A sign-in that began before `users.password_changed_at` is refused, and while
   `must_change_password` is set (an Admin's temporary password) only
   `/auth/me`, `/auth/refresh`, `/auth/password` and `/auth/logout` answer. Any path that sets a
-  password sets `passwordChangedAt` too. A user sent to a client selects
-  `USER_FIELDS` (`src/modules/identity/identity.service.ts`), never the whole
-  row, so `passwordHash` never leaves the server (AUD-006, TD-028).
+  password sets `passwordChangedAt` too. No answer carries a raw user row, so
+  `passwordHash` never leaves the server (AUD-006, TD-028): the user-management
+  answers (`/users`) select `USER_FIELDS`, sign-in, renewal and password change
+  return `toSessionUser` (built field by field from `SESSION_USER_INCLUDE`), and
+  `/auth/me` answers from the token's claims (all in `src/modules/identity/`).
   `UserService.update` refuses a change that leaves no active Admin, or that
   brings two or more down to one
   (`MIN_ADMINS`, kept in step with `src/lib/admins.ts`), under the
