@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-26 by="Ntokozo Maselala" body=459e4ab5c5d8 -->
+<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-26 by="Ntokozo Maselala" body=0aa2383870dd -->
 
 # @afrinov/backend
 
@@ -155,7 +155,7 @@ any Rack row remains. On each database:
 | `HOST` | No | `0.0.0.0` | Interface to bind |
 | `LOG_LEVEL` | No | `info` | Pino log level |
 | `CORS_ORIGIN` | In production | Local Vite origins in development | Comma-separated list of allowed browser origins |
-| `CORS_ALLOW_ANY` | No | — | `true` allows any origin. Throwaway demos only |
+| `CORS_ALLOW_ANY` | No | — | `true` allows any origin. Throwaway demos only: production refuses to start with it (SEC-04) |
 | `RATE_LIMIT_AUTH` | No | `5` | Login requests per minute per IP |
 | `RATE_LIMIT_GLOBAL` | No | `1000` | All other requests per minute per IP |
 | `PROCUREMENT_ENABLED` | No | `true` | `false` turns off purchase orders and goods receipts. Keep in step with the frontend's `VITE_PROCUREMENT_ENABLED` |

@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-BE-007 updated=2026-11-26 by="Ntokozo Maselala" body=9ba4b5305a60 -->
+<!-- /afrinov:document-control id=AFRI-OMS-BE-007 updated=2026-11-26 by="Ntokozo Maselala" body=64a64dbf371c -->
 
 # Environment and configuration model
 
@@ -52,7 +52,7 @@ the test template carries no signing secret.
 | `HOST` | Listener interface | `loadConfig`, `server.start()` | No | `0.0.0.0` | Example `0.0.0.0` | Example `127.0.0.1`; integration binds `127.0.0.1` directly | Compose does not override | No validation |
 | `LOG_LEVEL` | Pino threshold | Fastify logger in `server.ts` | No | `info` | `pino-pretty` transport, level configurable | Example `silent`; tests can override | `info` unless injected | Passed to Pino; no app-level enum check |
 | `CORS_ORIGIN` | Comma-separated browser-origin allow-list | `resolveCorsOrigin`, `@fastify/cors` | No at boot; operationally needed for browser UI outside dev | Local dev origin list in development; otherwise CORS disabled | Explicit list wins; known local Vite origins if unset | E2E injects `http://localhost:5173`; integration tests set their origin explicitly | Compose defaults empty (CORS disabled) | Split/trim/filter; no URL validation |
-| `CORS_ALLOW_ANY` | Explicit any-origin CORS escape hatch | `resolveCorsOrigin` | No | Disabled | `true` returns wildcard policy | Same | Same; code does not reject it in production | Exact lowercase string `true`; not restricted by `NODE_ENV` |
+| `CORS_ALLOW_ANY` | Explicit any-origin CORS escape hatch | `resolveCorsOrigin` | No | Disabled | `true` returns wildcard policy | Same | Refused: `loadConfig()` will not start with it, and `resolveCorsOrigin` ignores it (SEC-04, 2026-11-26) | Exact lowercase string `true`; production refuses it |
 | `RATE_LIMIT_AUTH` | Login requests/minute/IP | Rate-limit plugin in `server.ts` | No | 5 (1000 in tests) | Positive numeric override | 1000 fallback | 5 fallback | `Number()` then used only when `>0`; nonpositive/NaN falls back |
 | `RATE_LIMIT_GLOBAL` | Other requests/minute/IP | Rate-limit plugin | No | 1000 (10000 in tests) | Positive numeric override | 10000 fallback | 1000 fallback | Same positive-number fallback; no shared store configured in source |
 | `PROCUREMENT_ENABLED` | Toggle purchase-order/goods-receipt routes | `isProcurementEnabled`, `server.ts` | No | Enabled unless string is `false` | Enabled by default | Enabled unless test override | Enabled by default | Case-insensitive exact `false`; supplier routes remain mounted |
@@ -77,9 +77,10 @@ the test template carries no signing secret.
 - Production JWT validation checks a small list of exact published
   placeholders. A one-character secret was accepted by direct reproduction;
   no strength, length, or entropy policy exists in `loadConfig()`.
-- `CORS_ALLOW_ANY=true` is accepted in production and CORS is configured with
-  credentials. Its comments call it a demo escape hatch but code does not
-  enforce that restriction.
+- `CORS_ALLOW_ANY=true` is refused in production since 2026-11-26 (SEC-04):
+  `loadConfig()` will not start with it, and `resolveCorsOrigin` ignores it
+  there. Outside production it still allows any origin with credentials, for a
+  throwaway demo box.
 - `CORS_ORIGIN` is described as required for production in the README/example,
   but startup does not enforce it. When absent outside development, browser
   CORS is disabled, which may make a deployed SPA unable to call the API.
