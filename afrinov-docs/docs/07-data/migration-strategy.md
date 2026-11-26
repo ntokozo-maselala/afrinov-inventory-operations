@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-07-003 updated=2026-11-26 by="Ntokozo Maselala" body=550db37d2633 -->
+<!-- /afrinov:document-control id=AFRI-OMS-07-003 updated=2026-11-26 by="Ntokozo Maselala" body=cf4a82785916 -->
 
 # Migration Strategy
 
@@ -35,8 +35,14 @@ starts and in the CI integration job).
 
 The two gaps once recorded here are closed: the `inventory_balances` foreign
 keys are created by migration `20260101000027` (TD-005), and
-`20260101000000_initial/README.md` names the right folder (TD-016). There are
-no down/rollback migrations.
+`20260101000000_initial/README.md` names the right folder (TD-016). Prisma
+migrations only go forward; there are no down migrations. A migration that
+adds a constraint or table a release may need to undo has a hand-written
+rollback script in `prisma/rollbacks/` (ADR-047): today
+`20260101000073_stock_floor.sql` and `20260101000074_stock_reconciliation_runs.sql`,
+each tested inside a transaction that is then undone
+(`integration/stock-floor.real-http.test.ts`,
+`integration/stock-reconciliation.real-http.test.ts`).
 
 ## Workbook import
 **Source:** the stock workbook (`AFRI-03A-08-IAM-02 - Stock Inventory1.xlsm`,
