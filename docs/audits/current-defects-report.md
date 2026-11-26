@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-26 by="Ntokozo Maselala" body=6197999edf59 -->
+<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-26 by="Ntokozo Maselala" body=3c516b4c3f54 -->
 
 # Current Defects Report
 
@@ -27,8 +27,9 @@ whether the defect is still there. Nothing here comes from outside the repositor
   business decision, a deployment, or work the owner deferred. This group includes
   the two High items: the credential in git history (SEC-07 / TD-026) and the
   missing production evidence (OPS-01).
-- **4 are recorded as open but are fixed in the code** (TD-016, TD-024, TD-025,
-  ARCH-01), and part of a fifth (TD-011). The registers need updating.
+- **4 are recorded as open but are fixed in the repository**: three in the code
+  (TD-024, TD-025, ARCH-01) and one in documentation (TD-016), and part of a fifth
+  (TD-011). The registers need updating.
 - **6 documentation defects** come from the 26 Nov 2026 standardisation.
 
 ## Scope and method
@@ -49,7 +50,7 @@ whether the defect is still there. Nothing here comes from outside the repositor
   result is in the column **At `d1f25a3`**:
   - **Present**: the code still shows the defect.
   - **Partly**: some of what is recorded is still there; the rest is not.
-  - **Fixed in code**: the code no longer shows it, though the register says open.
+  - **Fixed**: the repository no longer shows it, though the register says open.
   - **Not re-checked**: the entry needs a person, a deployment or a route-by-route
     review, not a code search.
 - **Not examined:** any running system, production host or database; the stock
@@ -70,7 +71,7 @@ whether the defect is still there. Nothing here comes from outside the repositor
 | TD-006 | Ledger and audit immutability is application convention only: no GRANT, REVOKE or trigger in the migrations | "Direct SQL can edit history" | Open (docs corrected) | **Present.** No migration grants, revokes or creates a trigger; the one match (migration `20260101000052`) is a comment | `technical-debt.md` |
 | TD-007 | Domain events are dispatched but no handler is registered; `SupplierCreated` and `PurchaseOrderCreated/Approved/Cancelled` are declared but never dispatched | "Dead code; misleading design" | Open (docs corrected) | **Present.** No application code calls `registerDomainEventHandler`; the four events appear only in `src/shared/events.ts` | `technical-debt.md` |
 | TD-011 | Unused model and fields: `purchase_orders.shipped_*` kept unused; `GoodsReceiptStatus.DRAFT` never produced; `createPOSchema` accepts `unitPrice`, silently dropped | "Confusing contract" | Open | **Partly.** `shipped_at` and `shipped_by_id` (`schema.prisma:590-591`) are not used in `src`; `DRAFT` is still in the enum (`schema.prisma:1047`). The `unitPrice` part is out of date: it is now stored (`procurement.service.ts:600`) | `technical-debt.md` |
-| TD-012 | Inventory report currency comes from the `REPORT_CURRENCY` environment variable; all other reports use the `general.defaultCurrency` setting | "Reports can disagree on currency" | Open | **Present.** `reporting/report.service.ts:168` and `inventory/inventory.service.ts:1142` (the register cites line 138) | `technical-debt.md` |
+| TD-012 | Inventory report currency comes from the `REPORT_CURRENCY` environment variable; all other reports use the `general.defaultCurrency` setting | "Reports can disagree on currency" | Open | **Present.** `reporting/report.service.ts:168` and `inventory/inventory.service.ts:1142` (the register cites line 138). "All other reports" is too wide: the procurement savings report fixes its currency at `ZAR` (`reporting/procurement-savings.service.ts:20`) | `technical-debt.md` |
 | TD-015 | Client role checks duplicate server permissions by role name; the menu is now filtered by permission | "UI and server can drift" | Partly resolved | **Present, as recorded.** Role names in `apps/frontend/src/hooks/usePermissions.ts:3-11` | `technical-debt.md` |
 | TD-020 | Schema comments say the schema is "derived from" the docs and that `inventory_balances` is "never written by application code" / refreshed by a trigger; the code upserts it and there is no trigger | "Misleading in-code documentation" | Open | **Present.** `prisma/schema.prisma:2`, `:6`, `:1478` | `technical-debt.md` |
 | TD-021 | `task_context.md` says "Phase 1 … is next"; phases 1–3 are implemented | "Stale orientation doc" | Open | **Present.** `task_context.md:28-29` | `technical-debt.md` |
@@ -83,7 +84,7 @@ whether the defect is still there. Nothing here comes from outside the repositor
 | ID | Defect, as recorded | Severity / impact, as recorded | Recorded status | Waiting on | Source |
 |---|---|---|---|---|---|
 | SEC-07 / TD-026 / EX-01 | A real bootstrap admin password is in reachable git history (commit `db1501ac0b`); the repository is public | High. "Account takeover if the account still exists or the password is reused" | Open — action required | Rotating the password or deleting the account wherever it was used, then reviewing the scanning baseline. Not visible in the repository | `RISK_REGISTER.md`, `technical-debt.md`, `EXCEPTIONS.md` |
-| OPS-01 | No deployment workflow, backup/restore runbook, restore evidence or alerting in the repository | High (release gate) | Open — backups built, production setup and evidence needed | Production topology, backup and restore evidence, RPO/RTO, alerting proof | `RISK_REGISTER.md` |
+| OPS-01 | Recorded as "no deployment workflow, backup/restore runbook, restore evidence, or alerting in the repository"; the register's own evidence adds that a backup service with an off-site copy, a restore test, Dashboard warnings and a CI drill are built (ADR-037), not yet set up on a production host | High (release gate) | Open — backups built, production setup and evidence needed | Production topology, backup and restore evidence from a production host, RPO/RTO, alerting proof | `RISK_REGISTER.md` |
 | SEC-05 | Rate limiting may count every client as the proxy; counters are per process | Medium (conditional) | Mitigated in code — needs `TRUST_PROXY` set at deployment | The deployment setting | `RISK_REGISTER.md` |
 | TD-001 | Location and supplier free-text clean-up during migration is a manual review; ambiguous cases need a business decision | "Delays migration sign-off" | Open | Business decisions on the location spellings | `technical-debt.md` |
 | TD-002 | How `Sheet1` (836 rows), `Consumables Box` and `Consumables Tracking Main` overlap with `Consumables Main` is not understood | "Blocks migration completeness" | Open | Clarification of the workbook's sheets | `technical-debt.md` |
@@ -95,10 +96,11 @@ whether the defect is still there. Nothing here comes from outside the repositor
 | TD-019 | Lists other than `/reports/inventory` are unbounded or `limit`-capped | "Large lists" | Partly resolved 2026-10-29 | A route-by-route review. Not re-checked | `technical-debt.md` |
 | ARCH-02 | No idempotency contract for repeated POSTs beyond inventory movements | Low | Partly resolved 2026-10-29 — inventory covered; rest open | Not re-checked. A later record (ADR-042, `AGENTS.md`) extends the key to creating suppliers, purchase orders and RFQs | `RISK_REGISTER.md` |
 
-## 3. Recorded open, fixed in the code
+## 3. Recorded open, fixed in the repository
 
-The registers still list these as open. The code at `d1f25a3` no longer shows them, so
-the register entries need updating by their owners.
+The registers still list these as open. The repository at `d1f25a3` no longer shows
+them: TD-024, TD-025, ARCH-01 and part of TD-011 were fixed in the code, TD-016 in a
+migration's README (documentation). The register entries need updating by their owners.
 
 | ID | Recorded as | At `d1f25a3` | Source |
 |---|---|---|---|
@@ -123,7 +125,7 @@ open issues).
 | O11 | Long inline code in some documents runs past a phone screen | A content edit by the owner |
 
 This report adds one: the technical-debt and risk registers list five entries as
-open that the code shows fixed (section 3).
+open that the repository shows fixed (section 3).
 
 ## 5. Environment notes
 
