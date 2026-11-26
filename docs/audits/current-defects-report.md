@@ -7,29 +7,29 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-26 by="Ntokozo Maselala" body=3c516b4c3f54 -->
+<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-26 by="Ntokozo Maselala" body=3541c7f8ffc9 -->
 
 # Current Defects Report
 
-**Status:** DRAFT · **Owner:** Product/Engineering · **Baseline:** `d1f25a3`, 2026-11-26
+**Status:** DRAFT · **Owner:** Product/Engineering · **Baseline:** `9d01ef5`, 2026-11-26 · **Edition:** 2 (edition 1 at `d1f25a3`)
 
 ## Summary
 
 This report extracts every defect the repository's documents record as open or partly
-resolved, as of commit `d1f25a3` (26 Nov 2026). Each entry is quoted from its source
-document and cited. Where an entry names code, the code was read at `d1f25a3` to see
+resolved, as of commit `9d01ef5` (26 Nov 2026). Each entry is quoted from its source
+document and cited. Where an entry names code, the code was read at `9d01ef5` to see
 whether the defect is still there. Nothing here comes from outside the repository.
 
-- **13 defects are confirmed in the code.** The most serious is **AUD-006**:
-  `PATCH /users/:id` returns the stored password hash. No register tracks it; it is
-  recorded only in the 21 Oct 2026 system audit.
+- **12 defects are confirmed in the code.** The highest rated is SEC-03, "High if
+  Compose is deployed on a reachable host": the development Compose file publishes the
+  database on every interface.
 - **12 are open but cannot be confirmed from the repository.** They wait on a
   business decision, a deployment, or work the owner deferred. This group includes
   the two High items: the credential in git history (SEC-07 / TD-026) and the
   missing production evidence (OPS-01).
-- **4 are recorded as open but are fixed in the repository**: three in the code
-  (TD-024, TD-025, ARCH-01) and one in documentation (TD-016), and part of a fifth
-  (TD-011). The registers need updating.
+- **6 closed since edition 1** (section 3): AUD-006 is fixed in the code and recorded
+  as TD-028 (PR #215), and the registers now close TD-016, TD-024, TD-025 and ARCH-01
+  and record TD-011 as partly resolved (PR #216).
 - **6 documentation defects** come from the 26 Nov 2026 standardisation.
 
 ## Scope and method
@@ -38,19 +38,20 @@ whether the defect is still there. Nothing here comes from outside the repositor
 
 | Source | What it holds | As of |
 |---|---|---|
-| `afrinov-docs/docs/13-project-management/technical-debt.md` (TD-) | The register the documentation guide names for defects | Last verified 2026-10-28; entries updated to 2026-11-23 |
-| `docs/engineering/RISK_REGISTER.md` (SEC-, OPS-, ARCH-, DOC-) | Engineering risks, extending `audit/07_FINDINGS_AND_READINESS.md` | Updated with ADR-036 and ADR-037 |
+| `afrinov-docs/docs/13-project-management/technical-debt.md` (TD-) | The register the documentation guide names for defects | Entries updated to 2026-11-26 |
+| `docs/engineering/RISK_REGISTER.md` (SEC-, OPS-, ARCH-, DOC-) | Engineering risks, extending `audit/07_FINDINGS_AND_READINESS.md` | Updated to 2026-11-26 (ARCH-01) |
 | `docs/engineering/EXCEPTIONS.md` (EX-) | Accepted deviations from a gate | — |
 | `docs/audits/system/FAILURE_REGISTER.md` (F-) | Build and environment failures, re-verified 2026-10-29 | 2026-10-29 |
 | `docs/audits/system/CODEBASE_AUDIT_REPORT.md` (AUD-0nn) | A dated audit; where each finding is tracked now is in the appendix | 2026-10-21 |
 | `docs/document-control/STANDARDISATION_REPORT.md` (O) | Documentation defects | 2026-11-26 |
 
 - **Checked against code:** entries that name a file, a line, a setting or a
-  behaviour were looked up at `d1f25a3` by reading the source and migrations. The
-  result is in the column **At `d1f25a3`**:
+  behaviour were looked up at `9d01ef5` by reading the source and migrations. Since
+  edition 1 only `src/modules/identity/identity.service.ts` changed among the cited
+  code, so every other reference was re-read and still holds. The result is in the
+  column **At `9d01ef5`**:
   - **Present**: the code still shows the defect.
   - **Partly**: some of what is recorded is still there; the rest is not.
-  - **Fixed**: the repository no longer shows it, though the register says open.
   - **Not re-checked**: the entry needs a person, a deployment or a route-by-route
     review, not a code search.
 - **Not examined:** any running system, production host or database; the stock
@@ -61,16 +62,15 @@ whether the defect is still there. Nothing here comes from outside the repositor
 
 ## 1. Defects confirmed in the code
 
-| ID | Defect, as recorded | Severity / impact, as recorded | Recorded status | At `d1f25a3` | Source |
+| ID | Defect, as recorded | Severity / impact, as recorded | Recorded status | At `9d01ef5` | Source |
 |---|---|---|---|---|---|
-| AUD-006 | User update response returns a password hash: the update re-reads the full user and `PATCH` sends it as it is | Medium, P1. "ADMIN caller can collect bcrypt hashes for offline cracking or credential reuse" | Static path verified (2026-10-21); in no register | **Present.** `identity.service.ts:250-253` re-reads the user with `include` (every column, `passwordHash` among them) and returns it (`:274`, `:277`); `user.routes.ts:96-97` sends it with no response schema or field selection. Callers need `manage:users` | `CODEBASE_AUDIT_REPORT.md` |
 | SEC-03 | Compose publishes PostgreSQL on all interfaces and the API uses the superuser account | High if Compose is deployed on a reachable host | Open — applicability unknown | **Partly.** `docker-compose.yml:11-12` still maps `5432:5432`; the production overlay binds the database and API to `127.0.0.1` (`docker-compose.prod.yml:13`, `:18`); the API still connects as `POSTGRES_USER` (`docker-compose.yml:50`) | `RISK_REGISTER.md` |
 | SEC-06 | The browser app stores the bearer token in `localStorage`; production CSP undefined in this repository | Medium (conditional). "XSS or unsafe third-party script could exfiltrate a reusable token" | Open — out of scope | **Present.** `apps/frontend/src/api/client.ts:58-62` | `RISK_REGISTER.md` |
 | SEC-04 | `CORS_ALLOW_ANY=true` can be enabled in production | Low. "Broad browser cross-origin access if explicitly enabled" | Open — low, opt-in | **Present.** `src/shared/config.ts:139` returns `true` before the environment is considered | `RISK_REGISTER.md` |
 | TD-004 | Module boundaries are not enforced: `inventory` and `procurement` import each other; procurement writes ledger rows; reporting reads other modules' tables | "Harder to split or change modules" | Open (docs corrected 2026-10-09) | **Present.** `procurement/goods-receipt.service.ts:6` imports `InventoryService`; `inventory/stock-receipt.service.ts:12` imports from procurement | `technical-debt.md` |
 | TD-006 | Ledger and audit immutability is application convention only: no GRANT, REVOKE or trigger in the migrations | "Direct SQL can edit history" | Open (docs corrected) | **Present.** No migration grants, revokes or creates a trigger; the one match (migration `20260101000052`) is a comment | `technical-debt.md` |
 | TD-007 | Domain events are dispatched but no handler is registered; `SupplierCreated` and `PurchaseOrderCreated/Approved/Cancelled` are declared but never dispatched | "Dead code; misleading design" | Open (docs corrected) | **Present.** No application code calls `registerDomainEventHandler`; the four events appear only in `src/shared/events.ts` | `technical-debt.md` |
-| TD-011 | Unused model and fields: `purchase_orders.shipped_*` kept unused; `GoodsReceiptStatus.DRAFT` never produced; `createPOSchema` accepts `unitPrice`, silently dropped | "Confusing contract" | Open | **Partly.** `shipped_at` and `shipped_by_id` (`schema.prisma:590-591`) are not used in `src`; `DRAFT` is still in the enum (`schema.prisma:1047`). The `unitPrice` part is out of date: it is now stored (`procurement.service.ts:600`) | `technical-debt.md` |
+| TD-011 | Unused fields: `purchase_orders.shipped_*` kept unused; `GoodsReceiptStatus.DRAFT` never produced. (`unitPrice` is now stored; see section 3) | "Confusing contract" | Partly resolved | **Present.** `shipped_at` and `shipped_by_id` (`schema.prisma:590-591`) are used nowhere in `src`; `DRAFT` is still in the enum (`schema.prisma:1047`) and receipts are created SUBMITTED or POSTED (`goods-receipt.service.ts:174`, `stock-receipt.service.ts:172`) | `technical-debt.md` |
 | TD-012 | Inventory report currency comes from the `REPORT_CURRENCY` environment variable; all other reports use the `general.defaultCurrency` setting | "Reports can disagree on currency" | Open | **Present.** `reporting/report.service.ts:168` and `inventory/inventory.service.ts:1142` (the register cites line 138). "All other reports" is too wide: the procurement savings report fixes its currency at `ZAR` (`reporting/procurement-savings.service.ts:20`) | `technical-debt.md` |
 | TD-015 | Client role checks duplicate server permissions by role name; the menu is now filtered by permission | "UI and server can drift" | Partly resolved | **Present, as recorded.** Role names in `apps/frontend/src/hooks/usePermissions.ts:3-11` | `technical-debt.md` |
 | TD-020 | Schema comments say the schema is "derived from" the docs and that `inventory_balances` is "never written by application code" / refreshed by a trigger; the code upserts it and there is no trigger | "Misleading in-code documentation" | Open | **Present.** `prisma/schema.prisma:2`, `:6`, `:1478` | `technical-debt.md` |
@@ -96,24 +96,28 @@ whether the defect is still there. Nothing here comes from outside the repositor
 | TD-019 | Lists other than `/reports/inventory` are unbounded or `limit`-capped | "Large lists" | Partly resolved 2026-10-29 | A route-by-route review. Not re-checked | `technical-debt.md` |
 | ARCH-02 | No idempotency contract for repeated POSTs beyond inventory movements | Low | Partly resolved 2026-10-29 — inventory covered; rest open | Not re-checked. A later record (ADR-042, `AGENTS.md`) extends the key to creating suppliers, purchase orders and RFQs | `RISK_REGISTER.md` |
 
-## 3. Recorded open, fixed in the repository
+## 3. Closed since edition 1
 
-The registers still list these as open. The repository at `d1f25a3` no longer shows
-them: TD-024, TD-025, ARCH-01 and part of TD-011 were fixed in the code, TD-016 in a
-migration's README (documentation). The register entries need updating by their owners.
+Edition 1 (`d1f25a3`) listed AUD-006 as present in the code, and five register entries
+as recorded open though the repository showed them fixed. All six are now closed in
+the code and in the registers.
 
-| ID | Recorded as | At `d1f25a3` | Source |
+| ID | Edition 1 said | Now (`9d01ef5`) | Closed by |
 |---|---|---|---|
-| TD-016 | The initial migration's README names `20260101000000_location_management`; the folder is `20260101000001_location_management` | The README names `20260101000001_location_management` (`prisma/migrations/20260101000000_initial/README.md:7`, `:14`); `docs/audits/documentation-inventory.md` records the correction on 2026-10-22 | `technical-debt.md` |
-| TD-024 | `projects.status` is free text; allowed values exist only in `project.service.ts` | Migration `20260101000057_project_status_decides` adds `projects_status_check` (the five statuses) and `projects_active_follows_status` | `technical-debt.md` |
-| TD-025 | Dashboard tile notes hard-code "below 20%/40% of required" though the bands are settings | `apps/frontend/src/pages/Dashboard.tsx:295-296` read `urgentBelowPercent` and `warningBelowPercent`; commit `cc8336c` (2026-10-13) | `technical-debt.md` |
-| ARCH-01 | The last active administrator can demote or deactivate themselves | `identity.service.ts:247-248` refuses a change that leaves fewer than `MIN_ADMINS` (2, `:306`) active Admins (ADR-036) | `RISK_REGISTER.md` |
-| TD-011, in part | `createPOSchema` accepts `unitPrice`, silently dropped | Stored on the order line (`procurement.service.ts:600`); the rest of TD-011 stands (section 1) | `technical-debt.md` |
+| AUD-006 / TD-028 | `PATCH /users/:id` returned the stored password hash; in no register | Fixed in the code. The user-management answers select `USER_FIELDS` (`identity.service.ts:151`; used at `:164`, `:178`, `:270`), never `passwordHash`; a unit test and a real-HTTP test fail on the old code. Recorded as TD-028, resolved | PR #215 |
+| TD-016 | Recorded open; the migration README was already corrected | Register: resolved 2026-10-22 (commit `5c577fd`) | PR #216 |
+| TD-024 | Recorded open; migration 57 already checks project status | Register: resolved 2026-11-12 (commit `1472541`, ADR-038) | PR #216 |
+| TD-025 | Recorded open; the Dashboard already read the bands | Register: resolved 2026-10-13 (commit `cc8336c`) | PR #216 |
+| ARCH-01 | Recorded open; the two-Admin guard already existed | Register: fixed and verified 2026-11-11 (ADR-036, commit `a35db69`); the guard is at `identity.service.ts:264-265`, `MIN_ADMINS` at `:324` | PR #216 |
+| TD-011, in part | `unitPrice` recorded as silently dropped; already stored | Register: partly resolved, `unitPrice` stored since 2026-10-19 (commit `b59f55d`); the rest stands (section 1) | PR #216 |
+
+PR #216 also corrected the reference pages that described these as current, and
+`07-data/migration-strategy.md` now names the rollback scripts in `prisma/rollbacks/`.
 
 ## 4. Documentation defects
 
 From the documentation standardisation of 26 Nov 2026 (`STANDARDISATION_REPORT.md`,
-open issues).
+open issues), as that report records them.
 
 | ID | Defect | Needs |
 |---|---|---|
@@ -124,8 +128,8 @@ open issues).
 | O8 | 88 documents have no status line, which the documentation guide asks for | Owners and statuses from the people responsible |
 | O11 | Long inline code in some documents runs past a phone screen | A content edit by the owner |
 
-This report adds one: the technical-debt and risk registers list five entries as
-open that the repository shows fixed (section 3).
+The defect edition 1 added here (registers listing fixed entries as open) is closed
+(section 3).
 
 ## 5. Environment notes
 
@@ -149,7 +153,7 @@ Where each finding of `CODEBASE_AUDIT_REPORT.md` (AUD-001 to AUD-016) is tracked
 | AUD-003 Compose publishes PostgreSQL | SEC-03 | Section 1, partly |
 | AUD-004 No backup or tested restore | OPS-01 | Section 2 |
 | AUD-005 Backend on Node 20 | TD-018 | Resolved 2026-10-28 (register) |
-| AUD-006 User update returns a password hash | Not tracked | **Section 1, present** |
+| AUD-006 User update returns a password hash | TD-028 | **Fixed 2026-11-26 (PR #215); section 3** |
 | AUD-007 Read routes bypass role permissions | TD-014 | Section 2 |
 | AUD-008 Audit history omits operations; some audits non-atomic | TD-008, AUD-01 | Section 2, partly resolved |
 | AUD-009 Balance foreign keys missing | TD-005, DATA-03 | Resolved 2026-10-28 (register) |
