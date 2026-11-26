@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-26 by="Ntokozo Maselala" body=6d6407b25d8f -->
+<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-26 by="Ntokozo Maselala" body=8743d3ccfe0a -->
 
 # Current Defects Report
 
@@ -101,7 +101,9 @@ whether the defect is still there. Nothing here comes from outside the repositor
 
 Edition 1 (`d1f25a3`) listed AUD-006 as present in the code, and five register entries
 as recorded open though the repository showed them fixed, wholly or in part. Five are
-now closed in the code and in the registers. TD-011 changed status only: the register
+now closed in the registers: four were fixed in the code (AUD-006, TD-024, TD-025,
+ARCH-01) and one in documentation (TD-016, a migration's README). TD-011 changed
+status only: the register
 records it as partly resolved, and its unused `purchase_orders.shipped_*` columns and
 `GoodsReceiptStatus.DRAFT` stay open (section 1).
 
