@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-005 updated=2026-11-26 by="Ntokozo Maselala" body=a4f92a8bc69b -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-005 updated=2026-11-26 by="Ntokozo Maselala" body=8907fc640d2e -->
 
 # Implementation roadmap
 
@@ -87,7 +87,7 @@ this repository alone:
 | Canary / feature-flag rollout | There is a deployment platform that supports it and the risk profile justifies it |
 | Mutation testing | The suite is stable in CI and critical-rule coverage needs strengthening; start with `authorization.ts` and the inventory service |
 | Coverage of critical paths as a gate | A meaningful, stable coverage baseline exists; gate only on critical modules, not a global percentage |
-| Last-admin guard (ARCH-01) | The business policy and recovery route are agreed |
+| Last-admin guard (ARCH-01) | Done 2026-11-11 (ADR-036): no change may leave no active Admin, and once two exist two are kept |
 | Idempotency contract (ARCH-02) | The product decides at-most-once semantics per operation |
 | `trustProxy` / shared rate-limit store (SEC-05) | The real proxy/replica topology is known |
 | Host CSP (SEC-06) | The static-host owner is identified |

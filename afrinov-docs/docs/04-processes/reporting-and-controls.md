@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-04-004 updated=2026-11-26 by="Ntokozo Maselala" body=fcf2f88ca7fb -->
+<!-- /afrinov:document-control id=AFRI-OMS-04-004 updated=2026-11-26 by="Ntokozo Maselala" body=d1c24c2e9817 -->
 
 # Process: Reporting & Controls
 
@@ -89,8 +89,8 @@ daylight saving): a movement at 00:30 on the 1st belongs to the new month.
   it — no parallel summary numbers are stored.
 - Known inconsistency: the inventory report's currency comes from the
   `REPORT_CURRENCY` environment variable, the other reports' from the
-  `general.defaultCurrency` setting (TD-012). The dashboard's tile notes
-  say "below 20%/40% of required" even if the bands are changed (TD-025).
+  `general.defaultCurrency` setting (TD-012). (The dashboard's tile notes
+  now show the stock status bands as set; TD-025 is resolved.)
 
 ## Evidence
 - `afrinov-platform/apps/backend/src/modules/reporting/reporting.routes.ts:26-198`

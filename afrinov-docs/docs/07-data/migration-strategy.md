@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-07-003 updated=2026-11-26 by="Ntokozo Maselala" body=30b5729d1037 -->
+<!-- /afrinov:document-control id=AFRI-OMS-07-003 updated=2026-11-26 by="Ntokozo Maselala" body=550db37d2633 -->
 
 # Migration Strategy
 
@@ -33,10 +33,10 @@ starts and in the CI integration job).
 | `20260101000005_recipients` | Creates `recipients` (case-insensitive unique name), converts any user ids already in `inventory_transactions.recipient_id` into WORKER recipients, nulls the rest, adds the FK |
 | `20260101000006_inventory_returns` | Adds `RETURN` to `InventoryTransactionType` |
 
-Known gaps: the `inventory_balances` foreign keys declared in
-`schema.prisma` are not created by any migration (TD-005), and the
-`20260101000000_initial/README.md` names a folder that does not exist
-(TD-016). There are no down/rollback migrations.
+The two gaps once recorded here are closed: the `inventory_balances` foreign
+keys are created by migration `20260101000027` (TD-005), and
+`20260101000000_initial/README.md` names the right folder (TD-016). There are
+no down/rollback migrations.
 
 ## Workbook import
 **Source:** the stock workbook (`AFRI-03A-08-IAM-02 - Stock Inventory1.xlsm`,

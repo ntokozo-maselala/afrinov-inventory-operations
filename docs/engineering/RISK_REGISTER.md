@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-008 updated=2026-11-26 by="Ntokozo Maselala" body=322106ac9d18 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-008 updated=2026-11-26 by="Ntokozo Maselala" body=ca8a631a6abe -->
 
 # Risk register
 
@@ -27,7 +27,7 @@ named so it can be assigned.
 | DATA-03 | Medium | `inventory_balances` foreign keys missing from migrations | Drift check emitted two `AddForeignKey` statements | Orphan balance rows; misleading reports | Migration `20260101000027` with orphan preflight | Backend owner | **Fixed & verified** |
 | AUD-01 | Medium | A business change (user, material, project, setting) could commit without its audit record | Source review + failure-injection tests reproduced the orphaned change in each service | Administrative and inventory changes with no audit history | Wrap each mutation and its audit record in one transaction | Backend owner | **Fixed & verified** |
 | SEC-06 | Medium (conditional) | SPA stores bearer token in `localStorage`; production CSP undefined in this repo | Token persistence confirmed; no injection sink found; host CSP unknown | XSS or unsafe third-party script could exfiltrate a reusable token | Define host CSP; review token lifetime/storage in a scoped frontend package | Frontend/host owner | Open — out of scope |
-| ARCH-01 | Medium | Last active administrator can demote or deactivate themselves | `identity.service.ts` update has no last-admin guard | Administrative lockout; recovery needs direct DB access | Agree a last-admin policy and recovery route; enforce transactionally | Product + backend owner | Open — policy needed |
+| ARCH-01 | Medium | Last active administrator can demote or deactivate themselves | `identity.service.ts` update has no last-admin guard | Administrative lockout; recovery needs direct DB access | Agree a last-admin policy and recovery route; enforce transactionally | Product + backend owner | **Fixed & verified** 2026-11-11 (ADR-036, commit `a35db69`): `UserService.update` refuses a change that leaves no active Admin, or that brings two or more down to one (`MIN_ADMINS` = 2), under the `afrinov:admins` lock, and nobody deactivates themselves or removes their own Admin role (`identity.service.ts`; `identity.service.test.ts`). Found still marked open by the Current Defects Report, 2026-11-26 |
 | SEC-05 | Medium (conditional) | Rate limiting may key all clients as the proxy; counters are per-process | `server.ts` rate-limit config; `trustProxy` from `TRUST_PROXY` (addresses only) and a per-account limit (ADR-036); in-memory store | Shared-IP lockout if `TRUST_PROXY` is left unset behind a proxy; weak cluster-wide enforcement | Set `TRUST_PROXY` to the proxy (`12-operations/reverse-proxy.md`); shared store only if more than one process | Platform owner | Mitigated in code — needs `TRUST_PROXY` set at deployment |
 | SUPPLY-01 | Medium | Actions referenced by mutable tags | Workflow inspection | Upstream tag move could inject code into CI | Pin to commit SHAs; least-privilege `permissions` | Engineering productivity | **Fixed & verified** |
 | GATE-01 | Medium | No dependency-audit, secret-scan, or migration-drift gate | Workflow inspection | Vulnerable dependency, leaked secret, or schema drift could merge unnoticed | `security-ci.yml` + `migration-drift` job | Engineering productivity | **Fixed & verified** |
