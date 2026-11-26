@@ -1,3 +1,14 @@
+<!-- afrinov:document-control: written by `npm run docs:stamp` from docs/document-control/register.json. Do not edit by hand. -->
+<table>
+<tr>
+<td width="104" align="center"><img src="../document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
+<td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-ENG-006</b></td>
+<td align="center"><b><i>Quality gates</i></b><br><i>Engineering Assurance</i></td>
+<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+</tr>
+</table>
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-006 updated=2026-11-26 by="Ntokozo Maselala" body=8ed78876dcef -->
+
 # Quality gates
 
 Every gate has a purpose, an executable check, an explicit pass/fail rule, a
@@ -21,6 +32,8 @@ reproduced locally with the same commands.
 | Secret scanning | `gitleaks detect … --exit-code 1` | No new leak | Every PR / push | Block |
 | CodeQL | `github/codeql-action` | No new alerts | PR, push, weekly | Block (via branch protection) |
 | Workflow lint | `actionlint` | Exit 0 | Local / review | Advisory |
+| Document control | `npm run docs:test` and `npm run docs:check` | All pass; every controlled document's header current | Every PR / push | Block |
+| Relative links | `npm run docs:links` | — | Every PR / push | Advisory only |
 
 ## Where each gate runs
 
@@ -28,7 +41,8 @@ reproduced locally with the same commands.
   `frontend-ci.yml` `checks` job — typecheck, lint, unit tests, build.
 - **Stage B (PR assurance):** the above plus `backend-ci.yml` `integration`,
   `migration-drift`, `frontend-ci.yml` `e2e` (the Playwright browser tests,
-  system audit H5), and `security-ci.yml` (audit + secret scan).
+  system audit H5), `security-ci.yml` (audit + secret scan), and `docs-ci.yml`
+  (document control).
 - **Stage C (main-branch verification):** the same workflows run on `push` to
   `main`, re-verifying the merged commit.
 - **Weekly:** `security-ci.yml` and `codeql.yml` re-run on a schedule so a newly
@@ -45,6 +59,8 @@ npm run lint
 npm test
 npm run build
 npm audit --omit=dev --audit-level=high
+npm run docs:stamp   # after changing any document, then commit what it writes
+npm run docs:check
 ```
 
 Integration tests and migration checks need a disposable PostgreSQL database
@@ -74,6 +90,7 @@ gitleaks detect --source . --redact --no-banner \
 | Migration drift | Run the `migrate diff` command; the emitted SQL is the missing change. Add a migration; do not edit the schema to match a wrong database |
 | Dependency audit | The advisory's package and severity; check whether a patched version exists in range |
 | Secret scan | The file, line and commit in the report. **Do not paste the value anywhere.** If it is real: rotate, then remove |
+| Document control | The files it names. Run `npm run docs:stamp` and commit what it writes; never edit a header by hand. See `docs/document-control/README.md` |
 
 ## Exceptions
 

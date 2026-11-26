@@ -1,3 +1,14 @@
+<!-- afrinov:document-control: written by `npm run docs:stamp` from docs/document-control/register.json. Do not edit by hand. -->
+<table>
+<tr>
+<td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
+<td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-12-011</b></td>
+<td align="center"><b><i>Reverse Proxy</i></b><br><i>Operations</i></td>
+<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+</tr>
+</table>
+<!-- /afrinov:document-control id=AFRI-OMS-12-011 updated=2026-11-26 by="Ntokozo Maselala" body=b8224dd4cd58 -->
+
 # Reverse Proxy
 
 **Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** feature/audit-p1-go-live-safety, 2026-11-11

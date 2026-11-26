@@ -1,3 +1,14 @@
+<!-- afrinov:document-control: written by `npm run docs:stamp` from docs/document-control/register.json. Do not edit by hand. -->
+<table>
+<tr>
+<td width="104" align="center"><img src="../../document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
+<td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-BE-002</b></td>
+<td align="center"><b><i>Backend architecture</i></b><br><i>Backend Reference</i></td>
+<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+</tr>
+</table>
+<!-- /afrinov:document-control id=AFRI-OMS-BE-002 updated=2026-11-26 by="Ntokozo Maselala" body=34ab32da18a7 -->
+
 # Backend architecture
 
 ## Architectural shape

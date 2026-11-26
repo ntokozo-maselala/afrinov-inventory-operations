@@ -324,6 +324,15 @@ Use these forms; the older spellings still work but are deprecated or removed.
   unit cost then, and the month's report and stock used in it read those.
   Reopening needs a reason. A new report that values a past period at unit
   cost reads `MonthCloseService.pricesFor` for closed months.
+- **Every document carries the Afrinov header; the tool writes it.** Logo,
+  document ID, title over type, last updated and by whom, between
+  `afrinov:document-control` comments at the top of each controlled Markdown
+  file. After adding, changing, moving or removing a document, run
+  `npm run docs:stamp` (from `afrinov-platform/`) and commit what it writes;
+  `docs-ci.yml` fails otherwise. Never edit the header by hand, and never
+  reuse an ID. Scope, IDs (interim `AFRI-OMS-…`) and people are in
+  `docs/document-control/register.json`; the standard is
+  `docs/document-control/STYLE_GUIDE.md`. This file is outside the scope.
 - **The seed loads demo data only with `SEED_DEMO_DATA=true`, never in
   production** (`src/db/seed-plan.ts`). Reference data (permissions, roles,
   settings, the admin) goes before the `if (!plan.demo)` return in

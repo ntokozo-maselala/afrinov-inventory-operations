@@ -16,7 +16,12 @@
     "db:seed": "npm run db:seed --workspace=@afrinov/backend",
     "db:rotate-admin": "npm run db:rotate-admin --workspace=@afrinov/backend",
     "dev:backend": "npm run dev --workspace=@afrinov/backend",
-    "dev:frontend": "npm run dev --workspace=@afrinov/frontend"
+    "dev:frontend": "npm run dev --workspace=@afrinov/frontend",
+    "docs:stamp": "node scripts/doc-control.mjs",
+    "docs:check": "node scripts/doc-control.mjs --check",
+    "docs:links": "node scripts/doc-control.mjs --links",
+    "docs:logo": "node scripts/doc-control.mjs --logo",
+    "docs:test": "node --test scripts/doc-control.test.mjs"
   },
   "devDependencies": {
     "cross-env": "^10.1.0"

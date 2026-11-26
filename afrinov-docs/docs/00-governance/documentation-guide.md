@@ -1,3 +1,14 @@
+<!-- afrinov:document-control: written by `npm run docs:stamp` from docs/document-control/register.json. Do not edit by hand. -->
+<table>
+<tr>
+<td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
+<td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-00-004</b></td>
+<td align="center"><b><i>Documentation Guide</i></b><br><i>Governance</i></td>
+<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+</tr>
+</table>
+<!-- /afrinov:document-control id=AFRI-OMS-00-004 updated=2026-11-26 by="Ntokozo Maselala" body=82035d291389 -->
+
 # Documentation Guide
 
 **Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
@@ -41,6 +52,16 @@ that describe the system (`06`–`12`) carry an **Evidence** section listing
 the files they rely on. Claims that cannot be checked in the repository are
 marked *Unverified* and listed in `assumptions-register.md`; capabilities
 described but not built are marked **Planned**.
+
+## Document header
+Above the title, every document carries the Afrinov header: the logo, its
+document ID, the title over the document type, and the date its text last changed
+with who changed it. The header is written by `npm run docs:stamp` (run from
+`afrinov-platform/` after any change) and checked in CI; it is never edited by
+hand. Its **Last updated** is not the status line's **Last verified against
+code**: the first says when the text changed, the second when it was last checked
+against the code. See `docs/document-control/STYLE_GUIDE.md` and
+`docs/document-control/README.md`.
 
 ## Ownership and review
 - Each document has a named **Owner** who is accountable for it staying accurate.

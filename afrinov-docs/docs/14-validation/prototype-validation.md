@@ -1,3 +1,14 @@
+<!-- afrinov:document-control: written by `npm run docs:stamp` from docs/document-control/register.json. Do not edit by hand. -->
+<table>
+<tr>
+<td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
+<td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-14-003</b></td>
+<td align="center"><b><i>Prototype Validation</i></b><br><i>Validation</i></td>
+<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+</tr>
+</table>
+<!-- /afrinov:document-control id=AFRI-OMS-14-003 updated=2026-11-26 by="Ntokozo Maselala" body=1b6991462d5b -->
+
 # Prototype Validation
 
 **Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09

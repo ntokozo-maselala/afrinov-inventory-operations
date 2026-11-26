@@ -1,3 +1,14 @@
+<!-- afrinov:document-control: written by `npm run docs:stamp` from docs/document-control/register.json. Do not edit by hand. -->
+<table>
+<tr>
+<td width="104" align="center"><img src="document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
+<td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-GEN-004</b></td>
+<td align="center"><b><i>Documentation index</i></b><br><i>Index</i></td>
+<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+</tr>
+</table>
+<!-- /afrinov:document-control id=AFRI-OMS-GEN-004 updated=2026-11-26 by="Ntokozo Maselala" body=91fcad6a245a -->
+
 # Documentation index
 
 This is the repository-wide starting point for Afrinov documentation. The
@@ -62,3 +73,12 @@ historical reports to `docs/archive/` only when their historical value is
 clear. Update this index and relevant local indexes when paths change. Use
 relative Markdown links and verify them after moving a document. Do not add
 secrets, generated build output, or dependency documentation to this tree.
+
+Every controlled document carries the Afrinov header: logo, document ID, title,
+and the date of its last change and who made it. Start a new document from
+[`document-control/templates/`](document-control/templates/), and after adding,
+changing, moving or removing any document run `npm run docs:stamp` from
+`afrinov-platform/` and commit what it writes; CI checks it. The standard is the
+[Style Guide](document-control/STYLE_GUIDE.md), the list of documents the
+[Document Register](document-control/DOCUMENT_REGISTER.md), and the procedure
+[Document Control](document-control/README.md).
