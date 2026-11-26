@@ -141,10 +141,26 @@ export interface UpdateUserInput {
   roleNames?: string[];
 }
 
+/**
+ * The fields of a user any response may carry: never the password hash, nor
+ * the sign-in bookkeeping (when the password changed, the sign-out cut-off).
+ * Every user read that is sent to a client selects these (AUD-006: the update
+ * once re-read the whole row and sent its passwordHash back).
+ */
+export const USER_FIELDS = {
+  id: true,
+  email: true,
+  name: true,
+  active: true,
+  mustChangePassword: true,
+  createdAt: true,
+  roles: { include: { role: true } },
+} satisfies Prisma.UserSelect;
+
 export const UserService = {
   async list() {
     return prisma.user.findMany({
-      select: { id: true, email: true, name: true, active: true, mustChangePassword: true, createdAt: true, roles: { include: { role: true } } },
+      select: USER_FIELDS,
       orderBy: { name: 'asc' },
     });
   },
@@ -158,7 +174,7 @@ export const UserService = {
   async getById(id: string) {
     const u = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, email: true, name: true, active: true, mustChangePassword: true, createdAt: true, roles: { include: { role: true } } },
+      select: USER_FIELDS,
     });
     if (!u) throw Errors.notFound('User');
     return u;
@@ -247,9 +263,10 @@ export const UserService = {
       if (adminsBefore >= MIN_ADMINS && adminsAfter < MIN_ADMINS) {
         throw Errors.invalidState(`This would leave one active Admin, and nobody to reset their password. Give someone else the Admin role first, so ${MIN_ADMINS} remain.`);
       }
+      // What is returned is what the client receives: the safe fields only.
       const fresh = await tx.user.findUnique({
         where: { id: input.id },
-        include: { roles: { include: { role: true } } },
+        select: USER_FIELDS,
       });
       if (!fresh) throw Errors.notFound('User');
 

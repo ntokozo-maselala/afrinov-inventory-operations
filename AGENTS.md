@@ -287,8 +287,11 @@ Use these forms; the older spellings still work but are deprecated or removed.
   A sign-in that began before `users.password_changed_at` is refused, and while
   `must_change_password` is set (an Admin's temporary password) only
   `/auth/me`, `/auth/refresh`, `/auth/password` and `/auth/logout` answer. Any path that sets a
-  password sets `passwordChangedAt` too. `UserService.update` refuses a change
-  that leaves no active Admin, or that brings two or more down to one
+  password sets `passwordChangedAt` too. A user sent to a client selects
+  `USER_FIELDS` (`src/modules/identity/identity.service.ts`), never the whole
+  row, so `passwordHash` never leaves the server (AUD-006, TD-028).
+  `UserService.update` refuses a change that leaves no active Admin, or that
+  brings two or more down to one
   (`MIN_ADMINS`, kept in step with `src/lib/admins.ts`), under the
   `afrinov:admins` lock (ADR-036).
 - **Controls (ADR-039).** Only `edit:unit_cost` (Admin, Procurement) sets an

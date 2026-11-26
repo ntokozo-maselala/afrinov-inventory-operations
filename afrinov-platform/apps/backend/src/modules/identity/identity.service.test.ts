@@ -24,9 +24,22 @@ vi.mock('../../shared/db.js', () => ({ get prisma() { return makePrisma(); } }))
 function makePrisma(): unknown {
   return {
     user: {
-      findUnique: async ({ where, include }: { where: { id?: string; email?: string }; include?: unknown }) => {
+      findUnique: async ({ where, include, select }: { where: { id?: string; email?: string }; include?: unknown; select?: Record<string, unknown> }) => {
         const u = where.id ? db.users.get(where.id) : where.email ? [...db.users.values()].find((x) => x.email === where.email) : null;
         if (!u) return null;
+        // Like Prisma, a select returns the chosen fields and nothing else, so a
+        // test can see whether a response would carry the password hash.
+        if (select) {
+          const picked: Record<string, unknown> = {};
+          for (const [key, on] of Object.entries(select)) {
+            if (key === 'roles') {
+              picked.roles = [...db.userRoles.values()].filter((ur) => ur.userId === u.id).map((ur) => ({ role: { ...db.roles.get(ur.roleId)!, permissions: [] } }));
+            } else if (on === true) {
+              picked[key] = (u as Record<string, unknown>)[key];
+            }
+          }
+          return picked;
+        }
         if (include) {
           const roles = [...db.userRoles.values()].filter((ur) => ur.userId === u.id);
           const expanded = roles.map((ur) => ({ role: { ...db.roles.get(ur.roleId)!, permissions: [] } }));
@@ -159,6 +172,19 @@ describe('UserService', () => {
     const after = audit?.after as { roles: string[]; active: boolean; name: string };
     expect(after.active).toBe(false);
     expect(after.roles.sort()).toEqual(['ADMIN', 'STORE_CONTROLLER']);
+  });
+
+  it('returns the safe fields of the updated user, never the password hash (AUD-006)', async () => {
+    const { UserService, USER_FIELDS } = await import('./identity.service.js');
+    await UserService.create({ email: 'admin@b.c', name: 'Admin', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'actor-1');
+    const u = await UserService.create({ email: 'h@b.c', name: 'Hash', password: 'ChangeMe!2026', roleNames: ['VIEWER'] }, 'actor-1');
+    const updated = await UserService.update({ id: u.id, name: 'Hash2' }, 'actor-2');
+    expect(updated).not.toHaveProperty('passwordHash');
+    expect(updated).not.toHaveProperty('passwordChangedAt');
+    expect(Object.keys(updated).sort()).toEqual(Object.keys(USER_FIELDS).sort());
+    expect(updated.roles.map((r) => r.role.name)).toEqual(['VIEWER']);
+    // The same fields as reading the user, so the two answers can't drift apart.
+    expect(Object.keys(await UserService.getById(u.id)).sort()).toEqual(Object.keys(updated).sort());
   });
 
   describe('keeps an Admin (system audit F2)', () => {

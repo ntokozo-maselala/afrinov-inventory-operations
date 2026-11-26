@@ -52,6 +52,12 @@ describe('user mutations are atomic with their audit record (AUD-01)', () => {
       roleNames: ['STORE_CONTROLLER'],
     });
     expect(patched.status).toBe(200);
+    // AUD-006: the answer carries the user's safe fields, never the password
+    // hash or the sign-in bookkeeping, read here from the raw response text.
+    expect(patched.body).toMatchObject({ id: created.body.id, name: 'Audit OK Renamed' });
+    expect(JSON.stringify(patched.body)).not.toMatch(/passwordHash|password_hash|\$2[aby]\$/);
+    expect(patched.body).not.toHaveProperty('passwordChangedAt');
+    expect(patched.body).not.toHaveProperty('signedOutBefore');
 
     const entries = await prisma.auditLogEntry.findMany({
       where: { entityType: 'User', entityId: created.body.id },
