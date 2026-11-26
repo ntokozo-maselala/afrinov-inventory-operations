@@ -1,3 +1,14 @@
+<!-- afrinov:document-control: written by `npm run docs:stamp` from docs/document-control/register.json. Do not edit by hand. -->
+<table>
+<tr>
+<td width="104" align="center"><img src="../document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
+<td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-ENG-002</b></td>
+<td align="center"><b><i>CI/CD architecture</i></b><br><i>Engineering Assurance</i></td>
+<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+</tr>
+</table>
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-26 by="Ntokozo Maselala" body=9233ec7bf366 -->
+
 # CI/CD architecture
 
 How changes are verified, from a push to the merge of a reviewed commit. The
@@ -11,6 +22,7 @@ existing platform (GitHub Actions) is reused; no new CI system was introduced.
 | Frontend CI | `.github/workflows/frontend-ci.yml` | PR and push to `main`, on frontend, backend and root paths | `checks` (typecheck, lint, unit tests, build), `e2e` (Playwright in Chromium against the real backend and a throwaway PostgreSQL; system audit H5) |
 | Security CI | `.github/workflows/security-ci.yml` | Every PR and push to `main`; weekly schedule | `dependency-audit`, `secret-scan` |
 | CodeQL | `.github/workflows/codeql.yml` | PR and push to `main`; weekly schedule | `analyze` (`javascript-typescript`, `actions`) |
+| Docs CI | `.github/workflows/docs-ci.yml` | Every PR and push to `main` | `document-control` (the tool's tests, every document's Afrinov header current, relative links listed) |
 
 ## Staging model
 
@@ -58,6 +70,7 @@ is recorded as an action item rather than assumed. The required checks should be
 - Backend CI: `checks`, `migration-drift`, `integration`
 - Frontend CI: `checks`, `e2e`
 - Security CI: `dependency-audit`, `secret-scan`
+- Docs CI: `document-control`
 - CodeQL: `analyze (javascript-typescript)`, `analyze (actions)`
 
 Also required: at least one approving review, and dismissal of stale approvals

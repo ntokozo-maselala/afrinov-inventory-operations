@@ -1,0 +1,44 @@
+name: Docs CI
+
+# Document control (docs/document-control/README.md). Every controlled document
+# carries the Afrinov header (logo, document ID, title, last updated and by whom),
+# written by `npm run docs:stamp`. This fails a change whose headers are missing
+# or out of date, so "Last updated" can be trusted. Not path-filtered: a document
+# anywhere in the repository is in scope. The tool uses Node built-ins only, so
+# no install is needed and the job takes seconds.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: docs-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  document-control:
+    name: Document control
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Tool tests
+        working-directory: afrinov-platform
+        run: npm run docs:test
+
+      - name: Headers and register current
+        working-directory: afrinov-platform
+        run: npm run docs:check
+
+      # Advisory: lists relative links that lead nowhere without failing the build.
+      - name: Relative links (informational)
+        if: always()
+        working-directory: afrinov-platform
+        run: npm run docs:links

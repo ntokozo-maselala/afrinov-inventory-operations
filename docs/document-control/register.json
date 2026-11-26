@@ -1,0 +1,1270 @@
+{
+  "idPrefix": "AFRI-OMS",
+  "scope": {
+    "include": [
+      "**/*.md"
+    ],
+    "exclude": [
+      "AGENTS.md",
+      "**/CLAUDE.md",
+      "SECURITY.md",
+      ".github/**",
+      ".claude/**",
+      "**/node_modules/**",
+      "**/prisma/migrations/**",
+      "docs/document-control/templates/**",
+      "system-knowledge/**"
+    ]
+  },
+  "people": {
+    "ntokozo-maselala": "Ntokozo Maselala"
+  },
+  "sections": [
+    {
+      "code": "00",
+      "path": "afrinov-docs/docs/00-governance/",
+      "type": "Governance"
+    },
+    {
+      "code": "01",
+      "path": "afrinov-docs/docs/01-product/",
+      "type": "Product"
+    },
+    {
+      "code": "02",
+      "path": "afrinov-docs/docs/02-business-analysis/",
+      "type": "Business Analysis"
+    },
+    {
+      "code": "03",
+      "path": "afrinov-docs/docs/03-domain/",
+      "type": "Domain Model"
+    },
+    {
+      "code": "04",
+      "path": "afrinov-docs/docs/04-processes/",
+      "type": "Business Process"
+    },
+    {
+      "code": "05",
+      "path": "afrinov-docs/docs/05-sap-study/",
+      "type": "SAP Study"
+    },
+    {
+      "code": "06",
+      "path": "afrinov-docs/docs/06-system-architecture/",
+      "type": "System Architecture"
+    },
+    {
+      "code": "07",
+      "path": "afrinov-docs/docs/07-data/",
+      "type": "Data Architecture"
+    },
+    {
+      "code": "08",
+      "path": "afrinov-docs/docs/08-api/",
+      "type": "API Reference"
+    },
+    {
+      "code": "09",
+      "path": "afrinov-docs/docs/09-frontend/",
+      "type": "Frontend Reference"
+    },
+    {
+      "code": "10",
+      "path": "afrinov-docs/docs/10-security/",
+      "type": "Security"
+    },
+    {
+      "code": "11",
+      "path": "afrinov-docs/docs/11-testing/",
+      "type": "Testing"
+    },
+    {
+      "code": "12",
+      "path": "afrinov-docs/docs/12-operations/",
+      "type": "Operations"
+    },
+    {
+      "code": "13",
+      "path": "afrinov-docs/docs/13-project-management/",
+      "type": "Project Management"
+    },
+    {
+      "code": "14",
+      "path": "afrinov-docs/docs/14-validation/",
+      "type": "Validation"
+    },
+    {
+      "code": "ENG",
+      "path": "docs/engineering/",
+      "type": "Engineering Assurance"
+    },
+    {
+      "code": "BE",
+      "path": "docs/backend/",
+      "type": "Backend Reference"
+    },
+    {
+      "code": "AUD",
+      "path": "docs/audits/",
+      "type": "Audit Report"
+    },
+    {
+      "code": "AUD",
+      "path": "audit/",
+      "type": "Audit Report"
+    },
+    {
+      "code": "ARC",
+      "path": "docs/archive/",
+      "type": "Archived Document"
+    },
+    {
+      "code": "DOC",
+      "path": "docs/document-control/",
+      "type": "Document Control"
+    },
+    {
+      "code": "DEV",
+      "path": "afrinov-platform/",
+      "type": "Developer Guide"
+    },
+    {
+      "code": "GEN",
+      "path": "",
+      "type": "General"
+    }
+  ],
+  "typeRules": [
+    {
+      "match": "docs/archive/**",
+      "type": "Archived Document"
+    },
+    {
+      "match": "afrinov-platform/**",
+      "type": "Developer Guide"
+    },
+    {
+      "match": "README.md",
+      "type": "Repository Overview"
+    },
+    {
+      "match": "docs/document-control/DOCUMENT_REGISTER.md",
+      "type": "Document Register"
+    },
+    {
+      "match": "docs/document-control/STYLE_GUIDE.md",
+      "type": "Style Guide"
+    },
+    {
+      "match": "**/README.md",
+      "type": "Index"
+    },
+    {
+      "match": "**/*roadmap*.md",
+      "type": "Roadmap"
+    },
+    {
+      "match": "**/decision-log.md",
+      "type": "Decision Records"
+    },
+    {
+      "match": "**/change-log.md",
+      "type": "Change Log"
+    }
+  ],
+  "documents": [
+    {
+      "id": "AFRI-OMS-00-001",
+      "path": "afrinov-docs/docs/00-governance/assumptions-register.md",
+      "type": "Governance"
+    },
+    {
+      "id": "AFRI-OMS-00-002",
+      "path": "afrinov-docs/docs/00-governance/change-log.md",
+      "type": "Change Log"
+    },
+    {
+      "id": "AFRI-OMS-00-003",
+      "path": "afrinov-docs/docs/00-governance/decision-log.md",
+      "type": "Decision Records"
+    },
+    {
+      "id": "AFRI-OMS-00-004",
+      "path": "afrinov-docs/docs/00-governance/documentation-guide.md",
+      "type": "Governance"
+    },
+    {
+      "id": "AFRI-OMS-00-005",
+      "path": "afrinov-docs/docs/00-governance/glossary.md",
+      "type": "Governance"
+    },
+    {
+      "id": "AFRI-OMS-01-001",
+      "path": "afrinov-docs/docs/01-product/capability-map.md",
+      "type": "Product"
+    },
+    {
+      "id": "AFRI-OMS-01-002",
+      "path": "afrinov-docs/docs/01-product/product-charter.md",
+      "type": "Product"
+    },
+    {
+      "id": "AFRI-OMS-01-003",
+      "path": "afrinov-docs/docs/01-product/product-principles.md",
+      "type": "Product"
+    },
+    {
+      "id": "AFRI-OMS-01-004",
+      "path": "afrinov-docs/docs/01-product/product-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-01-005",
+      "path": "afrinov-docs/docs/01-product/product-scope.md",
+      "type": "Product"
+    },
+    {
+      "id": "AFRI-OMS-01-006",
+      "path": "afrinov-docs/docs/01-product/product-vision.md",
+      "type": "Product"
+    },
+    {
+      "id": "AFRI-OMS-01-007",
+      "path": "afrinov-docs/docs/01-product/stakeholder-map.md",
+      "type": "Product"
+    },
+    {
+      "id": "AFRI-OMS-01-008",
+      "path": "afrinov-docs/docs/01-product/user-journeys.md",
+      "type": "Product"
+    },
+    {
+      "id": "AFRI-OMS-01-009",
+      "path": "afrinov-docs/docs/01-product/user-personas.md",
+      "type": "Product"
+    },
+    {
+      "id": "AFRI-OMS-02-001",
+      "path": "afrinov-docs/docs/02-business-analysis/business-context.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-002",
+      "path": "afrinov-docs/docs/02-business-analysis/business-process-model.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-003",
+      "path": "afrinov-docs/docs/02-business-analysis/business-requirements.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-004",
+      "path": "afrinov-docs/docs/02-business-analysis/business-rules.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-005",
+      "path": "afrinov-docs/docs/02-business-analysis/current-state-as-is.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-006",
+      "path": "afrinov-docs/docs/02-business-analysis/functional-requirements.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-007",
+      "path": "afrinov-docs/docs/02-business-analysis/gap-analysis.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-008",
+      "path": "afrinov-docs/docs/02-business-analysis/non-functional-requirements.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-009",
+      "path": "afrinov-docs/docs/02-business-analysis/requirements-traceability-matrix.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-02-010",
+      "path": "afrinov-docs/docs/02-business-analysis/target-state-to-be.md",
+      "type": "Business Analysis"
+    },
+    {
+      "id": "AFRI-OMS-03-001",
+      "path": "afrinov-docs/docs/03-domain/aggregate-model.md",
+      "type": "Domain Model"
+    },
+    {
+      "id": "AFRI-OMS-03-002",
+      "path": "afrinov-docs/docs/03-domain/bounded-contexts.md",
+      "type": "Domain Model"
+    },
+    {
+      "id": "AFRI-OMS-03-003",
+      "path": "afrinov-docs/docs/03-domain/business-transactions.md",
+      "type": "Domain Model"
+    },
+    {
+      "id": "AFRI-OMS-03-004",
+      "path": "afrinov-docs/docs/03-domain/domain-events.md",
+      "type": "Domain Model"
+    },
+    {
+      "id": "AFRI-OMS-03-005",
+      "path": "afrinov-docs/docs/03-domain/domain-model.md",
+      "type": "Domain Model"
+    },
+    {
+      "id": "AFRI-OMS-03-006",
+      "path": "afrinov-docs/docs/03-domain/domain-overview.md",
+      "type": "Domain Model"
+    },
+    {
+      "id": "AFRI-OMS-03-007",
+      "path": "afrinov-docs/docs/03-domain/entity-catalog.md",
+      "type": "Domain Model"
+    },
+    {
+      "id": "AFRI-OMS-03-008",
+      "path": "afrinov-docs/docs/03-domain/state-machines.md",
+      "type": "Domain Model"
+    },
+    {
+      "id": "AFRI-OMS-04-001",
+      "path": "afrinov-docs/docs/04-processes/goods-receiving.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-04-002",
+      "path": "afrinov-docs/docs/04-processes/procure-to-stock.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-04-003",
+      "path": "afrinov-docs/docs/04-processes/purchase-order-lifecycle.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-04-004",
+      "path": "afrinov-docs/docs/04-processes/reporting-and-controls.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-04-005",
+      "path": "afrinov-docs/docs/04-processes/stock-adjustment.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-04-006",
+      "path": "afrinov-docs/docs/04-processes/stock-issuing.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-04-007",
+      "path": "afrinov-docs/docs/04-processes/stock-transfer.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-04-008",
+      "path": "afrinov-docs/docs/04-processes/supplier-management.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-04-009",
+      "path": "afrinov-docs/docs/04-processes/tool-loans.md",
+      "type": "Business Process"
+    },
+    {
+      "id": "AFRI-OMS-05-001",
+      "path": "afrinov-docs/docs/05-sap-study/sap-business-processes.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-05-002",
+      "path": "afrinov-docs/docs/05-sap-study/sap-document-flow.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-05-003",
+      "path": "afrinov-docs/docs/05-sap-study/sap-inventory-model.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-05-004",
+      "path": "afrinov-docs/docs/05-sap-study/sap-lessons-for-afrinov.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-05-005",
+      "path": "afrinov-docs/docs/05-sap-study/sap-not-to-copy.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-05-006",
+      "path": "afrinov-docs/docs/05-sap-study/sap-organizational-model.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-05-007",
+      "path": "afrinov-docs/docs/05-sap-study/sap-procurement-model.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-05-008",
+      "path": "afrinov-docs/docs/05-sap-study/sap-study-plan.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-05-009",
+      "path": "afrinov-docs/docs/05-sap-study/sap-terminology.md",
+      "type": "SAP Study"
+    },
+    {
+      "id": "AFRI-OMS-06-001",
+      "path": "afrinov-docs/docs/06-system-architecture/architecture-overview.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-002",
+      "path": "afrinov-docs/docs/06-system-architecture/architecture-principles.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-003",
+      "path": "afrinov-docs/docs/06-system-architecture/component-architecture.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-004",
+      "path": "afrinov-docs/docs/06-system-architecture/data-architecture.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-005",
+      "path": "afrinov-docs/docs/06-system-architecture/deployment-architecture.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-006",
+      "path": "afrinov-docs/docs/06-system-architecture/integration-architecture.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-007",
+      "path": "afrinov-docs/docs/06-system-architecture/module-architecture.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-008",
+      "path": "afrinov-docs/docs/06-system-architecture/observability-architecture.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-009",
+      "path": "afrinov-docs/docs/06-system-architecture/security-architecture.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-06-010",
+      "path": "afrinov-docs/docs/06-system-architecture/system-context.md",
+      "type": "System Architecture"
+    },
+    {
+      "id": "AFRI-OMS-07-001",
+      "path": "afrinov-docs/docs/07-data/audit-model.md",
+      "type": "Data Architecture"
+    },
+    {
+      "id": "AFRI-OMS-07-002",
+      "path": "afrinov-docs/docs/07-data/database-schema.md",
+      "type": "Data Architecture"
+    },
+    {
+      "id": "AFRI-OMS-07-003",
+      "path": "afrinov-docs/docs/07-data/migration-strategy.md",
+      "type": "Data Architecture"
+    },
+    {
+      "id": "AFRI-OMS-08-001",
+      "path": "afrinov-docs/docs/08-api/api-architecture.md",
+      "type": "API Reference"
+    },
+    {
+      "id": "AFRI-OMS-08-002",
+      "path": "afrinov-docs/docs/08-api/api-conventions.md",
+      "type": "API Reference"
+    },
+    {
+      "id": "AFRI-OMS-08-003",
+      "path": "afrinov-docs/docs/08-api/api-principles.md",
+      "type": "API Reference"
+    },
+    {
+      "id": "AFRI-OMS-08-004",
+      "path": "afrinov-docs/docs/08-api/api-versioning.md",
+      "type": "API Reference"
+    },
+    {
+      "id": "AFRI-OMS-08-005",
+      "path": "afrinov-docs/docs/08-api/authentication.md",
+      "type": "API Reference"
+    },
+    {
+      "id": "AFRI-OMS-08-006",
+      "path": "afrinov-docs/docs/08-api/authorization.md",
+      "type": "API Reference"
+    },
+    {
+      "id": "AFRI-OMS-08-007",
+      "path": "afrinov-docs/docs/08-api/error-model.md",
+      "type": "API Reference"
+    },
+    {
+      "id": "AFRI-OMS-08-008",
+      "path": "afrinov-docs/docs/08-api/resource-model.md",
+      "type": "API Reference"
+    },
+    {
+      "id": "AFRI-OMS-09-001",
+      "path": "afrinov-docs/docs/09-frontend/accessibility.md",
+      "type": "Frontend Reference"
+    },
+    {
+      "id": "AFRI-OMS-09-002",
+      "path": "afrinov-docs/docs/09-frontend/design-system.md",
+      "type": "Frontend Reference"
+    },
+    {
+      "id": "AFRI-OMS-09-003",
+      "path": "afrinov-docs/docs/09-frontend/frontend-architecture.md",
+      "type": "Frontend Reference"
+    },
+    {
+      "id": "AFRI-OMS-09-004",
+      "path": "afrinov-docs/docs/09-frontend/information-architecture.md",
+      "type": "Frontend Reference"
+    },
+    {
+      "id": "AFRI-OMS-09-005",
+      "path": "afrinov-docs/docs/09-frontend/interaction-model.md",
+      "type": "Frontend Reference"
+    },
+    {
+      "id": "AFRI-OMS-09-006",
+      "path": "afrinov-docs/docs/09-frontend/navigation-model.md",
+      "type": "Frontend Reference"
+    },
+    {
+      "id": "AFRI-OMS-09-007",
+      "path": "afrinov-docs/docs/09-frontend/page-inventory.md",
+      "type": "Frontend Reference"
+    },
+    {
+      "id": "AFRI-OMS-10-001",
+      "path": "afrinov-docs/docs/10-security/access-control.md",
+      "type": "Security"
+    },
+    {
+      "id": "AFRI-OMS-10-002",
+      "path": "afrinov-docs/docs/10-security/audit-and-accountability.md",
+      "type": "Security"
+    },
+    {
+      "id": "AFRI-OMS-10-003",
+      "path": "afrinov-docs/docs/10-security/authentication-model.md",
+      "type": "Security"
+    },
+    {
+      "id": "AFRI-OMS-10-004",
+      "path": "afrinov-docs/docs/10-security/authorization-model.md",
+      "type": "Security"
+    },
+    {
+      "id": "AFRI-OMS-10-005",
+      "path": "afrinov-docs/docs/10-security/secrets-management.md",
+      "type": "Security"
+    },
+    {
+      "id": "AFRI-OMS-10-006",
+      "path": "afrinov-docs/docs/10-security/security-requirements.md",
+      "type": "Security"
+    },
+    {
+      "id": "AFRI-OMS-10-007",
+      "path": "afrinov-docs/docs/10-security/security-testing.md",
+      "type": "Security"
+    },
+    {
+      "id": "AFRI-OMS-10-008",
+      "path": "afrinov-docs/docs/10-security/threat-model.md",
+      "type": "Security"
+    },
+    {
+      "id": "AFRI-OMS-11-001",
+      "path": "afrinov-docs/docs/11-testing/acceptance-testing.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-002",
+      "path": "afrinov-docs/docs/11-testing/api-testing.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-003",
+      "path": "afrinov-docs/docs/11-testing/contract-testing.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-004",
+      "path": "afrinov-docs/docs/11-testing/e2e-testing.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-005",
+      "path": "afrinov-docs/docs/11-testing/integration-testing.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-006",
+      "path": "afrinov-docs/docs/11-testing/performance-testing.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-007",
+      "path": "afrinov-docs/docs/11-testing/test-pyramid.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-008",
+      "path": "afrinov-docs/docs/11-testing/test-traceability.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-009",
+      "path": "afrinov-docs/docs/11-testing/testing-strategy.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-11-010",
+      "path": "afrinov-docs/docs/11-testing/unit-testing.md",
+      "type": "Testing"
+    },
+    {
+      "id": "AFRI-OMS-12-001",
+      "path": "afrinov-docs/docs/12-operations/alerting.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-002",
+      "path": "afrinov-docs/docs/12-operations/backup-and-recovery.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-003",
+      "path": "afrinov-docs/docs/12-operations/ci-cd.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-004",
+      "path": "afrinov-docs/docs/12-operations/deployment.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-005",
+      "path": "afrinov-docs/docs/12-operations/disaster-recovery.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-006",
+      "path": "afrinov-docs/docs/12-operations/environments.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-007",
+      "path": "afrinov-docs/docs/12-operations/error-handling.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-008",
+      "path": "afrinov-docs/docs/12-operations/incident-management.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-009",
+      "path": "afrinov-docs/docs/12-operations/logging.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-010",
+      "path": "afrinov-docs/docs/12-operations/monitoring.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-12-011",
+      "path": "afrinov-docs/docs/12-operations/reverse-proxy.md",
+      "type": "Operations"
+    },
+    {
+      "id": "AFRI-OMS-13-001",
+      "path": "afrinov-docs/docs/13-project-management/branching-strategy.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-13-002",
+      "path": "afrinov-docs/docs/13-project-management/coding-standards.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-13-003",
+      "path": "afrinov-docs/docs/13-project-management/definition-of-done.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-13-004",
+      "path": "afrinov-docs/docs/13-project-management/definition-of-ready.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-13-005",
+      "path": "afrinov-docs/docs/13-project-management/development-workflow.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-13-006",
+      "path": "afrinov-docs/docs/13-project-management/onboarding.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-13-007",
+      "path": "afrinov-docs/docs/13-project-management/pull-request-guidelines.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-13-008",
+      "path": "afrinov-docs/docs/13-project-management/release-process.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-13-009",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/materials-sections-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-010",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/procurement-alignment-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-011",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/procurement-workflow-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-012",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/project-material-through-the-store-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-013",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/project-on-the-order-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-014",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/project-tracking-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-015",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/rfq-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-016",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/stores-ordering-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-017",
+      "path": "afrinov-docs/docs/13-project-management/roadmaps/stores-procurement-separation-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-13-018",
+      "path": "afrinov-docs/docs/13-project-management/technical-debt.md",
+      "type": "Project Management"
+    },
+    {
+      "id": "AFRI-OMS-14-001",
+      "path": "afrinov-docs/docs/14-validation/acceptance-criteria.md",
+      "type": "Validation"
+    },
+    {
+      "id": "AFRI-OMS-14-002",
+      "path": "afrinov-docs/docs/14-validation/production-readiness.md",
+      "type": "Validation"
+    },
+    {
+      "id": "AFRI-OMS-14-003",
+      "path": "afrinov-docs/docs/14-validation/prototype-validation.md",
+      "type": "Validation"
+    },
+    {
+      "id": "AFRI-OMS-14-004",
+      "path": "afrinov-docs/docs/14-validation/readiness-checklist.md",
+      "type": "Validation"
+    },
+    {
+      "id": "AFRI-OMS-14-005",
+      "path": "afrinov-docs/docs/14-validation/stakeholder-review.md",
+      "type": "Validation"
+    },
+    {
+      "id": "AFRI-OMS-14-006",
+      "path": "afrinov-docs/docs/14-validation/uat-plan.md",
+      "type": "Validation"
+    },
+    {
+      "id": "AFRI-OMS-ARC-001",
+      "path": "docs/archive/AUDITOR_PERFORMANCE_REPORT.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-002",
+      "path": "docs/archive/CURRENT-STATE.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-003",
+      "path": "docs/archive/DARK_MODE_IMPLEMENTATION_REPORT.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-004",
+      "path": "docs/archive/DASHBOARD_IMPLEMENTATION_REPORT.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-005",
+      "path": "docs/archive/FRONTEND_AUDIT_REPORT.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-006",
+      "path": "docs/archive/IMPLEMENTATION_REPORT.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-007",
+      "path": "docs/archive/PERFORMANCE_AUDIT_REPORT.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-008",
+      "path": "docs/archive/PRODUCTION_READINESS_REPORT.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-009",
+      "path": "docs/archive/Production Readiness & Deployment Audit.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-010",
+      "path": "docs/archive/README.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-011",
+      "path": "docs/archive/SIDEBAR_SHELL_AUDIT.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-012",
+      "path": "docs/archive/System-Inspection.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-013",
+      "path": "docs/archive/architecture-audit.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-014",
+      "path": "docs/archive/audit-production-readiness-2026-09-22.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-015",
+      "path": "docs/archive/backend_vulnerability_and_static_analysis_remediation_report.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-016",
+      "path": "docs/archive/backend_vulnerability_and_static_analysis_report.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-017",
+      "path": "docs/archive/codebase-map.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-018",
+      "path": "docs/archive/domain-gap-analysis.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-019",
+      "path": "docs/archive/engineering-decision-log.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-020",
+      "path": "docs/archive/frontend_vulnerability_and_static_analysis_report.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-021",
+      "path": "docs/archive/inventory-operations-refactoring-plan.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-022",
+      "path": "docs/archive/refactoring-plan.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-023",
+      "path": "docs/archive/requirements-model.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-024",
+      "path": "docs/archive/technical-debt.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-ARC-025",
+      "path": "docs/archive/testing-strategy.md",
+      "type": "Archived Document"
+    },
+    {
+      "id": "AFRI-OMS-AUD-001",
+      "path": "audit/00_SCOPE_AND_BASELINE.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-002",
+      "path": "audit/01_ARCHITECTURE_MAP.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-003",
+      "path": "audit/02_DOMAIN_AND_DATA_INTEGRITY.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-004",
+      "path": "audit/03_SECURITY_REVIEW.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-005",
+      "path": "audit/04_ARCHITECTURE_AND_CODE_QUALITY.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-006",
+      "path": "audit/05_TESTING_AND_QUALITY.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-007",
+      "path": "audit/06_DEPLOYMENT_AND_OPERATIONS.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-008",
+      "path": "audit/07_FINDINGS_AND_READINESS.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-009",
+      "path": "audit/08_REMEDIATION_ROADMAP.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-010",
+      "path": "audit/09_IMPLEMENTATION_LOG.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-011",
+      "path": "docs/audits/backend/ROOT_CAUSE_ANALYSIS.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-012",
+      "path": "docs/audits/backend/backend-audit.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-013",
+      "path": "docs/audits/documentation-inventory.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-014",
+      "path": "docs/audits/documentation-reorganization-report.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-015",
+      "path": "docs/audits/frontend/build-errors.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-016",
+      "path": "docs/audits/frontend/theme-default-audit.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-017",
+      "path": "docs/audits/system/CODEBASE_AUDIT_REPORT.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-018",
+      "path": "docs/audits/system/FAILURE_REGISTER.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-019",
+      "path": "docs/audits/system/RECOVERY_PLAN.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-AUD-020",
+      "path": "docs/audits/system/VERIFICATION_REPORT.md",
+      "type": "Audit Report"
+    },
+    {
+      "id": "AFRI-OMS-BE-001",
+      "path": "docs/backend/README.md",
+      "type": "Index"
+    },
+    {
+      "id": "AFRI-OMS-BE-002",
+      "path": "docs/backend/architecture/backend-architecture.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-003",
+      "path": "docs/backend/architecture/codebase-navigation.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-004",
+      "path": "docs/backend/architecture/request-lifecycle.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-005",
+      "path": "docs/backend/architecture/system-inventory.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-006",
+      "path": "docs/backend/audits/backend-understanding-and-readiness-audit.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-007",
+      "path": "docs/backend/configuration/environment-configuration.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-008",
+      "path": "docs/backend/configuration/environment-variable-reference.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-009",
+      "path": "docs/backend/data/persistence-and-database-lifecycle.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-010",
+      "path": "docs/backend/operations/development-to-production.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-011",
+      "path": "docs/backend/operations/runbook.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-012",
+      "path": "docs/backend/operations/runtime-lifecycle.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-013",
+      "path": "docs/backend/security/authentication-and-security-model.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-014",
+      "path": "docs/backend/security/authentication-incident-report.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-BE-015",
+      "path": "docs/backend/testing/verification-and-test-strategy.md",
+      "type": "Backend Reference"
+    },
+    {
+      "id": "AFRI-OMS-DEV-001",
+      "path": "afrinov-platform/README.md",
+      "type": "Developer Guide"
+    },
+    {
+      "id": "AFRI-OMS-DEV-002",
+      "path": "afrinov-platform/apps/backend/README.md",
+      "type": "Developer Guide"
+    },
+    {
+      "id": "AFRI-OMS-DEV-003",
+      "path": "afrinov-platform/apps/frontend/FRONTEND_ONLY.md",
+      "type": "Developer Guide"
+    },
+    {
+      "id": "AFRI-OMS-DOC-001",
+      "path": "docs/document-control/DOCUMENT_REGISTER.md",
+      "type": "Document Register"
+    },
+    {
+      "id": "AFRI-OMS-DOC-002",
+      "path": "docs/document-control/README.md",
+      "type": "Index"
+    },
+    {
+      "id": "AFRI-OMS-DOC-003",
+      "path": "docs/document-control/STYLE_GUIDE.md",
+      "type": "Style Guide"
+    },
+    {
+      "id": "AFRI-OMS-DOC-004",
+      "path": "docs/document-control/STANDARDISATION_REPORT.md",
+      "type": "Document Control"
+    },
+    {
+      "id": "AFRI-OMS-ENG-001",
+      "path": "docs/engineering/BASELINE_ASSESSMENT.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-002",
+      "path": "docs/engineering/CI_CD_ARCHITECTURE.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-003",
+      "path": "docs/engineering/DATABASE_ASSURANCE.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-004",
+      "path": "docs/engineering/EXCEPTIONS.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-005",
+      "path": "docs/engineering/IMPLEMENTATION_ROADMAP.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-006",
+      "path": "docs/engineering/QUALITY_GATES.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-007",
+      "path": "docs/engineering/README.md",
+      "type": "Index"
+    },
+    {
+      "id": "AFRI-OMS-ENG-008",
+      "path": "docs/engineering/RISK_REGISTER.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-009",
+      "path": "docs/engineering/SECURITY_CONTROLS.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-010",
+      "path": "docs/engineering/TESTING_GUIDE.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-011",
+      "path": "docs/engineering/VERIFICATION_EVIDENCE.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-GEN-001",
+      "path": "README.md",
+      "type": "Repository Overview"
+    },
+    {
+      "id": "AFRI-OMS-GEN-002",
+      "path": "afrinov-docs/docs/README.md",
+      "type": "Index"
+    },
+    {
+      "id": "AFRI-OMS-GEN-003",
+      "path": "decision-log.md",
+      "type": "Decision Records"
+    },
+    {
+      "id": "AFRI-OMS-GEN-004",
+      "path": "docs/README.md",
+      "type": "Index"
+    },
+    {
+      "id": "AFRI-OMS-GEN-005",
+      "path": "gap-analysis.md",
+      "type": "General"
+    },
+    {
+      "id": "AFRI-OMS-GEN-006",
+      "path": "racks-locations-roadmap.md",
+      "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-GEN-007",
+      "path": "sap-lessons-for-afrinov.md",
+      "type": "General"
+    },
+    {
+      "id": "AFRI-OMS-GEN-008",
+      "path": "task_context.md",
+      "type": "General"
+    },
+    {
+      "id": "AFRI-OMS-GEN-009",
+      "path": "workbook-replacement-roadmap.md",
+      "type": "Roadmap"
+    }
+  ],
+  "retired": []
+}
