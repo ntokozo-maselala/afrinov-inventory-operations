@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-GEN-004 updated=2026-11-26 by="Ntokozo Maselala" body=91fcad6a245a -->
+<!-- /afrinov:document-control id=AFRI-OMS-GEN-004 updated=2026-11-26 by="Ntokozo Maselala" body=4f5a6c91c308 -->
 
 # Documentation index
 
@@ -58,7 +58,9 @@ audits, project entry points, and code-adjacent guides.
   [documentation inventory](audits/documentation-inventory.md) records each
   original document's disposition; the
   [reorganization report](audits/documentation-reorganization-report.md)
-  records changes and validation.
+  records changes and validation. The
+  [current defects report](audits/current-defects-report.md) lists every defect
+  the registers record as open, each checked against the code.
 - Earlier reports retained for historical context are in
   [`docs/archive/`](archive/README.md). Archived reports describe their
   original point in time and are not current technical references.
