@@ -155,13 +155,24 @@ export function editorName(register, gitName) {
   return register.people[gitName] ?? gitName;
 }
 
+/** Text safe inside a Markdown table cell: backslashes first, then pipes. */
+export const tableCell = (v) => v.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
+/** A relative link with each part percent-encoded, so spaces and brackets can't end it. */
+export const linkTo = (from, to) =>
+  posix
+    .relative(posix.dirname(from), to)
+    .split('/')
+    .map((part) => encodeURIComponent(part).replace(/\(/g, '%28').replace(/\)/g, '%29'))
+    .join('/');
+
 function registerPageBody(register, stamped) {
   const rows = register.documents
     .filter((d) => d.path !== REGISTER_PAGE)
     .map((d) => {
       const s = stamped.get(d.path);
-      const link = posix.relative(posix.dirname(REGISTER_PAGE), d.path).replace(/ /g, '%20');
-      const cell = (v) => v.replace(/\|/g, '\\|');
+      const link = linkTo(REGISTER_PAGE, d.path);
+      const cell = tableCell;
       return `| ${d.id} | [${cell(s.title)}](${link}) | ${cell(d.type)} | ${displayDay(s.updated)} | ${cell(s.by)} |`;
     });
   const retired = register.retired.length

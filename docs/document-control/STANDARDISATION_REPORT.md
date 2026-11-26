@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DOC-004 updated=2026-11-26 by="Ntokozo Maselala" body=1890204245e3 -->
+<!-- /afrinov:document-control id=AFRI-OMS-DOC-004 updated=2026-11-26 by="Ntokozo Maselala" body=b059e2b87e97 -->
 
 # Documentation Standardisation Report
 
@@ -119,7 +119,7 @@ document's type is in the register.
 | `docs/document-control/templates/*.md` | Six templates |
 | `docs/document-control/assets/afrinov-logo-header.png` | The official logo on a white tile, 532 × 477, made by `npm run docs:logo` |
 | `afrinov-platform/scripts/doc-control.mjs` | The tool: stamp, check, links, logo (Node built-ins only) |
-| `afrinov-platform/scripts/doc-control.test.mjs` | 19 tests (`node --test`) |
+| `afrinov-platform/scripts/doc-control.test.mjs` | 20 tests (`node --test`) |
 | `.github/workflows/docs-ci.yml` | The CI gate |
 
 ### Modified
@@ -144,7 +144,7 @@ about content are listed below for review rather than changed.
 
 | Check | Result |
 |---|---|
-| Tool tests (`npm run docs:test`) | 19 of 19 pass: globs, scope, types, ID numbering and reuse, fingerprint with Windows line endings, title cleaning, South African day, stamp and restamp, date kept on an unchanged text or a register change, moved, retired and copied documents, BOM and CRLF kept, a future date refused, HTML escaped, link finding |
+| Tool tests (`npm run docs:test`) | 20 of 20 pass: globs, scope, types, ID numbering and reuse, fingerprint with Windows line endings, title cleaning, South African day, stamp and restamp, date kept on an unchanged text or a register change, moved, retired and copied documents, BOM and CRLF kept, a future date refused, HTML escaped, register cells and links escaped, link finding |
 | Check (`npm run docs:check`) | Pass: 218 documents, every header current |
 | Restamp without changes | Writes nothing; dates and names kept |
 | Content integrity (`git diff --numstat`) | 214 documents: +11 lines each, no line removed (the BOM document's first line re-written with the same title) |

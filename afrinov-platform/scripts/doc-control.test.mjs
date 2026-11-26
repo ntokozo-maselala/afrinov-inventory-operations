@@ -8,7 +8,9 @@ import {
   displayDay,
   editorName,
   inScope,
+  linkTo,
   matches,
+  tableCell,
   nextId,
   parseDocument,
   planStamp,
@@ -200,6 +202,17 @@ test('a date in the future fails the check', () => {
 test('titles with HTML characters are escaped in the header', () => {
   const plan = stamp(register(), { 'a.md': '# Receiving & <issuing>\n' });
   assert.match(plan.writes.get('a.md'), /Receiving &amp; &lt;issuing&gt;/);
+});
+
+test('register cells escape backslashes before pipes, and links encode each part', () => {
+  assert.equal(tableCell('a | b'), 'a \\| b');
+  // A title holding "\|" must not become "\\|", where the pipe would end the cell.
+  assert.equal(tableCell('a \\| b'), 'a \\\\\\| b');
+  assert.equal(tableCell('ends in \\'), 'ends in \\\\');
+  assert.equal(
+    linkTo(REGISTER_PAGE, 'docs/archive/Production Readiness & Deployment (old).md'),
+    '../archive/Production%20Readiness%20%26%20Deployment%20%28old%29.md',
+  );
 });
 
 test('broken links: relative targets only, code ignored, anchors and spaces handled', () => {

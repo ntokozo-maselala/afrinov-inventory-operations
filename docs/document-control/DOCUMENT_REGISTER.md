@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-26 by="Ntokozo Maselala" body=e89a12bab912 -->
+<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-26 by="Ntokozo Maselala" body=00e220c7d3c4 -->
 
 # Document Register
 
@@ -162,7 +162,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-ARC-006 | [Afrinov Platform — Implementation Report](../archive/IMPLEMENTATION_REPORT.md) | Archived Document | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ARC-007 | [Afrinov Platform — Performance, Resource Efficiency & Bottleneck Audit](../archive/PERFORMANCE_AUDIT_REPORT.md) | Archived Document | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ARC-008 | [Afrinov IMS — Production Readiness Audit Report](../archive/PRODUCTION_READINESS_REPORT.md) | Archived Document | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ARC-009 | [Production Readiness & Deployment Audit](../archive/Production%20Readiness%20&%20Deployment%20Audit.md) | Archived Document | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ARC-009 | [Production Readiness & Deployment Audit](../archive/Production%20Readiness%20%26%20Deployment%20Audit.md) | Archived Document | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ARC-010 | [Archived reports](../archive/README.md) | Archived Document | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ARC-011 | [Afrinov IMS — Sidebar & Application Shell Audit](../archive/SIDEBAR_SHELL_AUDIT.md) | Archived Document | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ARC-012 | [System Inspection — Afrinov IMS](../archive/System-Inspection.md) | Archived Document | 26/11/2026 | Ntokozo Maselala |
