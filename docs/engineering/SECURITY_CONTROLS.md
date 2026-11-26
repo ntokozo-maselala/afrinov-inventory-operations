@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-26 by="Ntokozo Maselala" body=0735d16dac66 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-26 by="Ntokozo Maselala" body=67b74aabf004 -->
 
 # Security controls
 
@@ -54,7 +54,8 @@ environment outside this repository. These are listed as open items in
   values fail startup. Production rejects known-insecure placeholder secrets and
   any secret shorter than 32 bytes. API docs are opt-in in production.
 - **CORS.** Allow-list based in every environment. Reflecting arbitrary origins
-  requires the explicit `CORS_ALLOW_ANY=true` opt-in.
+  requires the explicit `CORS_ALLOW_ANY=true` opt-in, and production refuses to
+  start with it (SEC-04).
 - **Headers.** `@fastify/helmet` sets HSTS, `X-Content-Type-Options`,
   `Referrer-Policy` and a restrictive CSP on API responses.
 - **Rate limiting.** Strict per-IP limit on `/api/v1/auth/login` and

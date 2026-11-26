@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-BE-008 updated=2026-11-26 by="Ntokozo Maselala" body=6c501214e0ed -->
+<!-- /afrinov:document-control id=AFRI-OMS-BE-008 updated=2026-11-26 by="Ntokozo Maselala" body=738dcaefb323 -->
 
 # Environment variable reference
 
@@ -24,7 +24,7 @@ deliberately omitted where a variable may contain credentials.
 | `HOST` | Fastify listener | `0.0.0.0` | Bind interface; no validation. |
 | `LOG_LEVEL` | Pino | `info` | Development uses pretty transport. |
 | `CORS_ORIGIN` | CORS plugin | Local Vite allow-list in development; disabled elsewhere if unset | Comma-separated explicit origins. |
-| `CORS_ALLOW_ANY` | CORS resolver | Disabled | `true` permits any origin with credentials in every environment. |
+| `CORS_ALLOW_ANY` | CORS resolver | Disabled | `true` permits any origin with credentials outside production; production refuses to start with it (SEC-04). |
 | `RATE_LIMIT_AUTH` | Login rate limit | 5 requests/minute/IP; 1000 in unit-test mode | Positive number overrides; default key is separated from global API counter. |
 | `RATE_LIMIT_GLOBAL` | Global rate limit | 1000 requests/minute/IP; 10000 in unit-test mode | Positive number overrides. |
 | `PROCUREMENT_ENABLED` | Server route registration | Enabled unless value is `false` | Disables purchase orders and goods receipts, not supplier routes. |

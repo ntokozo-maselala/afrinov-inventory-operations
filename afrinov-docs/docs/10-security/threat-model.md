@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-10-008 updated=2026-11-26 by="Ntokozo Maselala" body=6c8acf12cb3c -->
+<!-- /afrinov:document-control id=AFRI-OMS-10-008 updated=2026-11-26 by="Ntokozo Maselala" body=b0d4f94effea -->
 
 # Threat Model
 
@@ -22,7 +22,7 @@
 | Audit log tampering | Someone covering their tracks after a bad edit | Append-only table, no UPDATE/DELETE grant on `audit_log_entries` | No API path edits it; no DB grant restriction (TD-006) |
 | Injection (SQL etc.) | Any user-input field | Parameterised queries/ORM throughout | Met: Prisma queries; the few raw queries use tagged templates (parameterised) |
 | Sensitive data exposure | Stock value, supplier pricing could be commercially sensitive | Role-gated reporting | Partial: reports need `view:reports`, which every role (including VIEWER) holds; material unit costs are readable by any signed-in user via `/materials` |
-| Cross-site requests from other origins | Browser-based SPA with bearer token | — | CORS allow-list; credentialed wildcard only with explicit `CORS_ALLOW_ANY=true` |
+| Cross-site requests from other origins | Browser-based SPA with bearer token | — | CORS allow-list; credentialed wildcard only with explicit `CORS_ALLOW_ANY=true`, outside production (production refuses to start with it, SEC-04) |
 
 ## Evidence
 - `afrinov-platform/apps/backend/prisma/migrations/` — no GRANT, REVOKE or TRIGGER

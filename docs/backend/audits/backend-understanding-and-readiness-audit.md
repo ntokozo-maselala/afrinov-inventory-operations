@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-BE-006 updated=2026-11-26 by="Ntokozo Maselala" body=fe476a3e3b08 -->
+<!-- /afrinov:document-control id=AFRI-OMS-BE-006 updated=2026-11-26 by="Ntokozo Maselala" body=3d3ae7a39f54 -->
 
 # Backend understanding and readiness audit
 
@@ -26,6 +26,7 @@ the current configuration where this section says otherwise.
 | BKA-03/04: Docker build order and dependency pruning | Corrected: Node 24 multi-stage build installs from the workspace lockfile, copies source/schema before build, and prunes at the workspace root. Root `.dockerignore` excludes local `.env*` and build artifacts. | Docker engine was unavailable; image build/startup remains unverified. |
 | BKA-05: backend CI used unsupported Node 20 | Corrected: both backend jobs select Node 24. | Workflow was inspected but no GitHub Actions run was available. |
 | BKA-06: integration tests loaded `.env` without a target guard | Corrected: integration and E2E use `.env.test` only and require a local `_test` DB; guarded migrate/seed commands and a separate Compose test DB were added. | URL-guard unit tests pass, but no isolated Postgres integration cycle ran. |
+| BKA-07: `CORS_ALLOW_ANY` remained available in production | Corrected 2026-11-26 (SEC-04): `loadConfig()` refuses to start in production with `CORS_ALLOW_ANY=true`, and `resolveCorsOrigin` ignores it there; `security.regression.test.ts` covers both and fails on the old code. Outside production the opt-in still works. | No deployed instance was checked; confirm `CORS_ALLOW_ANY` is unset in any production environment file. |
 | Authentication algorithm was implicit | Corrected: application signs and verifies HS256 explicitly; regressions reject unsupported/expired/tampered tokens. | Tokens in an actual deployment were not inspected; confirm they are HS256 before rollout. This is independent of the reported login 401. |
 | Reported authentication incident | The current source explains the POST-only GET 404 and possible POST 401 branches. No login lookup/password behavior was changed. | Production root cause remains unresolved pending deployed revision, sanitized request logs, caller evidence, and authoritative account/database state. See [incident report](../security/authentication-incident-report.md). |
 

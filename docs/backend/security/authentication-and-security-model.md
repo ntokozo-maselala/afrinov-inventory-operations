@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-BE-013 updated=2026-11-26 by="Ntokozo Maselala" body=c3b15e57d764 -->
+<!-- /afrinov:document-control id=AFRI-OMS-BE-013 updated=2026-11-26 by="Ntokozo Maselala" body=832dcd956994 -->
 
 # Authentication and security model
 
@@ -69,9 +69,10 @@ The route group table is a map, not a replacement for route-level review.
 - CORS uses an explicit comma-separated allow-list when configured; development
   has a fixed local-origin fallback. CORS is disabled outside development if
   the list is empty. Credentials are enabled.
-- `CORS_ALLOW_ANY=true` overrides the allow-list in every environment and
-  permits any origin with credential support. The code comments say this is
-  for throwaway demos, but production is not prevented from enabling it.
+- `CORS_ALLOW_ANY=true` overrides the allow-list outside production and
+  permits any origin with credential support, for throwaway demos. Production
+  refuses to start with it, and the resolver ignores it there (SEC-04,
+  2026-11-26).
 - Fastify's global rate limiter uses a default 5/minute/IP for the login path
   and 1000/minute/IP elsewhere (higher defaults in tests). The source does not
   configure a shared Redis/store. No `trustProxy` option was found; if deployed
@@ -112,8 +113,8 @@ The current findings are detailed in the
 - **Medium, confirmed:** production accepts extremely short JWT secrets.
 - **Medium, confirmed:** arbitrary `NODE_ENV` strings can bypass production
   secret rejection and expose API docs by default.
-- **Medium, confirmed:** production can enable `CORS_ALLOW_ANY` with
-  credentialed CORS.
+- **Medium, confirmed, resolved 2026-11-26 (SEC-04):** production could enable
+  `CORS_ALLOW_ANY` with credentialed CORS; it now refuses to start with it.
 - **Medium, operational risk:** the former local real-HTTP test setup loaded
   `.env` without guarding the target. Integration/E2E setup now requires
   `.env.test` and a local `_test` database; database-backed execution remains

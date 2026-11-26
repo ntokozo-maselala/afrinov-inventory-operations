@@ -69,6 +69,17 @@ export function loadConfig(): AppConfig {
     throw new ConfigError('JWT_SECRET must be at least 32 bytes in production.');
   }
 
+  // SEC-04: an any-origin CORS policy with credentials lets every website make
+  // signed-in calls to this API from a visitor's browser. It is for a throwaway
+  // demo box only, so production refuses to start with it rather than run with
+  // it: the allowed origins belong in CORS_ORIGIN.
+  if (nodeEnv === 'production' && process.env.CORS_ALLOW_ANY === 'true') {
+    throw new ConfigError(
+      'CORS_ALLOW_ANY=true is not permitted in production. ' +
+      'List the allowed origins in CORS_ORIGIN instead.',
+    );
+  }
+
   const port = Number(process.env.PORT ?? 4000);
   if (!Number.isFinite(port) || port <= 0 || port > 65535) {
     throw new ConfigError(`PORT must be a valid port number (got "${process.env.PORT}").`);
@@ -128,15 +139,16 @@ export type CorsOriginSetting = string[] | boolean;
  *   internet a credentialed cross-origin channel to this API.
  * - Anything else (production/test with no `CORS_ORIGIN`) disables CORS
  *   entirely, which is fail-closed.
- * - `CORS_ALLOW_ANY=true` is an explicit, opt-in escape hatch for operators
- *   who genuinely need a wildcard (e.g. a throwaway demo box).
+ * - `CORS_ALLOW_ANY=true` is an explicit, opt-in escape hatch for a throwaway
+ *   demo box, outside production only. loadConfig() refuses it in production
+ *   (SEC-04); here it is ignored there too, so the two can't disagree.
  */
 export function resolveCorsOrigin(
   nodeEnv: 'development' | 'test' | 'production',
   rawCorsOrigin: string | undefined,
   allowAny: string | undefined,
 ): CorsOriginSetting {
-  if (allowAny === 'true') return true;
+  if (allowAny === 'true' && nodeEnv !== 'production') return true;
 
   const configured = rawCorsOrigin
     ?.split(',')

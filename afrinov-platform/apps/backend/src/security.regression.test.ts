@@ -393,9 +393,31 @@ describe('F-11: CORS is allow-list based, never reflective by default', () => {
     ]);
   });
 
-  it('only reflects arbitrary origins behind the explicit opt-in', () => {
-    expect(resolveCorsOrigin('production', undefined, 'true')).toBe(true);
-    expect(resolveCorsOrigin('production', undefined, 'yes')).toBe(false);
+  it('only reflects arbitrary origins behind the explicit opt-in, outside production', () => {
+    expect(resolveCorsOrigin('development', undefined, 'true')).toBe(true);
+    expect(resolveCorsOrigin('test', undefined, 'true')).toBe(true);
+    expect(resolveCorsOrigin('development', undefined, 'yes')).not.toBe(true);
+  });
+
+  it('never reflects arbitrary origins in production, even with the opt-in (SEC-04)', () => {
+    expect(resolveCorsOrigin('production', undefined, 'true')).toBe(false);
+    expect(resolveCorsOrigin('production', 'https://a.example', 'true')).toEqual(['https://a.example']);
+  });
+
+  it('refuses to start in production with CORS_ALLOW_ANY=true (SEC-04)', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.DATABASE_URL = 'postgresql://u:p@localhost:5432/db';
+    process.env.JWT_SECRET = 'a-very-long-and-random-production-secret-1234567890';
+    process.env.CORS_ALLOW_ANY = 'true';
+    expect(() => loadConfig()).toThrow(ConfigError);
+    expect(() => loadConfig()).toThrow(/CORS_ALLOW_ANY.*production.*CORS_ORIGIN/);
+    // Any other value is not the opt-in, and the same settings otherwise start.
+    process.env.CORS_ALLOW_ANY = 'false';
+    expect(loadConfig().nodeEnv).toBe('production');
+    // Outside production the opt-in still loads, for a throwaway demo box.
+    process.env.NODE_ENV = 'development';
+    process.env.CORS_ALLOW_ANY = 'true';
+    expect(loadConfig().nodeEnv).toBe('development');
   });
 
   it('does not reflect a foreign origin at runtime', async () => {

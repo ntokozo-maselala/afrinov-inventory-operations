@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-008 updated=2026-11-26 by="Ntokozo Maselala" body=158b096859fe -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-008 updated=2026-11-26 by="Ntokozo Maselala" body=ecbcdff0363e -->
 
 # Risk register
 
@@ -33,7 +33,7 @@ named so it can be assigned.
 | GATE-01 | Medium | No dependency-audit, secret-scan, or migration-drift gate | Workflow inspection | Vulnerable dependency, leaked secret, or schema drift could merge unnoticed | `security-ci.yml` + `migration-drift` job | Engineering productivity | **Fixed & verified** |
 | ARCH-02 | Low | No idempotency contract for repeated POSTs | Inventory mutations now accept an `Idempotency-Key` and replay the stored response; procurement/master-data writes do not | A client retry of an inventory mutation replays instead of duplicating; other writes can still duplicate | Extend the same key contract to the remaining write endpoints | Product + backend owner | Partly resolved 2026-10-29 — inventory covered; rest open |
 | DOC-01 | Low | Operations documentation drift (Node version, test env loading) | Prior audit comparison | Operators may follow incorrect instructions | Update alongside the next source change | Backend owner | Open |
-| SEC-04 | Low | `CORS_ALLOW_ANY=true` can be enabled in production | `config.ts` returns `true` in every environment | Broad browser cross-origin access if explicitly enabled | Reject in production or record a reviewed exception | Backend owner | Open — low, opt-in |
+| SEC-04 | Low | `CORS_ALLOW_ANY=true` can be enabled in production | `config.ts` returns `true` in every environment | Broad browser cross-origin access if explicitly enabled | Refused in production: `loadConfig()` will not start with `CORS_ALLOW_ANY=true`, and `resolveCorsOrigin` ignores it there (`src/shared/config.ts`; `security.regression.test.ts`) | Backend owner | **Fixed & verified** 2026-11-26 |
 
 ## Residual risks introduced by this workstream
 
