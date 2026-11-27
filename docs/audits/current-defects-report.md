@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-27 by="Ntokozo Maselala" body=09ddc31a3999 -->
+<!-- /afrinov:document-control id=AFRI-OMS-AUD-021 updated=2026-11-27 by="Ntokozo Maselala" body=e2c23c72ade9 -->
 
 # Current Defects Report
 
@@ -19,7 +19,8 @@ This report extracts every defect the repository's documents record as open or p
 resolved, as of commit `a69749d` (27 Nov 2026, the merge of PR #222). Each entry is quoted
 from its source document and cited. Where an entry names code, the code was read at
 `a69749d` to see whether the defect is still there. Nothing here comes from outside the
-repository, except three settings and alert lists read from GitHub, which are named as such.
+repository, except GitHub settings and alert lists, and npm registry data (for SUPPLY-02
+and `npm audit`), which are named as such where used.
 
 - **11 defects are confirmed in the code.** The highest rated is still SEC-03, "High if
   Compose is deployed on a reachable host", now narrowed to its second half: the API
@@ -54,17 +55,21 @@ repository, except three settings and alert lists read from GitHub, which are na
 - **What moved since edition 3:** `git log 02e4146..a69749d` over every source above lists
   only the commits of PRs #220, #221 and #222, the production readiness review and its
   follow-ups. No other change touched the registers.
-- **Checked against code:** every entry that names a file, a line, a setting or a
-  behaviour was looked up again at `a69749d`, because those PRs changed some of the cited
-  files (`inventory.service.ts`, `schema.prisma`, `docker-compose.yml`) and line numbers
-  moved. The result is in the column **At `a69749d`**:
+- **Checked against code:** every entry in section 1, and every closure in section 3,
+  was looked up again at `a69749d`, because those PRs changed some of the cited files
+  (`inventory.service.ts`, `schema.prisma`, `docker-compose.yml`) and line numbers moved.
+  The result is in section 1's column **At `a69749d`**:
   - **Present**: the code still shows the defect.
   - **Partly**: some of what is recorded is still there; the rest is not.
-  - **Not re-checked**: the entry needs a person, a deployment or a route-by-route
-    review, not a code search.
-- **Read from GitHub, not the repository:** branch protection on `main`, open CodeQL
-  alerts, and the state of PRs #220 to #222, all through `gh api`. They are named where
-  used.
+
+  Section 2's entries were not checked against code: each waits on a person, a
+  deployment (SEC-05's `TRUST_PROXY`, for example, is set on the production host) or a
+  route-by-route review, and its **Waiting on** column says which, or "Not re-checked".
+- **Read from outside the repository:** branch protection on `main`, open CodeQL alerts,
+  and the state of PRs #220 to #222, through `gh api`; the latest
+  `eslint-plugin-react` and its peer range (SUPPLY-02), through `npm view`; and
+  `npm audit --package-lock-only`, which asks the npm registry about the lockfile. Each
+  is named where used.
 - **Not examined:** any running system, production host or database; the stock
   workbook; anything not written in the repository or its GitHub settings. A defect not
   listed here may still exist.
@@ -167,7 +172,7 @@ Where each finding of `CODEBASE_AUDIT_REPORT.md` (AUD-001 to AUD-016) is tracked
 | AUD-008 Audit history omits operations; some audits non-atomic | TD-008, AUD-01 | Section 2, partly resolved |
 | AUD-009 Balance foreign keys missing | TD-005, DATA-03 | Resolved 2026-10-28 (register) |
 | AUD-010 Immutability by convention only | TD-006 | Section 1, present |
-| AUD-011 Eight dev/build advisories | F-08 | Resolved 2026-10-29 (register); `npm audit` reports 0 at `a69749d` |
+| AUD-011 Eight dev/build advisories | F-08 | Resolved 2026-10-29 (register); `npm audit --package-lock-only` reports 0 at `a69749d` (npm registry, 2026-11-27) |
 | AUD-012 Production SPA hosting and rollback undefined | OPS-01 | Section 2 |
 | AUD-013 No monitoring, alerting or service objectives | OPS-01 | Section 2 |
 | AUD-014 Token in `localStorage` for 12 hours | SEC-06 | Section 1, present |
