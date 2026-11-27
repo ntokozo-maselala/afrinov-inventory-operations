@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-27 by="Ntokozo Maselala" body=2939c9a739c4 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-27 by="Ntokozo Maselala" body=7bed7efca33b -->
 
 # Security controls
 
@@ -204,11 +204,12 @@ name.
 
 ### What is still open
 
-SEC-07 (rotate the password in history, owner), **GATE-02** (`main` is protected
-since 2026-11-27, but Backend and Frontend CI are not yet required), **OPS-01**
+SEC-07 (rotate the password in history, owner), **OPS-01**
 (no production-host evidence: install, restore test, alerting; a release
 blocker, operational rather than a security control), the rest of SEC-03 (the
-API's database role), SEC-05, SEC-06, TD-006 and TD-014. Their next steps are in
+API's database role), SEC-05, SEC-06, TD-006 and TD-014. GATE-02 is closed:
+`main` is protected and requires all eleven CI checks (2026-11-27), and SEC-08's
+alerts are closed by CodeQL. Their next steps are in
 `REMEDIATION_PLAN.md`.
 
 ## Secret handling rules for this repository

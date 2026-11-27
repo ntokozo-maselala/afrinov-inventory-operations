@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=de2ed43e2bf8 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=dc2720dba742 -->
 
 # Production readiness assessment
 
@@ -26,18 +26,18 @@ the go-live checklist in `workbook-replacement-roadmap.md` (Phase 4) or the step
 
 The software itself meets every gate the repository sets, and on the evidence of
 this review the code holds no known critical or high defect. The release is blocked
-by three things outside the code, each recorded as High or as a release gate:
+by two things outside the code, each recorded as High or as a release gate:
 
 1. **OPS-01:** there is no evidence from a production host: no installed instance,
    no restore test there, no agreed RPO/RTO, no proven alerting.
 2. **SEC-07:** a real bootstrap admin password is in the public repository's
    history, and nobody has recorded that it was rotated wherever it was used.
-3. **GATE-02:** `main`, from which production is installed, has been protected
-   since 2026-11-27, but Backend CI and Frontend CI are not yet required checks,
-   so a change can still merge with failing unit, integration or browser tests.
 
-It becomes **CONDITIONALLY READY** when all three are done and this branch is
-merged with CI green, leaving the P2 items in the remediation plan to be accepted or
+A third, **GATE-02**, is closed: `main`, from which production is installed, is
+protected and requires all eleven CI checks (2026-11-27; PRs #220 and #221). This
+review's fixes are merged (PR #220).
+
+It becomes **CONDITIONALLY READY** when both are done, leaving the P2 items in the remediation plan to be accepted or
 scheduled by the owner. It becomes **READY FOR RELEASE** when the Phase 4 go-live
 checklist (`workbook-replacement-roadmap.md`) is also complete: accounts, training,
 the parallel run and the production import.
@@ -52,7 +52,7 @@ runs well in production.
 | Functional correctness | **Meets** | 1,464 backend and 1,672 frontend unit tests, 423 integration tests on real PostgreSQL, 1,223 Postman checks over every workflow: all pass. Browser tests passed in CI on `02e4146` | Phase 4 acceptance (parallel run against the workbook) not done | Business rules confirmed only against the workbook rehearsal still to come | None from the code; acceptance is part of go-live |
 | Architectural integrity | **Meets, with recorded debt** | One ledger with a database floor (ADR-047); one error envelope; idempotent writes; 47 ADRs | TD-004, TD-007, TD-027 | A new stock path must follow the lock order by hand (TD-027) | None |
 | Code quality | **Meets** | Lint and typecheck clean; no `@ts-ignore`, no `eslint-disable`; 6 `any` outside tests | PRR-05, PRR-06 (P3/P4) | Low | None |
-| Security | **Conditional** | 183 endpoints 401 without a token; 5 low-privilege roles × 88 writes, none succeeded; record-level checks 403; bound SQL; no XSS sink; fail-closed configuration; 0 vulnerabilities; CodeQL alerts fixed | SEC-07 (High), GATE-02; SEC-03 rest, SEC-05, SEC-06, TD-006, TD-014 (Medium or conditional) | A reused leaked password; an API compromise holding owner rights on the database | **Blocks** until SEC-07 is done and GATE-02 finished (Backend and Frontend CI required) |
+| Security | **Conditional** | 183 endpoints 401 without a token; 5 low-privilege roles × 88 writes, none succeeded; record-level checks 403; bound SQL; no XSS sink; fail-closed configuration; 0 vulnerabilities; CodeQL alerts fixed | SEC-07 (High); SEC-03 rest, SEC-05, SEC-06, TD-006, TD-014 (Medium or conditional). GATE-02 closed: eleven required checks on `main` | A reused leaked password; an API compromise holding owner rights on the database | **Blocks** until SEC-07 is done |
 | Data integrity | **Meets, with recorded debt** | 76 migrations apply cleanly; no drift; `CHECK (quantity >= 0)`; daily reconciliation; race tests pass | TD-006 immutability by convention | Direct SQL could edit history | None, if database access is limited to the operator |
 | Test maturity | **Meets** | Four layers in CI; every regression test in this review failed on the old code first | No load test; browser tests not run locally | Behaviour under many simultaneous users unmeasured | None for the one store the business has (one store controller) |
 | Performance | **Adequate for the expected load** | p50 10 ms, p95 56 ms, p99 290 ms over 426 requests; first load 147 kB + 258 kB, heavy libraries on demand | No load test; rate limits per process | Unknown beyond a handful of users | None |
@@ -67,12 +67,10 @@ runs well in production.
 
 1. **Rotate SEC-07** wherever that password was ever used, and record it in
    `EXCEPTIONS.md` (EX-01).
-2. **Finish protecting `main`**: protection is on (2026-11-27), and branch
-   `ci/gate-02-required-checks` makes Backend CI and Frontend CI report on every
-   pull request under distinct job names; merge it, then require their five
-   checks (`CI_CD_ARCHITECTURE.md`, "Branch protection", has the command).
-3. **Merge this branch** with CI green, so the fixes reach `main`; confirm CodeQL
-   then shows the four alerts closed.
+2. ~~**Protect `main`**~~ **Done** 2026-11-27: eleven required checks, Backend and
+   Frontend CI included (PR #221; `CI_CD_ARCHITECTURE.md`, "Branch protection").
+3. ~~**Merge this review's fixes**~~ **Done** (PR #220, CI green). CodeQL's next
+   scan of `main` marked alerts 1, 2, 3 and 5 fixed (2026-11-27T07:23Z); none open.
 4. **Install on the production host** by `deployment.md` Parts 1–9, `TRUST_PROXY`
    set, and record the result.
 5. **Prove recovery there**: a backup, an off-site copy and a restore test signed
@@ -96,8 +94,8 @@ runs well in production.
    items already in the registers stay open as recorded: no application code
    changed between `02e4146`, where the defects report checked them against the
    code, and `71395dc` (`git diff` empty), so those checks still hold.
-4. **Security.** Branch protection off at the baseline (P1; now on with six
-   required checks, Backend and Frontend CI still to require), four CodeQL alerts (fixed), the base
+4. **Security.** Branch protection off at the baseline (P1; now on, with all
+   eleven checks required), four CodeQL alerts (fixed, and closed by CodeQL), the base
    Compose file open to the network (fixed); SEC-07 still to be done by the owner.
 5. **Functional and reliability.** Eleven routes answered 500 to a bad filter
    (fixed). Nothing else gave a 5xx in 11,343 hostile calls.
@@ -121,12 +119,12 @@ runs well in production.
 13. **Outstanding defects.** In the registers: see the remediation plan and
     `docs/audits/current-defects-report.md` (edition 3; its next edition should take
     in TD-020, TD-021, TD-023, TD-029, SEC-08 and GATE-02).
-14. **Residual risks.** SEC-07, OPS-01, GATE-02 (blocking); SEC-03 rest, SEC-05,
+14. **Residual risks.** SEC-07, OPS-01 (blocking); SEC-03 rest, SEC-05,
     SEC-06, TD-006, TD-014 (decisions).
 15. **Deferred.** TD-027, TD-004, TD-007, TD-011, TD-012, TD-015, ARCH-02, PRR-05,
     PRR-06 rest, PRR-08, dependency patches.
 16. **Prerequisites.** The eight steps above.
-17. **Recommendation.** Merge this branch, then do steps 1, 2 and 4–6. Do not go
+17. **Recommendation.** Steps 2 and 3 are done; do steps 1 and 4–6. Do not go
     live before they are done.
 
 | Work | State |
@@ -135,7 +133,7 @@ runs well in production.
 | PRR-06 (fixture values) | Partly completed |
 | Load test, penetration test, browser tests on this machine | Not attempted |
 | OPS-01 evidence | Blocked: needs a production host |
-| Branch protection on `main` (GATE-02) | Partly completed 2026-11-27: on, with six always-run checks; the workflow change that lets Backend and Frontend CI be required is on `ci/gate-02-required-checks`; requiring them follows its merge |
+| Branch protection on `main` (GATE-02) | Completed 2026-11-27: eleven required checks (PR #220, PR #221, then the setting) |
 | SEC-07 | Waiting on the owner |
 | Committing this branch and opening its pull request | Completed: PR #220 |
 | Every P2 decision | Waiting on approval |

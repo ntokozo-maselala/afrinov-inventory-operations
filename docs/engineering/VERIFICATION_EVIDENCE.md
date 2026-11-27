@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-011 updated=2026-11-27 by="Ntokozo Maselala" body=fae993989eff -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-011 updated=2026-11-27 by="Ntokozo Maselala" body=39eb21a0a648 -->
 
 # Verification evidence
 
@@ -141,6 +141,15 @@ backend and frontend runs on `02e4146` cover the baseline's code.
 | `gh api repos/…/code-scanning/alerts?state=open` | 4: `js/polynomial-redos` (`supplier-fields.ts:40`), `js/incomplete-sanitization` ×3 (`workbook-report.ts:9`, `vendor-list.ts:228`, `reconciliation.ts:160`) |
 | `gh api repos/…/dependabot/alerts?state=open` | 0 |
 | `gh api repos/…/secret-scanning/alerts?state=open` | 0 |
+
+The table above is the baseline. After PRs #220 and #221, at the owner's request:
+
+| Read | Result |
+|---|---|
+| `gh api repos/…/branches/main/protection` | `enforce_admins` true; pull request required (0 approvals); force pushes and deletion off; `required_status_checks.strict` true; 11 checks, each `app_id` 15368: the 6 of Security CI, Docs CI and CodeQL, and `Backend: typecheck, lint, unit tests, build`, `Backend: migration drift and database integrity`, `Backend: integration tests (real Postgres)`, `Frontend: typecheck, lint, unit tests, build`, `Frontend: browser tests (Playwright, real backend)` (GATE-02) |
+| `for n in 1 2 3 5; do gh api "repos/…/code-scanning/alerts/$n"; done` and `gh api 'repos/…/code-scanning/alerts?state=open'` | each of the four `fixed`, `fixed_at` 2026-11-27T07:23:24Z, the first scan of `main` after PR #220; the open-alert query returns 0 (SEC-08) |
+| `gh pr checks 221` at `7c96c86` | 16 checks; every Backend and Frontend job ran and passed, CodeQL, Security CI and Docs CI passed |
+| `gh pr checks 222` and `gh pr view 222 --json mergeStateStatus` (documentation only), with the eleven checks required | `Backend: what changed` and `Frontend: what changed` success; the five Backend and Frontend test jobs `skipped`; Security CI, Docs CI and CodeQL passed; `mergeStateStatus` CLEAN. A docs-only pull request is not blocked by the required Backend and Frontend checks |
 
 ### The running API
 

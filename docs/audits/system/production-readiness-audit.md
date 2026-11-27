@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-AUD-022 updated=2026-11-27 by="Ntokozo Maselala" body=07b7d661a7a1 -->
+<!-- /afrinov:document-control id=AFRI-OMS-AUD-022 updated=2026-11-27 by="Ntokozo Maselala" body=239c34c1dbcb -->
 
 # Production Readiness Audit
 
@@ -30,9 +30,10 @@ CodeQL alerts were open (PRR-03, now SEC-08). The defect and the alerts are fixe
 this branch with regression tests.
 
 What stands between this code and a production release is not code. It is the
-operational evidence (OPS-01), the rotation of a credential in public history
-(SEC-07), and branch protection (PRR-01; since switched on, with Backend and
-Frontend CI still to be required: GATE-02). The verdict and its conditions are in
+operational evidence (OPS-01) and the rotation of a credential in public history
+(SEC-07). Branch protection (PRR-01), a third at the baseline, has since been
+done: `main` requires all eleven CI checks (GATE-02, closed 2026-11-27). The
+verdict and its conditions are in
 [`PRODUCTION_READINESS_ASSESSMENT.md`](../../engineering/PRODUCTION_READINESS_ASSESSMENT.md);
 the plan for each finding is in
 [`REMEDIATION_PLAN.md`](../../engineering/REMEDIATION_PLAN.md).

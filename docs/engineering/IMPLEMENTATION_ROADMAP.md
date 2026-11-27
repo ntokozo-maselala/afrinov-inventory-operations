@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-005 updated=2026-11-27 by="Ntokozo Maselala" body=f81195550d00 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-005 updated=2026-11-27 by="Ntokozo Maselala" body=a709a55644aa -->
 
 # Implementation roadmap
 
@@ -66,7 +66,7 @@ CI/CD, risk register, exceptions, roadmap, and this file's siblings.
 | Item | Why | Acceptance criteria |
 |---|---|---|
 | **SEC-07** rotate the committed admin password | The value is in public history | Account rotated or deleted; no reuse; outcome recorded in `EXCEPTIONS.md` |
-| **Branch protection** on `main` | The gates exist but are not enforcing until required | **Partly done 2026-11-27 (GATE-02):** on, with the six checks that run on every pull request targeting `main`. The workflows now report on every pull request under distinct job names (branch `ci/gate-02-required-checks`). Still to do: once that is on `main`, require their five checks (`CI_CD_ARCHITECTURE.md` has the command); one approving review when there is a second maintainer |
+| **An approving review** on `main` | Branch protection is in force (GATE-02, done 2026-11-27: eleven required checks, `CI_CD_ARCHITECTURE.md`), but with one maintainer no review can be required: an author can't approve their own pull request | Require one approving review once there is a second maintainer |
 | **CODEOWNERS** | Route auth/authz/migration/ledger paths to the right reviewers | File added once owning teams are named; those paths require an owner review |
 
 ### Priority 2 — Before any production release (OPS-01)

@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-GEN-010 updated=2026-11-27 by="Ntokozo Maselala" body=acdb46e3fbae -->
+<!-- /afrinov:document-control id=AFRI-OMS-GEN-010 updated=2026-11-27 by="Ntokozo Maselala" body=cf98d4adf80e -->
 
 # Changelog
 
@@ -43,6 +43,13 @@ merged pull requests on GitHub and in `git log`. How a release is made is in
   the production overlay already did. A developer stack is no longer reachable
   from other machines; use an SSH tunnel. Running containers keep their old ports
   until they are recreated (SEC-03, in part).
+- Backend and Frontend CI run on every pull request, skipping their jobs (as a
+  pass) when the pull request touches none of their paths, and their jobs are
+  named `Backend: …` / `Frontend: …`. `main` is protected and requires all eleven
+  CI checks, so nothing merges with failing tests, a migration that drifts or a
+  newly introduced secret (GATE-02, PRs #220 and #221). The secret scan's
+  baseline still allows the one known password in history, which has to be
+  rotated (SEC-07).
 
 ### Documentation
 
