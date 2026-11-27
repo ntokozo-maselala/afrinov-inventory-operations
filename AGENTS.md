@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1366, frontend 1615)
+npm test               # both workspaces (backend 1462, frontend 1672)
 npm run build          # both workspaces
 ```
 
@@ -143,7 +143,13 @@ Use these forms; the older spellings still work but are deprecated or removed.
   route that reads `?limit` by hand uses `pageLimit(raw, max)`
   (`src/shared/paging.ts`), never `Number(q['limit'])`: `abc` became `take: NaN`
   (a 500) and `-1` the oldest rows. An enum filter is checked against its list
-  first (as `GET /settings?category` is against `SETTING_SECTIONS`).
+  first (as `GET /settings?category` is against `SETTING_SECTIONS`): a query
+  string that becomes a Prisma enum goes through `enumFilter(raw, Enum, name)`
+  (`src/shared/query-filters.ts`), never `as Prisma.…WhereInput['type']`.
+  Prisma's refusal of an unknown enum value has no error code, so it was a 500
+  logged as a defect (TD-029); `integration/query-filters.real-http.test.ts`
+  lists the routes. A test fixture uses real enum values: the in-memory fakes
+  accept any string, PostgreSQL does not.
 - **A failed refresh keeps data only for availability failures.** `useApi`
   marks `stale` for `SERVICE_UNAVAILABLE`/`NETWORK_ERROR`/`TIMEOUT`; `FORBIDDEN`
   and `UNAUTHENTICATED` clear it, so a permission loss is never shown as "here

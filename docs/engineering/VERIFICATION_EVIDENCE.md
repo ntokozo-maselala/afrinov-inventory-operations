@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-ENG-011</b></td>
 <td align="center"><b><i>Verification evidence</i></b><br><i>Engineering Assurance</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-011 updated=2026-11-26 by="Ntokozo Maselala" body=657f87114a7b -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-011 updated=2026-11-27 by="Ntokozo Maselala" body=fec05f55c3b5 -->
 
 # Verification evidence
 
@@ -85,3 +85,100 @@ detects the defect rather than merely executing the code path.
 
 **DATA-03** — the drift check output before the migration is the two
 `AddForeignKey` statements quoted above; after the migration it is empty.
+
+## Production readiness review, 2026-11-27
+
+Backs [`PRODUCTION_READINESS_ASSESSMENT.md`](PRODUCTION_READINESS_ASSESSMENT.md)
+and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md). Environment: Windows 11, Node
+v24.21.0, npm 11.19.0, PostgreSQL 16 (Docker, `backend-test-db-1`), Docker Compose
+v5.5.1. A separate git worktree at `71395dc`, branch
+`chore/production-readiness-review`, so the developer's own checkout and running
+servers were not touched. Throwaway databases `afrinov_prr_test` (integration) and
+`afrinov_prr_api_test` (the API on `127.0.0.1:4710`), each dropped and rebuilt
+before use.
+
+### Gates, baseline and after
+
+| Check | Command (from `afrinov-platform/`) | Baseline `71395dc` | After the changes |
+|---|---|---|---|
+| Install | `npm ci` | exit 0; 809 packages, 18 s; "found 0 vulnerabilities" | not re-run (no dependency changed) |
+| Install scripts | `npm install-scripts ls` | "No packages with unreviewed install scripts." | — |
+| Typecheck | `npm run typecheck` | exit 0 | exit 0 |
+| Lint | `npm run lint` | exit 0 | exit 0 |
+| Unit tests | `npm test` | exit 0; backend 89 files / 1,429; frontend 145 files / 1,672 | exit 0; backend 93 files / 1,462; frontend 145 files / 1,672 |
+| Build | `npm run build` | exit 0 | exit 0 |
+| Document control | `npm run docs:test`, `docs:check`, `docs:links` | exit 0 each | exit 0 each; "223 documents, every header current"; "0 relative link(s) lead nowhere" |
+| Integration | `npm run test:integration --workspace=@afrinov/backend` | exit 0; 41 files / 400 | exit 0; 42 files / 422, on a database rebuilt for the run |
+| Migrate empty database | `npm run db:test:migrate` | 76 migrations applied | 76 applied |
+| Drift | `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script --exit-code` | — | exit 0, `-- This is an empty migration.` |
+| Production audit | `npm audit --omit=dev --audit-level=high` | — | exit 0, 0 vulnerabilities |
+| Outdated | `npm outdated --workspaces --long` | patches and held-back majors only | — |
+| Compose | `docker compose [-f docker-compose.yml] [-f docker-compose.prod.yml] [--profile test] config` | `db` `0.0.0.0:5432`, `backend` `0.0.0.0:4000` (file alone) | `127.0.0.1` for `db`, `backend` and `test-db`, alone and with the overlay |
+
+The first full unit run after the changes failed one test,
+`reporting.service.test.ts > stockStatus > filters by category`, with
+`ApiError: category must be one of …`: the fixture asked for `ELECTRICAL`, which
+the schema does not have (PRR-06). With the test asking for a real category and
+checking the refusal, the backend suite passed 1,462 / 1,462.
+
+### Continuous integration
+
+| Workflow | Last run on `main` | Commit | Result |
+|---|---|---|---|
+| Backend CI (checks, migration drift, integration) | 45782684666 | `02e4146` | success, all three jobs |
+| Frontend CI (checks, Playwright on a real backend) | 45782684614 | `02e4146` | success, both jobs |
+| Security CI, CodeQL, Docs CI | on `71395dc` | `71395dc` | success |
+
+`git diff --stat 02e4146 71395dc -- afrinov-platform/apps` is empty: the
+backend and frontend runs on `02e4146` cover the baseline's code.
+
+### GitHub settings (read only)
+
+| Read | Result |
+|---|---|
+| `gh api repos/…/branches/main/protection` | 404 "Branch not protected" |
+| `gh api repos/…/rulesets` | one ruleset, "Restrictions", `enforcement: disabled` |
+| `gh api repos/…/code-scanning/alerts?state=open` | 4: `js/polynomial-redos` (`supplier-fields.ts:40`), `js/incomplete-sanitization` ×3 (`workbook-report.ts:9`, `vendor-list.ts:228`, `reconciliation.ts:160`) |
+| `gh api repos/…/dependabot/alerts?state=open` | 0 |
+| `gh api repos/…/secret-scanning/alerts?state=open` | 0 |
+
+### The running API
+
+| Test | Result before the changes | After |
+|---|---|---|
+| Hostile-input probe: every GET, documented and common query parameters, 8 bad values each | 11,343 calls; 88 × 500 on `category` (6 routes) and `type` (5 routes); no 429 | 11,343 calls; **0 × 5xx**; no 429 |
+| Authorisation sweep: 88 writes and every GET per low-privilege account | VIEWER 403 ×80, 400 ×3, 404 ×5; APPROVER the same; TECHNICIAN 403 ×72, 400 ×11, 404 ×5; **no 2xx write**, no 5xx | VIEWER, APPROVER, TECHNICIAN as before; SALES 403 ×73, 400 ×6, 404 ×9; PROCUREMENT 403 ×53, 400 ×18, 404 ×16, 415 ×1; **no 2xx write**, no 5xx |
+| Record-level: a non-manager VIEWER on a real schedule, step and slip | 403 on all five; schedule unchanged | the same |
+| Postman, 426 requests | 1,223 / 1,223; 183 no-token calls all 401 | 1,223 / 1,223; 183 all 401; p50 10 ms, p95 56 ms, p99 290 ms |
+
+A first probe run reached the global limit of 1,000 requests a minute, and most of
+its calls were answered 429; it was discarded, the throwaway API restarted with
+`RATE_LIMIT_GLOBAL=100000`, and the probe changed to refuse to report when any call
+is throttled.
+
+### Test-first evidence for the fixes
+
+**PRR-02 / TD-029.** `integration/query-filters.real-http.test.ts` with the five
+changed service and route files put back as they were at `71395dc`:
+
+```
+ Test Files  1 failed (1)
+      Tests  11 failed | 11 passed (22)
+```
+
+The 11 failures are the 11 "refuses a value the enum does not have" tests; the 11
+passing are "still lists for a real value and for an empty one". With the changes:
+22 / 22.
+
+**PRR-03 / SEC-08.** The old `cleanWebsite` regex against `a` + n × `|` + `a`:
+
+```
+n=5000  old 11.3ms  new 0.11ms
+n=10000 old 46.0ms  new 0.01ms
+n=20000 old 181.7ms new 0.01ms
+n=40000 old 720.5ms new 0.01ms
+```
+
+Doubling the length quadruples the time. `supplier-fields.test.ts` gives
+`cleanWebsite` 200,000 separators and allows 500 ms; on that curve the old regex
+would take about 18 s, so the test fails on the old code.

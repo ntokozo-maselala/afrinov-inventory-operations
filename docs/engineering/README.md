@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-ENG-007</b></td>
 <td align="center"><b><i>Engineering assurance</i></b><br><i>Index</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-007 updated=2026-11-26 by="Ntokozo Maselala" body=96a9e7ddb8c7 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-007 updated=2026-11-27 by="Ntokozo Maselala" body=9dd7b61155a4 -->
 
 # Engineering assurance
 
@@ -27,9 +27,13 @@ gap is stated rather than implied away.
 | [`RISK_REGISTER.md`](RISK_REGISTER.md) | Prioritised risks with evidence, impact, remediation and owner |
 | [`EXCEPTIONS.md`](EXCEPTIONS.md) | Reviewed deviations from a gate |
 | [`IMPLEMENTATION_ROADMAP.md`](IMPLEMENTATION_ROADMAP.md) | Completed work, outstanding work, and the conditions for each next step |
+| [`PRODUCTION_READINESS_ASSESSMENT.md`](PRODUCTION_READINESS_ASSESSMENT.md) | The current release verdict, each dimension with its evidence, and what a release waits on |
+| [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md) | The latest review's findings, the change register, and outstanding work in priority order |
 
 ## Start here
 
+- Deciding whether to release: `PRODUCTION_READINESS_ASSESSMENT.md`, then
+  `REMEDIATION_PLAN.md`.
 - New to the repository: read `BASELINE_ASSESSMENT.md`, then `TESTING_GUIDE.md`.
 - Reviewing a change: check it against `QUALITY_GATES.md`.
 - Investigating a failed gate: the "Investigating a failure" table in
@@ -40,6 +44,8 @@ gap is stated rather than implied away.
 
 The work recorded here is **repository-scoped**. No production environment was
 accessed, and no DAST, penetration test or infrastructure assessment was
-performed. "Pipeline implementation complete" and "verification passing" are
+performed. The 2026-11-27 review did test a running API, started from the
+repository on a throwaway database (hostile input, an authorisation sweep, the
+Postman collection); that is not a test of production. "Pipeline implementation complete" and "verification passing" are
 distinct from "production readiness", which additionally requires the
 operational evidence tracked as OPS-01 in `RISK_REGISTER.md`.

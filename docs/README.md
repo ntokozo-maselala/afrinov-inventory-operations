@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-GEN-004</b></td>
 <td align="center"><b><i>Documentation index</i></b><br><i>Index</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-GEN-004 updated=2026-11-26 by="Ntokozo Maselala" body=2f482cea2f9c -->
+<!-- /afrinov:document-control id=AFRI-OMS-GEN-004 updated=2026-11-27 by="Ntokozo Maselala" body=89db0d85b19a -->
 
 # Documentation index
 
@@ -61,6 +61,9 @@ audits, project entry points, and code-adjacent guides.
   records changes and validation. The
   [current defects report](audits/current-defects-report.md) lists every defect
   the registers record as open, with each entry that names code checked against it.
+  The [production readiness audit](audits/system/production-readiness-audit.md)
+  (2026-11-27) tested the running API as well as the code; its verdict is the
+  [production readiness assessment](engineering/PRODUCTION_READINESS_ASSESSMENT.md).
 - Earlier reports retained for historical context are in
   [`docs/archive/`](archive/README.md). Archived reports describe their
   original point in time and are not current technical references.

@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-ENG-009</b></td>
 <td align="center"><b><i>Security controls</i></b><br><i>Engineering Assurance</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-26 by="Ntokozo Maselala" body=67b74aabf004 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-27 by="Ntokozo Maselala" body=1817af4c7596 -->
 
 # Security controls
 
@@ -161,6 +161,47 @@ CI workflows referenced actions by tag (`@v4`, `@v7`), which an upstream owner
 can move to different code. All action references are now pinned to immutable
 commit SHAs with the tag in a trailing comment, and each workflow declares
 least-privilege `permissions: contents: read`.
+
+## Production readiness review, 2026-11-27
+
+A second pass, at `71395dc`, that tested the running API rather than only reading
+the code. Method and results:
+[`production-readiness-audit.md`](../audits/system/production-readiness-audit.md),
+section "Security"; raw output: `VERIFICATION_EVIDENCE.md`, the section of the same
+name.
+
+### What was confirmed
+
+- **Authentication:** all 183 protected endpoints answer 401 without a token.
+- **Authorisation:** an account for each of VIEWER, APPROVER, TECHNICIAN, SALES and
+  PROCUREMENT sent all 88 write operations; none succeeded. A VIEWER who is not a
+  project's manager was refused (403) on a real schedule, step and slip. A route
+  that answered 400 or 404 to that account did so because it checks ownership on the
+  record, and was shown to refuse once the record exists.
+- **Injection:** no unsafe raw query in the code; `GET /audit`'s filters are bound
+  values (`audit.routes.test.ts`). A SQL fragment in every query parameter of every
+  GET was refused before it reached SQL.
+- **Frontend output:** no HTML-injection sink; error text always through
+  `presentError`.
+
+### What was fixed
+
+- **SEC-08** (four CodeQL alerts): the polynomial regex in `cleanWebsite` replaced
+  with a linear trim; Markdown cells in the import reports escape backslashes
+  before pipes. Not reachable from the API (`website` is capped at 200 characters),
+  but open High alerts on a public repository.
+- **SEC-03, in part:** `docker-compose.yml` now binds the database and API to
+  `127.0.0.1`, as the production overlay already did. On a developer machine the
+  database had been listening on every interface.
+- **TD-029** (a reliability fault more than a security one): unknown enum filters
+  no longer reach Prisma and are no longer logged as unhandled errors, which kept
+  false alarms out of the error log.
+
+### What is still open
+
+SEC-07 (rotate the password in history, owner), **GATE-02** (`main` not protected,
+owner), the rest of SEC-03 (the API's database role), SEC-05, SEC-06, TD-006 and
+TD-014. Their next steps are in `REMEDIATION_PLAN.md`.
 
 ## Secret handling rules for this repository
 
