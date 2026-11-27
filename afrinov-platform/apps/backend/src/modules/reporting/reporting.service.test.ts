@@ -424,7 +424,11 @@ describe('ReportingService', () => {
     it('filters by category', async () => {
       seedMaterials();
       const { ReportingService } = await import('./reporting.service.js');
-      expect((await ReportingService.stockStatus({ category: 'ELECTRICAL' })).map((r) => r.sku)).toEqual(['SKU-002']);
+      // A category the schema has. This asked for 'ELECTRICAL', which the in-memory
+      // fake accepted but PostgreSQL refuses: on a real database the same call was
+      // a 500 (TD-029), and is now a 400.
+      expect((await ReportingService.stockStatus({ category: 'CONSUMABLES' })).map((r) => r.sku)).toEqual(['SKU-003']);
+      await expect(ReportingService.stockStatus({ category: 'ELECTRICAL' })).rejects.toMatchObject({ statusCode: 400, code: 'VALIDATION_ERROR' });
     });
   });
 

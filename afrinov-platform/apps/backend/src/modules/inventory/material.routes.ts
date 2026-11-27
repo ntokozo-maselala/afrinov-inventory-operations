@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { LocationType } from '@prisma/client';
 import { MaterialService } from './material.service.js';
 import { STATUS_REASONS, type MaterialStatusReasonCode } from './material-status.js';
 import { CatalogueService } from './catalogue.service.js';
@@ -10,6 +11,7 @@ import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
+import { enumFilter } from '../../shared/query-filters.js';
 import { listUnits } from '../../shared/units.js';
 
 export const createMaterialSchema = z.object({
@@ -248,7 +250,7 @@ export async function locationRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as Record<string, string | undefined>;
     return LocationService.list({
       q: q['q'],
-      type: q['type'] as 'RACK' | 'STOREROOM' | 'SHOP_FLOOR_AREA' | 'CONTAINER' | 'OFF_SITE' | undefined,
+      type: enumFilter(q['type'], LocationType, 'type'),
       active: q['active'] === 'true' ? true : q['active'] === 'false' ? false : undefined,
       parentId: q['parentId'] || undefined,
     });

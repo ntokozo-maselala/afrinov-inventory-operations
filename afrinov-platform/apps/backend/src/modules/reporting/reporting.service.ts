@@ -1,5 +1,6 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, InventoryTransactionType, MaterialCategory } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { enumFilter } from '../../shared/query-filters.js';
 import { dayRange } from '../../shared/dates.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { classifyItem, getStatusBands, needsAttention, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
@@ -164,6 +165,7 @@ function statusFor(required: Prisma.Decimal, onHand: Prisma.Decimal | undefined,
 // Reporting reads only. No mutations. Computed from the ledger (ADR-002).
 export const ReportingService = {
   async currentStock(filter: { category?: string; locationId?: string; materialId?: string } = {}) {
+    const category = enumFilter(filter.category, MaterialCategory, 'category');
     const where: Prisma.InventoryBalanceWhereInput = {};
     if (filter.locationId) where.locationId = filter.locationId;
     if (filter.materialId) where.materialId = filter.materialId;
@@ -180,7 +182,7 @@ export const ReportingService = {
         ? prisma.material.findMany({
             where: {
               id: { in: materialIds },
-              ...(filter.category ? { category: filter.category as Prisma.MaterialWhereInput['category'] } : {}),
+              ...(category ? { category } : {}),
             },
             include: { project: { select: { name: true, status: true } } },
           })
@@ -234,7 +236,8 @@ export const ReportingService = {
   async movementHistory(filter: { materialId?: string; type?: string; from?: string; to?: string; projectNumber?: string; limit?: number } = {}) {
     const where: Prisma.InventoryTransactionWhereInput = {};
     if (filter.materialId) where.materialId = filter.materialId;
-    if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
+    const type = enumFilter(filter.type, InventoryTransactionType, 'type');
+    if (type) where.type = type;
     // As the movement history: stock used for the project, and its own stock (Qodo, PR #145).
     if (filter.projectNumber) where.OR = [{ projectNumber: filter.projectNumber }, { heldForProject: filter.projectNumber }];
     // A day's `to` is the whole day, as on the other reports.
@@ -291,11 +294,10 @@ export const ReportingService = {
     // Re-ordering is for Stores: Projects material is bought per job, so it is
     // left out unless asked for (materials sections roadmap, Phase 4).
     const section = filter.section ?? 'STORES';
+    const asked = enumFilter(filter.category, MaterialCategory, 'category');
     // A category and a section apply together: Project Material asked for in Stores is nothing.
-    if (filter.category && section !== 'ALL' && sectionOf(filter.category) !== section) return [];
-    const category = filter.category
-      ? filter.category as Prisma.MaterialWhereInput['category']
-      : section === 'ALL' ? undefined : categoryWhere(section);
+    if (asked && section !== 'ALL' && sectionOf(asked) !== section) return [];
+    const category = asked ?? (section === 'ALL' ? undefined : categoryWhere(section));
     const materials = await prisma.material.findMany({
       where: { ...(filter.includeInactive ? {} : { active: true }), ...(category ? { category } : {}) },
       include: { project: { select: { name: true, status: true } } },
