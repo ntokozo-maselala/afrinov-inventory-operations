@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=6128c963e1ea -->
+<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=eb7af99e8212 -->
 
 # Document Register
 
@@ -199,7 +199,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-AUD-018 | [Failure Register](../audits/system/FAILURE_REGISTER.md) | Audit Report | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-AUD-019 | [Recovery Plan](../audits/system/RECOVERY_PLAN.md) | Audit Report | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-AUD-020 | [Verification Report](../audits/system/VERIFICATION_REPORT.md) | Audit Report | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-AUD-021 | [Current Defects Report](../audits/current-defects-report.md) | Audit Report | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-AUD-021 | [Current Defects Report](../audits/current-defects-report.md) | Audit Report | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-AUD-022 | [Production Readiness Audit](../audits/system/production-readiness-audit.md) | Audit Report | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-001 | [Backend documentation](../backend/README.md) | Index | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-002 | [Backend architecture](../backend/architecture/backend-architecture.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |

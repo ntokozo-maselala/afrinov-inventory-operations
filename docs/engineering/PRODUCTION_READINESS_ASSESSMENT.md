@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=dc2720dba742 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=02a6c8fa2d71 -->
 
 # Production readiness assessment
 
@@ -117,8 +117,9 @@ runs well in production.
     `task_context.md`, `AGENTS.md`, the release process, deployment and backend
     README (one sentence each).
 13. **Outstanding defects.** In the registers: see the remediation plan and
-    `docs/audits/current-defects-report.md` (edition 3; its next edition should take
-    in TD-020, TD-021, TD-023, TD-029, SEC-08 and GATE-02).
+    `docs/audits/current-defects-report.md` (edition 4, baseline `a69749d`: 11 open
+    in the code, 12 open outside it; TD-020, TD-021, TD-023, TD-029, SEC-08 and
+    GATE-02 closed).
 14. **Residual risks.** SEC-07, OPS-01 (blocking); SEC-03 rest, SEC-05,
     SEC-06, TD-006, TD-014 (decisions).
 15. **Deferred.** TD-027, TD-004, TD-007, TD-011, TD-012, TD-015, ARCH-02, PRR-05,
