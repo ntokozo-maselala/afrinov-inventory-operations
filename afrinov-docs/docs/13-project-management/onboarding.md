@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-13-006</b></td>
 <td align="center"><b><i>Developer Onboarding</i></b><br><i>Project Management</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-13-006 updated=2026-11-26 by="Ntokozo Maselala" body=b1eea3351d0e -->
+<!-- /afrinov:document-control id=AFRI-OMS-13-006 updated=2026-11-27 by="Ntokozo Maselala" body=d50a1fd941c9 -->
 
 # Developer Onboarding
 
@@ -24,7 +24,7 @@ for one command with `$env:NAME = "value"; <command>`.
 
 | Tool | Version | Why |
 |---|---|---|
-| Node.js | 22 or later (24 recommended) | Vitest 5 and the frontend test tools do not start on Node 20 |
+| Node.js | 24 (the supported runtime: CI and the backend image use it) | Vitest 5 and the frontend test tools do not start on Node 20 |
 | npm | Comes with Node (workspaces needed) | Dependencies are installed once, at the workspace root |
 | Docker with Compose | Any recent | Local PostgreSQL 16, and the backend container |
 | Git | Any | — |

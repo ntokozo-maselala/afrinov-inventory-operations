@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=0d7966dbfa5d -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=85b2350f45e1 -->
 
 # Production readiness assessment
 
@@ -49,7 +49,7 @@ runs well in production.
 
 | Dimension | Assessment | Evidence | Outstanding | Residual risk | Release implication |
 |---|---|---|---|---|---|
-| Functional correctness | **Meets** | 1,462 backend and 1,672 frontend unit tests, 422 integration tests on real PostgreSQL, 1,223 Postman checks over every workflow: all pass. Browser tests passed in CI on `02e4146` | Phase 4 acceptance (parallel run against the workbook) not done | Business rules confirmed only against the workbook rehearsal still to come | None from the code; acceptance is part of go-live |
+| Functional correctness | **Meets** | 1,464 backend and 1,672 frontend unit tests, 423 integration tests on real PostgreSQL, 1,223 Postman checks over every workflow: all pass. Browser tests passed in CI on `02e4146` | Phase 4 acceptance (parallel run against the workbook) not done | Business rules confirmed only against the workbook rehearsal still to come | None from the code; acceptance is part of go-live |
 | Architectural integrity | **Meets, with recorded debt** | One ledger with a database floor (ADR-047); one error envelope; idempotent writes; 47 ADRs | TD-004, TD-007, TD-027 | A new stock path must follow the lock order by hand (TD-027) | None |
 | Code quality | **Meets** | Lint and typecheck clean; no `@ts-ignore`, no `eslint-disable`; 6 `any` outside tests | PRR-05, PRR-06 (P3/P4) | Low | None |
 | Security | **Conditional** | 183 endpoints 401 without a token; 5 low-privilege roles × 88 writes, none succeeded; record-level checks 403; bound SQL; no XSS sink; fail-closed configuration; 0 vulnerabilities; CodeQL alerts fixed | SEC-07 (High), GATE-02; SEC-03 rest, SEC-05, SEC-06, TD-006, TD-014 (Medium or conditional) | A reused leaked password; an API compromise holding owner rights on the database | **Blocks** until SEC-07 is done and GATE-02 finished (Backend and Frontend CI required) |
@@ -95,7 +95,8 @@ runs well in production.
    items already in the registers stay open as recorded: no application code
    changed between `02e4146`, where the defects report checked them against the
    code, and `71395dc` (`git diff` empty), so those checks still hold.
-4. **Security.** Branch protection off (P1), four CodeQL alerts (fixed), the base
+4. **Security.** Branch protection off at the baseline (P1; now on with six
+   required checks, Backend and Frontend CI still to require), four CodeQL alerts (fixed), the base
    Compose file open to the network (fixed); SEC-07 still to be done by the owner.
 5. **Functional and reliability.** Eleven routes answered 500 to a bad filter
    (fixed). Nothing else gave a 5xx in 11,343 hostile calls.
@@ -105,8 +106,8 @@ runs well in production.
    remediation plan.
 8. **Dependencies.** None added, removed or upgraded.
 9. **Database.** No migration; `schema.prisma` comments only; drift check empty.
-10. **Tests run.** Backend unit 1,462 / 1,462; frontend unit 1,672 / 1,672;
-    integration 422 / 422 on a fresh database; Postman 1,223 / 1,223; probe 0 × 5xx in
+10. **Tests run.** Backend unit 1,464 / 1,464; frontend unit 1,672 / 1,672;
+    integration 423 / 423 on a fresh database; Postman 1,223 / 1,223; probe 0 × 5xx in
     11,343 calls; authorisation sweep: no write by any of 5 roles. Browser tests not
     run on this machine.
 11. **Build.** Backend and frontend production builds pass; `npm ci` clean;

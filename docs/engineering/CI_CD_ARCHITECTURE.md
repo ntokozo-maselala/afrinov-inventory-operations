@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=3167daa174e0 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=1694a98c1c66 -->
 
 # CI/CD architecture
 
@@ -33,8 +33,10 @@ The workstream maps onto the staged pipeline model as follows.
   run first.
 - **Stage B — pull request assurance.** Before merge: the Stage A checks plus
   integration tests against a real PostgreSQL service, the browser tests
-  (`frontend-ci.yml` `e2e`), migration apply and drift detection, the production dependency audit, the secret scan, and CodeQL. All
-  are required checks (see "Branch protection" below).
+  (`frontend-ci.yml` `e2e`), migration apply and drift detection, the production dependency audit, the secret scan, and CodeQL. Six
+  of them are required checks today (Security CI, Docs CI, CodeQL); the Backend
+  CI and Frontend CI checks run but are not yet required (see "Branch
+  protection" below).
 - **Stage C — main-branch verification.** The same workflows re-run on `push`
   to `main`, so the merged commit is verified, not just the PR head.
 - **Stages D–F — staging, production, post-deployment.** **Not implemented.**
@@ -77,7 +79,8 @@ them. This is a repository setting, not something a commit can guarantee.
 | Applies to administrators | Yes |
 | Force pushes, deletion | Blocked |
 
-These six run on every pull request. **Not yet required:** Backend CI
+These six run on every pull request that targets `main` (CodeQL runs only on
+those; the rest on every pull request). **Not yet required:** Backend CI
 (`Typecheck, lint, unit tests, build`, `Migration drift and database integrity`,
 `Integration tests (real Postgres)`) and Frontend CI (`Typecheck, lint, unit
 tests, build`, `Browser tests (Playwright, real backend)`). Two things stop them:

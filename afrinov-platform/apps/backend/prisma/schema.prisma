@@ -1,12 +1,17 @@
 // Afrinov Platform — Prisma schema
 // Source of truth for the data model; the migrations in prisma/migrations/
-// build it, and CI fails when they differ (migration-drift). It began from the
-// docs in afrinov-docs/docs/03-domain/ and 02-business-analysis/, which now
-// follow it, not the other way round (TD-020).
+// build it, and CI fails when the two differ in anything Prisma can describe
+// (migration-drift). CHECK constraints are outside what Prisma compares; the
+// stock floor's is looked for by check:issued-stock and the daily stock check
+// (src/modules/inventory/issued-stock-check.ts). The schema began from the docs
+// in afrinov-docs/docs/03-domain/ and 02-business-analysis/, which now follow
+// it, not the other way round (TD-020).
 // ADR-002: inventory_transactions is the ledger; inventory_balances is derived
-// from it. There is no trigger: each path that moves stock locks the balances,
-// writes the ledger line and calls recomputeBalance (shared/inventory/balances.ts,
-// ADR-047), in the same transaction.
+// from it. There is no trigger: each application path that moves stock locks the
+// balances, writes the ledger line and calls recomputeBalance
+// (shared/inventory/balances.ts, ADR-047) in the same transaction. The demo seed
+// is the exception: it writes its ledger lines, then recomputes in a step of its
+// own (src/db/seed.ts).
 
 generator client {
   provider = "prisma-client-js"

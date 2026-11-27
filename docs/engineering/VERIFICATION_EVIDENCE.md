@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-011 updated=2026-11-27 by="Ntokozo Maselala" body=fec05f55c3b5 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-011 updated=2026-11-27 by="Ntokozo Maselala" body=fae993989eff -->
 
 # Verification evidence
 
@@ -105,10 +105,10 @@ before use.
 | Install scripts | `npm install-scripts ls` | "No packages with unreviewed install scripts." | — |
 | Typecheck | `npm run typecheck` | exit 0 | exit 0 |
 | Lint | `npm run lint` | exit 0 | exit 0 |
-| Unit tests | `npm test` | exit 0; backend 89 files / 1,429; frontend 145 files / 1,672 | exit 0; backend 93 files / 1,462; frontend 145 files / 1,672 |
+| Unit tests | `npm test` | exit 0; backend 89 files / 1,429; frontend 145 files / 1,672 | exit 0; backend 93 files / 1,464; frontend 145 files / 1,672 |
 | Build | `npm run build` | exit 0 | exit 0 |
 | Document control | `npm run docs:test`, `docs:check`, `docs:links` | exit 0 each | exit 0 each; "223 documents, every header current"; "0 relative link(s) lead nowhere" |
-| Integration | `npm run test:integration --workspace=@afrinov/backend` | exit 0; 41 files / 400 | exit 0; 42 files / 422, on a database rebuilt for the run |
+| Integration | `npm run test:integration --workspace=@afrinov/backend` | exit 0; 41 files / 400 | exit 0; 42 files / 423, on a database rebuilt for the run |
 | Migrate empty database | `npm run db:test:migrate` | 76 migrations applied | 76 applied |
 | Drift | `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script --exit-code` | — | exit 0, `-- This is an empty migration.` |
 | Production audit | `npm audit --omit=dev --audit-level=high` | — | exit 0, 0 vulnerabilities |
@@ -119,7 +119,7 @@ The first full unit run after the changes failed one test,
 `reporting.service.test.ts > stockStatus > filters by category`, with
 `ApiError: category must be one of …`: the fixture asked for `ELECTRICAL`, which
 the schema does not have (PRR-06). With the test asking for a real category and
-checking the refusal, the backend suite passed 1,462 / 1,462.
+checking the refusal, the backend suite passed 1,462 / 1,462; after the cubic fixes on PR #220 (the `?report=` case below), 1,464 / 1,464, and integration 423 / 423.
 
 ### Continuous integration
 
@@ -149,6 +149,7 @@ backend and frontend runs on `02e4146` cover the baseline's code.
 | Hostile-input probe: every GET, documented and common query parameters, 8 bad values each | 11,343 calls; 88 × 500 on `category` (6 routes) and `type` (5 routes); no 429 | 11,343 calls; **0 × 5xx**; no 429 |
 | Authorisation sweep: 88 writes and every GET per low-privilege account | VIEWER 403 ×80, 400 ×3, 404 ×5; APPROVER the same; TECHNICIAN 403 ×72, 400 ×11, 404 ×5; **no 2xx write**, no 5xx | VIEWER, APPROVER, TECHNICIAN as before; SALES 403 ×73, 400 ×6, 404 ×9; PROCUREMENT 403 ×53, 400 ×18, 404 ×16, 415 ×1; **no 2xx write**, no 5xx |
 | Record-level: a non-manager VIEWER on a real schedule, step and slip | 403 on all five; schedule unchanged | the same |
+| Valid bodies on real records (after cubic, PR #220): a non-manager VIEWER creates a schedule on an Admin's project, starts next month, re-plans | — | 403, 403, 403; the project's schedules read back identical. With the five above, all 8 VIEWER routes that did not answer 403 in the sweep refuse a valid request. The probe rerun on the same code: 11,343 calls, 0 × 5xx |
 | Postman, 426 requests | 1,223 / 1,223; 183 no-token calls all 401 | 1,223 / 1,223; 183 all 401; p50 10 ms, p95 56 ms, p99 290 ms |
 
 A first probe run reached the global limit of 1,000 requests a minute, and most of
@@ -168,7 +169,9 @@ changed service and route files put back as they were at `71395dc`:
 
 The 11 failures are the 11 "refuses a value the enum does not have" tests; the 11
 passing are "still lists for a real value and for an empty one". With the changes:
-22 / 22.
+22 / 22. After the cubic fix on PR #220 the file has a 23rd case, a Movements report
+with an unknown `?type=`, which passes on the old code too (it ignored the type) and
+on the new: 23 / 23.
 
 **PRR-03 / SEC-08.** The old `cleanWebsite` regex against `a` + n × `|` + `a`:
 

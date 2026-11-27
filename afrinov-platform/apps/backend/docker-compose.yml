@@ -78,8 +78,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # This machine only: the API speaks plain HTTP, so passwords and tokens
-    # cross the network only through the HTTPS reverse proxy in front of it.
+    # This machine only: the API speaks plain HTTP. In production the HTTPS
+    # reverse proxy on this machine is what faces the network
+    # (afrinov-docs/docs/12-operations/reverse-proxy.md).
     ports:
       - "127.0.0.1:4000:4000"
     # Seed is idempotent, and loads no demo data here: SEED_DEMO_DATA is not

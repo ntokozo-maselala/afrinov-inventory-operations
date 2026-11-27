@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-GEN-008 updated=2026-11-27 by="Ntokozo Maselala" body=51a11cd778c0 -->
+<!-- /afrinov:document-control id=AFRI-OMS-GEN-008 updated=2026-11-27 by="Ntokozo Maselala" body=a77fc3db8853 -->
 
 # Task Context
 
@@ -25,9 +25,11 @@ A platform to replace Afrinov's stock workbook
 tooling/PPE/electrical, fasteners and project material through IN/OUT logs.
 The workbook itself is git-ignored and never committed.
 
-`workbook-replacement-roadmap.md` holds the plan. Phases 0 to 3 (controls,
-daily store workflows, data migration, reporting) and Phase 5 (tools) are
-built; Phase 4 (pilot and go-live: production environment, accounts,
+`workbook-replacement-roadmap.md` holds the plan. Every checklist item of
+Phases 0 to 3 (controls, daily store workflows, data migration, reporting)
+and Phase 5 (tools) is ticked there; the roadmap's opening gap table, which
+marks receiving, Issued To and the import "Missing", describes the start, not
+now. Phase 4 (pilot and go-live: production environment, accounts,
 training, parallel run, cutover) is open. What stands between the code and a
 production release is in
 `docs/engineering/PRODUCTION_READINESS_ASSESSMENT.md`.
@@ -124,13 +126,16 @@ database; CI runs them on every backend pull request.
 
 The four follow-ups listed here before (the balance foreign keys, Node 20,
 the GitHub Actions versions, `npm audit` findings) are all resolved
-(TD-005, TD-018; `npm audit` reports none). What is open now is kept in one
-place, not here:
+(TD-005, TD-018; `npm audit` reports none). What is open now is kept in the
+registers, not here:
 
-- `docs/audits/current-defects-report.md` — every open defect, checked
-  against the code.
-- `docs/engineering/RISK_REGISTER.md` — engineering risks, the release gate
-  among them.
+- `afrinov-docs/docs/13-project-management/technical-debt.md` (TD-) and
+  `docs/engineering/RISK_REGISTER.md` (SEC-, OPS-, GATE-, …) — the current
+  list, the release gate among them.
+- `docs/audits/current-defects-report.md` — a dated extract of those
+  registers, each entry checked against the code at its baseline. Edition 3
+  is at `02e4146`, before the readiness review: it still lists this file
+  (TD-021) and others since closed.
 - `docs/engineering/PRODUCTION_READINESS_ASSESSMENT.md` — the latest
   readiness verdict and what it waits on.
 

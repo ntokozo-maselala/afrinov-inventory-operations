@@ -7,11 +7,11 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-13-008 updated=2026-11-27 by="Ntokozo Maselala" body=84e6a7ab6c8d -->
+<!-- /afrinov:document-control id=AFRI-OMS-13-008 updated=2026-11-27 by="Ntokozo Maselala" body=d0d21a7c7b6b -->
 
 # Release Process
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** `71395dc`, 2026-11-27 (no deploy jobs, staging or tags; earlier 4e6d76f, 2026-10-09)
 
 **Planned — no release process is implemented in the repository** (no
 deploy jobs, no staging environment, no release tags). Since 2026-11-27 there

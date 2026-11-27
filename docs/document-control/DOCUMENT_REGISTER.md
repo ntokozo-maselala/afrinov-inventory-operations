@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=519b7f5425ca -->
+<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=e382745d8575 -->
 
 # Document Register
 
@@ -135,7 +135,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-13-003 | [Definition of Done](../../afrinov-docs/docs/13-project-management/definition-of-done.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-004 | [Definition of Ready](../../afrinov-docs/docs/13-project-management/definition-of-ready.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-005 | [Development Workflow](../../afrinov-docs/docs/13-project-management/development-workflow.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-13-006 | [Developer Onboarding](../../afrinov-docs/docs/13-project-management/onboarding.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-13-006 | [Developer Onboarding](../../afrinov-docs/docs/13-project-management/onboarding.md) | Project Management | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-007 | [Pull Request Guidelines](../../afrinov-docs/docs/13-project-management/pull-request-guidelines.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-008 | [Release Process](../../afrinov-docs/docs/13-project-management/release-process.md) | Project Management | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-009 | [Afrinov Inventory Platform: Stores and Projects Materials Roadmap](../../afrinov-docs/docs/13-project-management/roadmaps/materials-sections-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
@@ -216,7 +216,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-BE-013 | [Authentication and security model](../backend/security/authentication-and-security-model.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-014 | [Authentication incident investigation](../backend/security/authentication-incident-report.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-015 | [Verification and test strategy](../backend/testing/verification-and-test-strategy.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-DEV-001 | [Afrinov Platform — Implementation](../../afrinov-platform/README.md) | Developer Guide | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-DEV-001 | [Afrinov Platform — Implementation](../../afrinov-platform/README.md) | Developer Guide | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-DEV-002 | [@afrinov/backend](../../afrinov-platform/apps/backend/README.md) | Developer Guide | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-DEV-003 | [Frontend-only development mode](../../afrinov-platform/apps/frontend/FRONTEND_ONLY.md) | Developer Guide | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-DOC-002 | [Document Control](README.md) | Index | 26/11/2026 | Ntokozo Maselala |

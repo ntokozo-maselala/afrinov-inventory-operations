@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-27 by="Ntokozo Maselala" body=5ab856ecdaa1 -->
+<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-27 by="Ntokozo Maselala" body=547bc2105fb0 -->
 
 # @afrinov/backend
 
@@ -15,15 +15,15 @@ REST API for the Afrinov Inventory & Operations Platform: inventory ledger,
 procurement, projects, reporting, settings and audit, behind JWT
 authentication and role-based permissions.
 
-Stack: Node.js, Fastify 5, TypeScript, Prisma 5, PostgreSQL 16, Zod, Vitest.
-The Docker image and backend/frontend CI use Node 24. Local development and
-Vitest checks require Node 22.12 or later (see below).
+Stack: Node.js 24, Fastify 5, TypeScript, Prisma 7, PostgreSQL 16, Zod 4,
+Vitest 5. The Docker image and backend/frontend CI use Node 24, the supported
+runtime; Vitest needs at least Node 22.12 (see below).
 
 *Reviewed against the current working tree: 2026-10-23.*
 
 ## Running it locally
 
-Requirements: Node.js 22.12 or later (24 recommended), npm, and Docker (for PostgreSQL).
+Requirements: Node.js 24 (22.12 at the least, for Vitest), npm, and Docker (for PostgreSQL).
 
 Commands below use Git Bash / macOS / Linux syntax. In PowerShell, set a
 variable for one command with `$env:NAME = "value"; <command>`.

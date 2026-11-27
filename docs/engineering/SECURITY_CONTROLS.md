@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-27 by="Ntokozo Maselala" body=f6917829fb56 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-27 by="Ntokozo Maselala" body=2939c9a739c4 -->
 
 # Security controls
 
@@ -174,13 +174,18 @@ name.
 
 - **Authentication:** all 183 protected endpoints answer 401 without a token.
 - **Authorisation:** an account for each of VIEWER, APPROVER, TECHNICIAN, SALES and
-  PROCUREMENT sent all 88 write operations; none succeeded. A VIEWER who is not a
-  project's manager was refused (403) on a real schedule, step and slip. A route
-  that answered 400 or 404 to that account did so because it checks ownership on the
-  record, and was shown to refuse once the record exists.
+  PROCUREMENT sent all 88 write operations with an empty body and a made-up id;
+  none succeeded. That proves refusal only where the answer was 403 (80 of 88 for
+  a VIEWER): a 400 or 404 means the route validated or looked up first. All 8 such
+  routes for a VIEWER (project schedules and steps, slip confirmation) were then
+  sent **valid bodies on real records** by a VIEWER who is not the project's
+  manager: all 403, nothing changed. For TECHNICIAN, SALES and PROCUREMENT the
+  routes that answered 400 or 404 were not re-sent with valid bodies, so for those
+  routes and roles the sweep shows only that an empty request changes nothing.
 - **Injection:** no unsafe raw query in the code; `GET /audit`'s filters are bound
-  values (`audit.routes.test.ts`). A SQL fragment in every query parameter of every
-  GET was refused before it reached SQL.
+  values (`audit.routes.test.ts`). A SQL fragment sent in every query parameter of
+  every GET gave no server error: free-text filters (`q`) bind it as data, and
+  enum filters refuse it with a 400 before Prisma.
 - **Frontend output:** no HTML-injection sink; error text always through
   `presentError`.
 
@@ -200,8 +205,11 @@ name.
 ### What is still open
 
 SEC-07 (rotate the password in history, owner), **GATE-02** (`main` is protected
-since 2026-11-27, but Backend and Frontend CI are not yet required), the rest of SEC-03 (the API's database role), SEC-05, SEC-06, TD-006 and
-TD-014. Their next steps are in `REMEDIATION_PLAN.md`.
+since 2026-11-27, but Backend and Frontend CI are not yet required), **OPS-01**
+(no production-host evidence: install, restore test, alerting; a release
+blocker, operational rather than a security control), the rest of SEC-03 (the
+API's database role), SEC-05, SEC-06, TD-006 and TD-014. Their next steps are in
+`REMEDIATION_PLAN.md`.
 
 ## Secret handling rules for this repository
 

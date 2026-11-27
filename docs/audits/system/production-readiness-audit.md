@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-AUD-022 updated=2026-11-27 by="Ntokozo Maselala" body=a06f970021d9 -->
+<!-- /afrinov:document-control id=AFRI-OMS-AUD-022 updated=2026-11-27 by="Ntokozo Maselala" body=07b7d661a7a1 -->
 
 # Production Readiness Audit
 
@@ -22,8 +22,8 @@ the running API with hostile input, an authorisation sweep and the 426-request
 Postman collection against a throwaway database.
 
 The code is in good order. Every gate passes, all 426 Postman requests pass, no
-low-privilege account could complete a single write, and `npm audit` reports
-nothing. The review found **one defect not in any register**: eleven list routes
+write by a low-privilege account succeeded (a VIEWER's were all refused, valid
+requests on real records included), and `npm audit` reports nothing. The review found **one defect not in any register**: eleven list routes
 answered 500 to an unknown `?category=` or `?type=` value (PRR-02, now TD-029). It
 also found **two process gaps**: `main` is not protected (PRR-01), and four High-rated
 CodeQL alerts were open (PRR-03, now SEC-08). The defect and the alerts are fixed on
@@ -31,7 +31,8 @@ this branch with regression tests.
 
 What stands between this code and a production release is not code. It is the
 operational evidence (OPS-01), the rotation of a credential in public history
-(SEC-07), and branch protection (PRR-01). The verdict and its conditions are in
+(SEC-07), and branch protection (PRR-01; since switched on, with Backend and
+Frontend CI still to be required: GATE-02). The verdict and its conditions are in
 [`PRODUCTION_READINESS_ASSESSMENT.md`](../../engineering/PRODUCTION_READINESS_ASSESSMENT.md);
 the plan for each finding is in
 [`REMEDIATION_PLAN.md`](../../engineering/REMEDIATION_PLAN.md).
@@ -59,8 +60,8 @@ the plan for each finding is in
 | Test | What it does | Before the fixes | After |
 |---|---|---|---|
 | Hostile-input probe | Every GET in the OpenAPI document (187 operations), each documented query parameter and 14 common filter names (`type`, `category`, `status`, `from`, `to`, `limit`, ids, cursors), each set to 8 bad values: `abc`, `-1`, `1e400`, a non-UUID, an impossible date, a SQL fragment, `%00`, 5,000 characters | 11,343 calls, **88 answered 5xx** (11 routes, 3 parameters) | 11,343 calls, **0 answered 5xx** |
-| Authorisation sweep | An Admin makes one account per low-privilege role; each sends every write operation (88, not counting `/auth/*`) with an empty body and a made-up id, then reads every GET | VIEWER, APPROVER, TECHNICIAN: **no write succeeded**, no 5xx | VIEWER, APPROVER, TECHNICIAN, SALES, PROCUREMENT: **no write succeeded**, no 5xx |
-| Record-level checks | A VIEWER who is not the project's manager tries to rename a real schedule, add and change a real step, delete it, and confirm someone else's real slip | All five **403**; the schedule unchanged | Same |
+| Authorisation sweep | An Admin makes one account per low-privilege role; each sends every write operation (88, not counting `/auth/*`) with an empty body and a made-up id, then reads every GET | VIEWER, APPROVER, TECHNICIAN: **no write succeeded**, no 5xx | VIEWER, APPROVER, TECHNICIAN, SALES, PROCUREMENT: **no write succeeded**, no 5xx. Only a 403 proves refusal: a VIEWER got 403 on 80 of 88; the other 8 validated or looked up first, and are the next row |
+| Record-level checks, valid requests | A VIEWER who is not the project's manager sends **valid bodies to real records** on the 8 routes that did not answer 403: rename a schedule, add, change and delete a step, confirm someone else's slip, create a schedule, start next month, re-plan | The first five **403**; the schedule unchanged | All eight **403**; the schedules unchanged. TECHNICIAN, SALES and PROCUREMENT routes that answered 400 or 404 were not re-sent with valid bodies |
 | Postman collection | 426 requests, 1,223 checks, every workflow end to end (`system-knowledge/22-api-postman`) | **1,223 / 1,223** | **1,223 / 1,223** |
 
 The probe and the sweeps send only to `127.0.0.1:47nn` and refuse any other address.
@@ -72,8 +73,10 @@ a minute, so it now refuses to report when any call was answered 429.
 ### Architecture
 
 A modular monolith: one Fastify API (`apps/backend`, 27,808 lines of TypeScript
-outside tests, one module per area under `src/modules/`) and one React SPA (`apps/frontend`, 38,793 lines). Every
-route is under `/api/v1` and registered in one place (`src/server.ts:345-387`).
+outside tests, one module per area under `src/modules/`) and one React SPA (`apps/frontend`, 38,793 lines). The
+application routes are under `/api/v1` and registered in one place
+(`src/server.ts:345-387`); `/`, `/health`, `/health/ready` and the optional
+`/api/docs` are registered outside that prefix.
 Errors leave through one envelope (`toErrorEnvelope`), stock moves through the
 ledger with a database floor (ADR-047), and inventory writes are retry-safe through
 an idempotency key. Each of these was confirmed in the code.
@@ -156,7 +159,7 @@ severity: a false alarm for whoever watches the logs.
 | Control | Evidence | Result |
 |---|---|---|
 | Authentication | 183 protected endpoints called with no token | All 401 |
-| Authorisation | The sweep above: five low-privilege roles, 88 writes each | No write succeeded; record-level checks 403 on real records |
+| Authorisation | The sweep above: five low-privilege roles, 88 writes each; then valid requests on real records for every VIEWER route that did not answer 403 | No write succeeded; all eight valid VIEWER requests 403. Not re-sent with valid bodies: the other roles' 400/404 routes |
 | Injection | Raw SQL uses `Prisma.sql` with bound values; no `$queryRawUnsafe` or `$executeRawUnsafe` anywhere | New test pins `/audit`'s filters as bound values |
 | Output encoding (frontend) | No `dangerouslySetInnerHTML`, `innerHTML`, `eval` or `document.write`; no `target="_blank"` without `rel`; `ErrorBoundary` renders `presentError`, not a raw message | Clean |
 | Secrets | `.env*` git-ignored; `.env.example` lists exactly the 17 variables the code reads, with placeholders | Consistent |
@@ -180,14 +183,14 @@ owner, not a new finding.
 
 | Layer | Baseline `71395dc` | This branch |
 |---|---|---|
-| Backend unit | 1,429 / 1,429 (89 files) | 1,462 / 1,462 (93 files) |
+| Backend unit | 1,429 / 1,429 (89 files) | 1,464 / 1,464 (93 files) |
 | Frontend unit | 1,672 / 1,672 (145 files) | 1,672 / 1,672 |
-| Backend integration, real PostgreSQL | 400 / 400 (41 files) | 422 / 422 (42 files) |
+| Backend integration, real PostgreSQL | 400 / 400 (41 files) | 423 / 423 (42 files) |
 | Browser (Playwright) | Not run here; passed in CI on `02e4146` (run 45782684614) | Not run here |
 | Postman, real API | 1,223 / 1,223 | 1,223 / 1,223 |
 
 Each new regression test was run against the old code and failed there:
-`query-filters.real-http.test.ts` fails 11 of 22 on the old code (all 11 refusals),
+`query-filters.real-http.test.ts` fails 11 of 23 on the old code (all 11 refusals),
 and the linear-time check in `supplier-fields.test.ts` would take about 18 s on the
 old regex against a 500 ms limit. `audit.routes.test.ts` closes TD-023.
 

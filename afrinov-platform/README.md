@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-DEV-001</b></td>
 <td align="center"><b><i>Afrinov Platform — Implementation</i></b><br><i>Developer Guide</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DEV-001 updated=2026-11-26 by="Ntokozo Maselala" body=86afcd366bcb -->
+<!-- /afrinov:document-control id=AFRI-OMS-DEV-001 updated=2026-11-27 by="Ntokozo Maselala" body=f9998581f5bd -->
 
 # Afrinov Platform — Implementation
 
@@ -22,14 +22,14 @@ the disagreement is logged in
 
 | Concern | Implementation |
 |---|---|
-| Architecture | Modular monolith, one backend deployable; modules `identity`, `inventory`, `procurement`, `operations`, `reporting`, `settings`, `audit`, `health`, `migration` (boundaries are folder convention, not enforced) |
-| Backend | Node.js, Fastify 5, TypeScript strict, Zod validation |
-| Database | PostgreSQL 16 via Prisma 5 |
-| Frontend | React 18 + Vite + TypeScript + Tailwind CSS |
+| Architecture | Modular monolith, one backend deployable; modules `identity`, `inventory`, `procurement`, `sales`, `operations`, `reporting`, `settings`, `audit`, `backups`, `health`, `migration` (boundaries are folder convention, not enforced) |
+| Backend | Node.js 24, Fastify 5, TypeScript strict, Zod 4 validation |
+| Database | PostgreSQL 16 via Prisma 7 |
+| Frontend | React 19 + Vite 8 + TypeScript + Tailwind CSS 4 |
 | Auth | JWT (HS256, 12 hours), bcrypt-hashed passwords; accounts created by an administrator |
 | Authorization | Role-based, checked on the server by each route |
 | Ledger | ADR-002: `inventory_transactions` is append-only through the API; `inventory_balances` is recomputed from it after every movement; mistakes are reversed (ADR-005) |
-| Tests | Vitest unit tests (both apps), backend integration tests against PostgreSQL, one Playwright E2E test |
+| Tests | Vitest unit tests (both apps), backend integration tests against PostgreSQL, Playwright browser tests on a real backend (sign-in, sign-out, error handling) |
 | Container | Dockerfile for the backend; docker-compose with PostgreSQL |
 
 ## What's intentionally NOT in this platform yet
@@ -47,7 +47,7 @@ Purchase orders and goods receipts are on by default. Set
 
 ## Quick start (local dev)
 
-Prerequisites: Node 22 or later (24 recommended; the test tools need 22+),
+Prerequisites: Node 24 (what CI and the backend image run; the test tools need 22+),
 Docker, npm 10+. The full, current steps are in
 [`apps/backend/README.md`](apps/backend/README.md) ("Running it locally").
 In short:
