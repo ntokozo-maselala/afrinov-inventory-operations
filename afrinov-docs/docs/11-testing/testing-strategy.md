@@ -7,11 +7,11 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-11-009 updated=2026-11-27 by="Ntokozo Maselala" body=c71c0d636550 -->
+<!-- /afrinov:document-control id=AFRI-OMS-11-009 updated=2026-11-27 by="Ntokozo Maselala" body=4a38a999cf2d -->
 
 # Testing Strategy
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09; the CI paragraph and its Evidence at `e2bdab7` (PR #221), 2026-11-27
 
 Test business invariants, not just CRUD. The most important invariant in
 this system: **a material's balance always equals the sum of its posted

@@ -7,11 +7,11 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-11-004 updated=2026-11-27 by="Ntokozo Maselala" body=cb16f0dc00bb -->
+<!-- /afrinov:document-control id=AFRI-OMS-11-004 updated=2026-11-27 by="Ntokozo Maselala" body=07ae231e902b -->
 
 # End-to-End Testing
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 6a122ff, 2026-11-24
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 6a122ff, 2026-11-24; the CI job name and when it runs at `e2bdab7` (PR #221), 2026-11-27
 
 Target: automate the critical journeys from `01-product/user-journeys.md`
 (technician issues material against a project; store controller receives
