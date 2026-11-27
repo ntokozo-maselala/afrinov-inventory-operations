@@ -1,12 +1,12 @@
 name: Backend CI
 
 on:
+  # Every pull request, so its checks always report and can be required on
+  # main (GATE-02). Whether there is anything to test is decided by the
+  # `changes` job below, not by a workflow-level `paths:` filter: a filtered
+  # workflow reports nothing, and a required check that never reports blocks
+  # the pull request.
   pull_request:
-    paths:
-      - 'afrinov-platform/apps/backend/**'
-      - 'afrinov-platform/package.json'
-      - 'afrinov-platform/package-lock.json'
-      - '.github/workflows/backend-ci.yml'
   push:
     branches: [main]
     paths:
@@ -27,8 +27,47 @@ defaults:
     working-directory: afrinov-platform/apps/backend
 
 jobs:
+  # Did this pull request touch the backend? The jobs below run only if so;
+  # a job skipped by its `if:` reports success, so a required check passes on
+  # a pull request with nothing to test. It fails open: if the diff can't be
+  # worked out, `run` is true and everything runs. A push to main has already
+  # been filtered by `paths:` above, so it always runs.
+  changes:
+    name: 'Backend: what changed'
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - id: diff
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if ! changed=$(git diff --name-only "$BASE...$HEAD"); then
+            echo "::warning::Could not list the changed files; running every backend job."
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(afrinov-platform/apps/backend/|afrinov-platform/package(-lock)?\.json$|\.github/workflows/backend-ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nothing the backend jobs test changed; they are skipped."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   checks:
-    name: Typecheck, lint, unit tests, build
+    name: 'Backend: typecheck, lint, unit tests, build'
+    needs: changes
+    # Runs unless the diff said "false": a failed or cancelled `changes` job
+    # still runs this one.
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -55,7 +94,9 @@ jobs:
       - run: npm run build
 
   migration-drift:
-    name: Migration drift and database integrity
+    name: 'Backend: migration drift and database integrity'
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -107,7 +148,9 @@ jobs:
             --script --exit-code
 
   integration:
-    name: Integration tests (real Postgres)
+    name: 'Backend: integration tests (real Postgres)'
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: ubuntu-latest
     services:
       postgres:
