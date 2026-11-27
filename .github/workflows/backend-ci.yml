@@ -50,12 +50,16 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if ! changed=$(git diff --name-only "$BASE...$HEAD"); then
+          # --no-renames lists both sides of a rename, so a file moved out of
+          # the backend still counts as a backend change.
+          if ! changed=$(git diff --no-renames --name-only "$BASE...$HEAD"); then
             echo "::warning::Could not list the changed files; running every backend job."
             echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(afrinov-platform/apps/backend/|afrinov-platform/package(-lock)?\.json$|\.github/workflows/backend-ci\.yml$)'; then
+          # From a here-string, not a pipe: with pipefail, grep -q stopping at
+          # the first match could fail the writer and read as no match.
+          if grep -qE '^(afrinov-platform/apps/backend/|afrinov-platform/package(-lock)?\.json$|\.github/workflows/backend-ci\.yml$)' <<< "$changed"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "Nothing the backend jobs test changed; they are skipped."
@@ -65,8 +69,8 @@ jobs:
   checks:
     name: 'Backend: typecheck, lint, unit tests, build'
     needs: changes
-    # Runs unless the diff said "false": a failed or cancelled `changes` job
-    # still runs this one.
+    # Runs unless the diff said "false": a failed `changes` job still runs this
+    # one. A cancelled workflow runs nothing.
     if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: ubuntu-latest
     steps:
