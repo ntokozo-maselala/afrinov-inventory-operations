@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-DEV-002</b></td>
 <td align="center"><b><i>@afrinov/backend</i></b><br><i>Developer Guide</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-26 by="Ntokozo Maselala" body=0aa2383870dd -->
+<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-27 by="Ntokozo Maselala" body=5ab856ecdaa1 -->
 
 # @afrinov/backend
 
@@ -91,8 +91,10 @@ the existing account may have been created with an empty bootstrap password.
 ## Running it with Docker
 
 `docker-compose.yml` runs PostgreSQL and the API together. On start the API
-container applies migrations, runs the seed, then starts the server. From
-`apps/backend`:
+container applies migrations, runs the seed, then starts the server. Both
+answer on this machine only (`127.0.0.1:5432` and `127.0.0.1:4000`); to reach
+them from another machine, use an SSH tunnel rather than opening the ports.
+From `apps/backend`:
 
 ```sh
 POSTGRES_PASSWORD=<db password> \

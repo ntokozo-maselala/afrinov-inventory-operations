@@ -8,8 +8,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-afrinov}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${POSTGRES_TEST_PASSWORD:?set POSTGRES_PASSWORD or POSTGRES_TEST_PASSWORD in the environment}}
       POSTGRES_DB: ${POSTGRES_DB:-afrinov}
+    # This machine only, as the test database below and the production overlay
+    # are (SEC-03). The API reaches the database over the Compose network, not
+    # this port; a stack started without docker-compose.prod.yml is then still
+    # closed to the network. To reach it from another machine, use an SSH tunnel.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - afrinov_pg:/var/lib/postgresql/data
     healthcheck:
@@ -74,8 +78,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # This machine only: the API speaks plain HTTP, so passwords and tokens
+    # cross the network only through the HTTPS reverse proxy in front of it.
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     # Seed is idempotent, and loads no demo data here: SEED_DEMO_DATA is not
     # set, and the seed refuses it in production. Run the compiled seed (node dist/db/seed.js) rather
     # than `npm run db:seed`, which needs tsx — a dev dependency that is
