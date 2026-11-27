@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=4bd29f0695d9 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=f5380c6795a3 -->
 
 # CI/CD architecture
 
@@ -18,8 +18,8 @@ existing platform (GitHub Actions) is reused; no new CI system was introduced.
 
 | Workflow | File | Trigger | Jobs |
 |---|---|---|---|
-| Backend CI | `.github/workflows/backend-ci.yml` | PR and push to `main`, on backend/root paths | `checks` (typecheck, lint, unit tests, build), `migration-drift`, `integration` (real PostgreSQL) |
-| Frontend CI | `.github/workflows/frontend-ci.yml` | PR and push to `main`, on frontend, backend and root paths | `checks` (typecheck, lint, unit tests, build), `e2e` (Playwright in Chromium against the real backend and a throwaway PostgreSQL; system audit H5) |
+| Backend CI | `.github/workflows/backend-ci.yml` | Every PR (the jobs skip, as a pass, when no backend, workspace-manifest or workflow file changed); push to `main` on those paths | `changes`, then `checks` (typecheck, lint, unit tests, build), `migration-drift`, `integration` (real PostgreSQL) |
+| Frontend CI | `.github/workflows/frontend-ci.yml` | Every PR (the jobs skip, as a pass, when no frontend, backend, workspace-manifest or workflow file changed); push to `main` on those paths | `changes`, then `checks` (typecheck, lint, unit tests, build), `e2e` (Playwright in Chromium against the real backend and a throwaway PostgreSQL; system audit H5) |
 | Security CI | `.github/workflows/security-ci.yml` | Every PR and push to `main`; weekly schedule | `dependency-audit`, `secret-scan` |
 | CodeQL | `.github/workflows/codeql.yml` | PR and push to `main`; weekly schedule | `analyze` (`javascript-typescript`, `actions`) |
 | Docs CI | `.github/workflows/docs-ci.yml` | Every PR and push to `main` | `document-control` (the tool's tests, every document's Afrinov header current, relative links listed) |

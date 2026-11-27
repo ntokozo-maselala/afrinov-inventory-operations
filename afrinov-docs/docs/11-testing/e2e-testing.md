@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-11-004 updated=2026-11-27 by="Ntokozo Maselala" body=aec2e9f9f4b7 -->
+<!-- /afrinov:document-control id=AFRI-OMS-11-004 updated=2026-11-27 by="Ntokozo Maselala" body=cb16f0dc00bb -->
 
 # End-to-End Testing
 
@@ -20,8 +20,9 @@ back), against a staging-like environment with seeded reference data.
 
 Implemented: Playwright (`apps/frontend/playwright.config.ts`, Chromium),
 run in CI as "Frontend: browser tests (Playwright, real backend)" in
-`frontend-ci.yml`, on every pull request that changes the frontend or the
-backend (skipped, as a success, otherwise). Three specs: signing in and being refused
+`frontend-ci.yml`, on every pull request that changes the frontend, the
+backend, the workspace manifests (`package.json`, `package-lock.json`) or
+`frontend-ci.yml` itself (skipped, as a success, otherwise). Three specs: signing in and being refused
 (`login.spec.ts`), signing out (`sign-out.spec.ts`), and how failures look
 over the live stack (`error-handling.spec.ts`). The seeded admin's password
 comes from `SEED_ADMIN_PASSWORD`; the database must be a local `*_test` one.

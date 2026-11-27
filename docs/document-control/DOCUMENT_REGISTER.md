@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=d84744b114fd -->
+<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=6128c963e1ea -->
 
 # Document Register
 
@@ -117,7 +117,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-11-006 | [Performance Testing](../../afrinov-docs/docs/11-testing/performance-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-11-007 | [Test Pyramid](../../afrinov-docs/docs/11-testing/test-pyramid.md) | Testing | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-11-008 | [Test Traceability](../../afrinov-docs/docs/11-testing/test-traceability.md) | Testing | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-11-009 | [Testing Strategy](../../afrinov-docs/docs/11-testing/testing-strategy.md) | Testing | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-11-009 | [Testing Strategy](../../afrinov-docs/docs/11-testing/testing-strategy.md) | Testing | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-11-010 | [Unit Testing](../../afrinov-docs/docs/11-testing/unit-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-001 | [Alerting](../../afrinov-docs/docs/12-operations/alerting.md) | Operations | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-002 | [Backup & Recovery](../../afrinov-docs/docs/12-operations/backup-and-recovery.md) | Operations | 26/11/2026 | Ntokozo Maselala |
