@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-GEN-008 updated=2026-11-27 by="Ntokozo Maselala" body=a77fc3db8853 -->
+<!-- /afrinov:document-control id=AFRI-OMS-GEN-008 updated=2026-11-27 by="Ntokozo Maselala" body=3f9faf8b1ac6 -->
 
 # Task Context
 
@@ -133,7 +133,8 @@ registers, not here:
   `docs/engineering/RISK_REGISTER.md` (SEC-, OPS-, GATE-, …) — the current
   list, the release gate among them.
 - `docs/audits/current-defects-report.md` — a dated extract of those
-  registers, each entry checked against the code at its baseline. Edition 3
+  registers; each entry that names code was checked against it at the report's
+  baseline (entries waiting on a decision or a deployment can't be). Edition 3
   is at `02e4146`, before the readiness review: it still lists this file
   (TD-021) and others since closed.
 - `docs/engineering/PRODUCTION_READINESS_ASSESSMENT.md` — the latest

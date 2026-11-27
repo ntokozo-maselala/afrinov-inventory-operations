@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-27 by="Ntokozo Maselala" body=547bc2105fb0 -->
+<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-27 by="Ntokozo Maselala" body=c78bd62d109b -->
 
 # @afrinov/backend
 
@@ -17,13 +17,14 @@ authentication and role-based permissions.
 
 Stack: Node.js 24, Fastify 5, TypeScript, Prisma 7, PostgreSQL 16, Zod 4,
 Vitest 5. The Docker image and backend/frontend CI use Node 24, the supported
-runtime; Vitest needs at least Node 22.12 (see below).
+runtime. Vitest 5 runs on Node 22.12 or later 22.x, 24.x, or 26 and later; not
+on 23 or 25 (its `engines` range).
 
 *Reviewed against the current working tree: 2026-10-23.*
 
 ## Running it locally
 
-Requirements: Node.js 24 (22.12 at the least, for Vitest), npm, and Docker (for PostgreSQL).
+Requirements: Node.js 24 (Vitest also runs on 22.12+ and 26+, not 23 or 25), npm, and Docker (for PostgreSQL).
 
 Commands below use Git Bash / macOS / Linux syntax. In PowerShell, set a
 variable for one command with `$env:NAME = "value"; <command>`.

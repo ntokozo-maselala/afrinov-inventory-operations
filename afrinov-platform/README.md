@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DEV-001 updated=2026-11-27 by="Ntokozo Maselala" body=f9998581f5bd -->
+<!-- /afrinov:document-control id=AFRI-OMS-DEV-001 updated=2026-11-27 by="Ntokozo Maselala" body=7c50fc3a90e3 -->
 
 # Afrinov Platform — Implementation
 
@@ -16,7 +16,7 @@ The runnable implementation of the system described in
 the disagreement is logged in
 `../afrinov-docs/docs/13-project-management/technical-debt.md`.
 
-*Last verified against code: 4e6d76f, 2026-10-09.*
+*Last verified against code: 4e6d76f, 2026-10-09; the stack, module, test and prerequisite lines at `71395dc`, 2026-11-27.*
 
 ## What's in this platform
 
@@ -47,7 +47,7 @@ Purchase orders and goods receipts are on by default. Set
 
 ## Quick start (local dev)
 
-Prerequisites: Node 24 (what CI and the backend image run; the test tools need 22+),
+Prerequisites: Node 24 (what CI and the backend image run; Vitest 5 also runs on 22.12+ and 26+, not 23 or 25),
 Docker, npm 10+. The full, current steps are in
 [`apps/backend/README.md`](apps/backend/README.md) ("Running it locally").
 In short:
@@ -98,8 +98,8 @@ afrinov-platform/
 ```
 apps/backend/src/
 ├── index.ts, server.ts      # entry point and server bootstrap
-├── modules/                 # identity, inventory, procurement, operations, reporting,
-│                            # settings, audit, health, migration
+├── modules/                 # identity, inventory, procurement, sales, operations,
+│                            # reporting, settings, audit, backups, health, migration
 ├── shared/                  # config, db, errors, events, permissions, authorization, inventory helpers
 ├── openapi/                 # OpenAPI document for /api/docs
 └── db/                      # migrate, seed

@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-GEN-010 updated=2026-11-27 by="Ntokozo Maselala" body=3bd522b3953f -->
+<!-- /afrinov:document-control id=AFRI-OMS-GEN-010 updated=2026-11-27 by="Ntokozo Maselala" body=acdb46e3fbae -->
 
 # Changelog
 
@@ -26,7 +26,9 @@ merged pull requests on GitHub and in `git log`. How a release is made is in
 
 - A list or report asked for with a `?category=` or `?type=` value it doesn't know
   now answers **400** ("category must be one of …", "type must be one of …")
-  instead of **500**. Affects
+  instead of **500**. One exception, as before: a Movements report
+  (`/inventory-transactions?report=…`) sets the type itself and ignores
+  `?type=`, unknown values included. Affects
   `/materials`, `/locations`, `/inventory-transactions` (and its summary and
   export), and the current-stock, movement-history, stock-status, consumption
   (and export) and re-order list export reports. Real values and an empty value
