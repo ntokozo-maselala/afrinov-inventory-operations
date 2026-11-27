@@ -12,6 +12,7 @@ import { CATEGORY_SHEETS } from './workbook-reader.js';
 import { CATEGORY_LABEL } from './workbook-analysis.js';
 import type { MappedImport } from './mapping.js';
 import { OPENING_BALANCE_REFERENCE } from './opening-balance.service.js';
+import { mdCell as cell } from './markdown.js';
 
 /** What the platform holds for one item. Quantities by location name. */
 export interface PlatformItem {
@@ -157,7 +158,6 @@ const DIFFERENCE_TITLE: Record<DifferenceKind, string> = {
 };
 
 const rand = (n: number) => `R ${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const cell = (s: string) => s.replace(/\|/g, '\\|');
 
 export function renderReconciliation(r: Reconciliation, meta: { file: string; database: string; generatedAt: Date }): string {
   const out: string[] = [];

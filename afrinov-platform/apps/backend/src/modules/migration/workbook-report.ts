@@ -4,9 +4,9 @@
 import { unitHint, type MappedImport } from './mapping.js';
 import type { MasterDataPlan } from './master-data.js';
 import { CATEGORY_LABEL, PROBLEM_TEXT, type Analysis, type Problem, type ProblemCode } from './workbook-analysis.js';
+import { mdCell as cell } from './markdown.js';
 
 const rand = (n: number) => `R ${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const cell = (s: string | null | undefined) => (s ?? '').replace(/\|/g, '\\|');
 
 export function problemCounts(problems: Problem[]): Array<{ code: ProblemCode; count: number }> {
   const counts = new Map<ProblemCode, number>();
