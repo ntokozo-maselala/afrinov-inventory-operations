@@ -5,7 +5,7 @@
 // (Project on the Order Roadmap, Phase 3), so nothing asks for, filters by or
 // warns about one.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockGet, mockPost, mockPatch } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn() }));
@@ -280,6 +280,17 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
       mockGet.mockImplementation(async (path: string) => (path === HELD_PATH ? answer() : base(path)));
     };
     const row = async (sku: string) => (await screen.findByText(sku)).closest('tr')!;
+    // Whether Issue is offered depends on /projects, which is asked for only once
+    // the held stock has loaded, so the quantities render a request before Issue
+    // can. Checking for Issue after the quantities alone raced that request: a
+    // missing link failed on a slow CI runner (PR #221), and an absent one passed
+    // before the answer could have shown it. Wait until /projects has answered
+    // and its answer has rendered.
+    const projectsAnswered = async () => {
+      await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/projects'));
+      const call = mockGet.mock.calls.findIndex(([path]) => path === '/projects');
+      await act(async () => { await mockGet.mock.results[call]!.value; });
+    };
 
     it('says how much is waiting for each project, across locations, and links to issue it', async () => {
       withHeld(() => [
@@ -291,7 +302,7 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
       const pipe = await row('1369-PIPE');
       expect(await within(pipe).findByText(/each for 1369/)).toHaveTextContent('12 each for 1369');
       expect(within(pipe).getByText(/each for 1402/)).toHaveTextContent('2 each for 1402');
-      expect(within(pipe).getByRole('link', { name: 'Issue 1369-PIPE to 1369' })).toHaveAttribute('href', '/stock/issue?materialId=m-1369-PIPE&project=1369');
+      expect(await within(pipe).findByRole('link', { name: 'Issue 1369-PIPE to 1369' })).toHaveAttribute('href', '/stock/issue?materialId=m-1369-PIPE&project=1369');
       expect(screen.getByRole('columnheader', { name: 'Waiting to issue' })).toBeInTheDocument();
       expect(within(await row('OLD-PLATE')).queryByText(/for /)).not.toBeInTheDocument();
       expect(within(await row('1402-BOLT')).queryByText(/each for/)).not.toBeInTheDocument();
@@ -302,7 +313,7 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
       list('/materials?section=PROJECTS');
       const pipe = await row('1369-PIPE');
       expect(await within(pipe).findByText(/each for 1200/)).toBeInTheDocument();
-      await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/projects'));
+      await projectsAnswered();
       expect(within(pipe).queryByRole('link', { name: /^Issue/ })).not.toBeInTheDocument();
     });
 
@@ -311,7 +322,7 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
       list('/materials?section=PROJECTS');
       const pipe = await row('1369-PIPE');
       expect(await within(pipe).findByText(/each for 1369/)).toBeInTheDocument();
-      await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/projects'));
+      await projectsAnswered();
       expect(within(pipe).queryByRole('link', { name: /^Issue/ })).not.toBeInTheDocument();
     });
 
