@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=ae5fa159f016 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=84df098f8c92 -->
 
 # CI/CD architecture
 
@@ -103,9 +103,12 @@ their paths. The six from Security CI, Docs CI and CodeQL were required first
 them report on every pull request under unique names. The `… what changed` jobs
 are not required: if one fails, the jobs after it run anyway.
 
-A pull request still on the workflows from before PR #221 reports the old
-names (`Typecheck, lint, unit tests, build` and so on) and waits for the new
-ones until `main` is merged into it.
+A `pull_request` run uses the workflow files of the pull request's merge
+result, which already has `main`'s, so an older branch reports the new names
+too. Only a branch that changes the workflow files itself can bring the old
+definitions back, and then reports the old names (`Typecheck, lint, unit
+tests, build` and so on) until `main` is merged into it. Either way a branch
+behind `main` merges `main` before it can merge, as branches must be up to date.
 
 The command that set the list, to repeat or change it (send the whole list:
 it replaces what is there):

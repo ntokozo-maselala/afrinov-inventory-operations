@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-006 updated=2026-11-27 by="Ntokozo Maselala" body=a4a9434f3c17 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-006 updated=2026-11-27 by="Ntokozo Maselala" body=e0595215f516 -->
 
 # Quality gates
 
@@ -25,7 +25,7 @@ reproduced locally with the same commands.
 | Unit tests | `npm test` | All pass | As typecheck | Block (required on `main`) |
 | Build | `npm run build` | Exit 0 | As typecheck | Block (required on `main`) |
 | Integration tests | `npm run test:integration` | All pass | Every PR; runs when backend paths, the workspace manifests or `backend-ci.yml` changed | Block (required on `main`) |
-| Migration drift | `prisma migrate diff … --exit-code` | Empty diff (exit 0) | As integration tests | Block (required on `main`) |
+| Migration drift | `prisma migrate diff … --exit-code` | Empty diff (exit 0) for every schema difference Prisma can describe; CHECK constraints are outside it, and the stock floor's `CHECK (quantity >= 0)` is checked by `check:issued-stock` and the daily stock check | As integration tests | Block (required on `main`) |
 | Migration apply | `prisma migrate deploy` on a clean DB | Exit 0 | As integration tests | Block (required on `main`) |
 | Browser tests | `npx playwright test` on a real backend | All pass | Every PR; runs when frontend or backend paths, the workspace manifests or `frontend-ci.yml` changed | Block (required on `main`) |
 | Dependency audit (prod) | `npm audit --omit=dev --audit-level=high` | No high/critical | Every PR / push / weekly | Block |
