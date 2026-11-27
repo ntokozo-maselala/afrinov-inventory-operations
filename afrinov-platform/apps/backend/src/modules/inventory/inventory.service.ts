@@ -10,6 +10,7 @@ import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
+import { enumFilter } from '../../shared/query-filters.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } from '../../shared/decimal.js';
@@ -425,7 +426,10 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
   const where: Prisma.InventoryTransactionWhereInput = {};
   const and: Prisma.InventoryTransactionWhereInput[] = [];
   if (filter.materialId) where.materialId = filter.materialId;
-  if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
+  // A report sets the type itself and ignores ?type=, as it always has, so a
+  // type it ignores is not checked either (cubic, PR #220).
+  const type = filter.report ? undefined : enumFilter(filter.type, InventoryTransactionType, 'type');
+  if (type) where.type = type;
   if (filter.report === 'issued') where.type = InventoryTransactionType.ISSUE;
   if (filter.report === 'transfers') where.type = InventoryTransactionType.TRANSFER_OUT;
   if (filter.report === 'loans') where.type = { in: [InventoryTransactionType.LOAN, InventoryTransactionType.LOAN_RETURN] };

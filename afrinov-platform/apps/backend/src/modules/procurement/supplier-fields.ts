@@ -33,11 +33,23 @@ export function cleanPaymentTerms(s: string | null | undefined): string | null {
   return t;
 }
 
-/** Drops stray separators the vendor list carries ("www.hydac.co.za | "). */
+/** A separator the vendor list leaves around a website: | , ; or a space. */
+const isEdgeSeparator = (c: string) => c === '|' || c === ',' || c === ';' || /\s/.test(c);
+
+/**
+ * Drops stray separators the vendor list carries ("www.hydac.co.za | ").
+ * Trimmed by walking in from each end, not by a regex: `[|,;\s]+$` is
+ * retried from every position of a long run of separators, so its time grows
+ * with the square of the length (CodeQL js/polynomial-redos).
+ */
 export function cleanWebsite(s: string | null | undefined): string | null {
   const t = cleanText(s);
   if (t === null) return null;
-  const stripped = t.replace(/^[|,;\s]+|[|,;\s]+$/g, '');
+  let start = 0;
+  let end = t.length;
+  while (start < end && isEdgeSeparator(t[start]!)) start++;
+  while (end > start && isEdgeSeparator(t[end - 1]!)) end--;
+  const stripped = t.slice(start, end);
   return stripped === '' ? null : stripped;
 }
 

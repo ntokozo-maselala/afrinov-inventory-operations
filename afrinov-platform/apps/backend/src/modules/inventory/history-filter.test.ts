@@ -33,6 +33,16 @@ describe('historyWhere', () => {
       .toEqual({ gte: new Date('2026-10-12T00:00:00.000+02:00'), lt: new Date('2026-10-13T00:00:00.000+02:00') });
   });
 
+  it('refuses a type the ledger does not have with a 400 (TD-029)', () => {
+    expect(() => historyWhere({ type: 'abc' })).toThrow(expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }));
+    expect(historyWhere({ type: 'ISSUE' }).type).toBe('ISSUE');
+  });
+
+  it('ignores ?type= under a report, which sets the type itself, unknown values included', () => {
+    expect(historyWhere({ report: 'issued', type: 'abc' }).type).toBe('ISSUE');
+    expect(historyWhere({ report: 'writeoffs', type: 'RECEIPT' }).type).toBe('ADJUSTMENT');
+  });
+
   it('keeps an exact time as an inclusive end, for callers that pass one', () => {
     expect(historyWhere({ to: '2026-10-12T10:30:00.000Z' }).postedAt).toEqual({ lte: new Date('2026-10-12T10:30:00.000Z') });
   });

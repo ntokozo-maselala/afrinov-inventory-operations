@@ -13,6 +13,7 @@ import { textOf } from './workbook-reader.js';
 import {
   EMAIL_PATTERN, cleanCurrency, cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite,
 } from '../procurement/supplier-fields.js';
+import { mdCell as cell } from './markdown.js';
 
 export interface VendorRow {
   row: number;
@@ -225,7 +226,6 @@ export function planVendorImport(list: VendorList, existing: ExistingSupplier[])
   return plan;
 }
 
-const cell = (s: string | null | undefined) => (s ?? '').replace(/\|/g, '\\|');
 
 export function renderVendorReport(plan: VendorPlan, meta: { file: string; sheet: string | null; generatedAt: Date }): string {
   const out: string[] = [];

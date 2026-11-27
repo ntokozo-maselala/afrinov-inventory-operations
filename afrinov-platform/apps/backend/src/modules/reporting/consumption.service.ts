@@ -11,8 +11,9 @@
 // Items that track use after issue (discs, blades, bits) also say what became
 // of what was issued: used up, broken, or still out with the person. That is
 // worked out as of now, for the issues in the period, whenever they came back.
-import { Prisma } from '@prisma/client';
+import { Prisma, MaterialCategory } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { enumFilter } from '../../shared/query-filters.js';
 import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { closedOffAgainst } from '../inventory/consumable-outcomes.js';
@@ -121,7 +122,8 @@ export const ConsumptionService = {
     };
     if (q.projectNumber === NO_PROJECT) where.projectNumber = null;
     else if (q.projectNumber) where.projectNumber = q.projectNumber;
-    if (q.category) where.material = { category: q.category as Prisma.MaterialWhereInput['category'] };
+    const category = enumFilter(q.category, MaterialCategory, 'category');
+    if (category) where.material = { category };
     if (q.recipientId === NO_RECIPIENT) where.recipientId = null;
     else if (q.recipientId) where.recipientId = q.recipientId;
 

@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-12-004</b></td>
 <td align="center"><b><i>Deployment</i></b><br><i>Operations</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-12-004 updated=2026-11-26 by="Ntokozo Maselala" body=fd9422e7378e -->
+<!-- /afrinov:document-control id=AFRI-OMS-12-004 updated=2026-11-27 by="Ntokozo Maselala" body=b3efd2b98e16 -->
 
 # Deployment
 
@@ -40,7 +40,9 @@ day for Parts 1 to 8, and the go-live weekend for Part 10.
 Everything except nginx runs in Docker, from `apps/backend/docker-compose.yml`
 with the production overrides in `apps/backend/docker-compose.prod.yml`. The
 database and the API answer only on the server itself; only nginx (ports 80
-and 443) faces the network.
+and 443) faces the network. Both files bind them to `127.0.0.1`, so a
+`docker compose` run that missed the overlay is still closed to the network;
+the overlay adds the restart policy.
 
 ---
 

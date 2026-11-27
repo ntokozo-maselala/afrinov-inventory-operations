@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-DEV-002</b></td>
 <td align="center"><b><i>@afrinov/backend</i></b><br><i>Developer Guide</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-26 by="Ntokozo Maselala" body=0aa2383870dd -->
+<!-- /afrinov:document-control id=AFRI-OMS-DEV-002 updated=2026-11-27 by="Ntokozo Maselala" body=c78bd62d109b -->
 
 # @afrinov/backend
 
@@ -15,15 +15,16 @@ REST API for the Afrinov Inventory & Operations Platform: inventory ledger,
 procurement, projects, reporting, settings and audit, behind JWT
 authentication and role-based permissions.
 
-Stack: Node.js, Fastify 5, TypeScript, Prisma 5, PostgreSQL 16, Zod, Vitest.
-The Docker image and backend/frontend CI use Node 24. Local development and
-Vitest checks require Node 22.12 or later (see below).
+Stack: Node.js 24, Fastify 5, TypeScript, Prisma 7, PostgreSQL 16, Zod 4,
+Vitest 5. The Docker image and backend/frontend CI use Node 24, the supported
+runtime. Vitest 5 runs on Node 22.12 or later 22.x, 24.x, or 26 and later; not
+on 23 or 25 (its `engines` range).
 
 *Reviewed against the current working tree: 2026-10-23.*
 
 ## Running it locally
 
-Requirements: Node.js 22.12 or later (24 recommended), npm, and Docker (for PostgreSQL).
+Requirements: Node.js 24 (Vitest also runs on 22.12+ and 26+, not 23 or 25), npm, and Docker (for PostgreSQL).
 
 Commands below use Git Bash / macOS / Linux syntax. In PowerShell, set a
 variable for one command with `$env:NAME = "value"; <command>`.
@@ -91,8 +92,10 @@ the existing account may have been created with an empty bootstrap password.
 ## Running it with Docker
 
 `docker-compose.yml` runs PostgreSQL and the API together. On start the API
-container applies migrations, runs the seed, then starts the server. From
-`apps/backend`:
+container applies migrations, runs the seed, then starts the server. Both
+answer on this machine only (`127.0.0.1:5432` and `127.0.0.1:4000`); to reach
+them from another machine, use an SSH tunnel rather than opening the ports.
+From `apps/backend`:
 
 ```sh
 POSTGRES_PASSWORD=<db password> \

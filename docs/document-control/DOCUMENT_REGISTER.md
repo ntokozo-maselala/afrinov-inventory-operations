@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-DOC-001</b></td>
 <td align="center"><b><i>Document Register</i></b><br><i>Document Register</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-26 by="Ntokozo Maselala" body=fda4131b84b8 -->
+<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=e382745d8575 -->
 
 # Document Register
 
@@ -19,7 +19,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 > Afrinov document control allocates numbers from the company register (the scheme behind
 > numbers such as AFRI-01D-10-01-088). Changing them is one edit to `register.json`.
 
-218 documents.
+222 documents.
 
 | ID | Title | Type | Last updated | By |
 |---|---|---|---|---|
@@ -122,7 +122,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-12-001 | [Alerting](../../afrinov-docs/docs/12-operations/alerting.md) | Operations | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-002 | [Backup & Recovery](../../afrinov-docs/docs/12-operations/backup-and-recovery.md) | Operations | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-003 | [CI/CD](../../afrinov-docs/docs/12-operations/ci-cd.md) | Operations | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-12-004 | [Deployment](../../afrinov-docs/docs/12-operations/deployment.md) | Operations | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-12-004 | [Deployment](../../afrinov-docs/docs/12-operations/deployment.md) | Operations | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-005 | [Disaster Recovery](../../afrinov-docs/docs/12-operations/disaster-recovery.md) | Operations | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-006 | [Environments](../../afrinov-docs/docs/12-operations/environments.md) | Operations | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-007 | [Error Handling and User Feedback](../../afrinov-docs/docs/12-operations/error-handling.md) | Operations | 26/11/2026 | Ntokozo Maselala |
@@ -135,9 +135,9 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-13-003 | [Definition of Done](../../afrinov-docs/docs/13-project-management/definition-of-done.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-004 | [Definition of Ready](../../afrinov-docs/docs/13-project-management/definition-of-ready.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-005 | [Development Workflow](../../afrinov-docs/docs/13-project-management/development-workflow.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-13-006 | [Developer Onboarding](../../afrinov-docs/docs/13-project-management/onboarding.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-13-006 | [Developer Onboarding](../../afrinov-docs/docs/13-project-management/onboarding.md) | Project Management | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-007 | [Pull Request Guidelines](../../afrinov-docs/docs/13-project-management/pull-request-guidelines.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-13-008 | [Release Process](../../afrinov-docs/docs/13-project-management/release-process.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-13-008 | [Release Process](../../afrinov-docs/docs/13-project-management/release-process.md) | Project Management | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-009 | [Afrinov Inventory Platform: Stores and Projects Materials Roadmap](../../afrinov-docs/docs/13-project-management/roadmaps/materials-sections-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-010 | [Afrinov Inventory Platform: Procurement Alignment Roadmap](../../afrinov-docs/docs/13-project-management/roadmaps/procurement-alignment-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-011 | [Afrinov Inventory Platform: Procurement Workflow Roadmap](../../afrinov-docs/docs/13-project-management/roadmaps/procurement-workflow-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
@@ -147,7 +147,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-13-015 | [Afrinov Inventory Platform: Request for Quotation (RFQ) Roadmap](../../afrinov-docs/docs/13-project-management/roadmaps/rfq-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-016 | [Afrinov Inventory Platform: Stores Ordering Roadmap](../../afrinov-docs/docs/13-project-management/roadmaps/stores-ordering-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-13-017 | [Afrinov Inventory Platform: Stores and Procurement Separation Roadmap](../../afrinov-docs/docs/13-project-management/roadmaps/stores-procurement-separation-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-13-018 | [Technical Debt Register](../../afrinov-docs/docs/13-project-management/technical-debt.md) | Project Management | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-13-018 | [Technical Debt Register](../../afrinov-docs/docs/13-project-management/technical-debt.md) | Project Management | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-14-001 | [Acceptance Criteria (Go-Live)](../../afrinov-docs/docs/14-validation/acceptance-criteria.md) | Validation | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-14-002 | [Production Readiness — Summary](../../afrinov-docs/docs/14-validation/production-readiness.md) | Validation | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-14-003 | [Prototype Validation](../../afrinov-docs/docs/14-validation/prototype-validation.md) | Validation | 26/11/2026 | Ntokozo Maselala |
@@ -200,6 +200,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-AUD-019 | [Recovery Plan](../audits/system/RECOVERY_PLAN.md) | Audit Report | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-AUD-020 | [Verification Report](../audits/system/VERIFICATION_REPORT.md) | Audit Report | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-AUD-021 | [Current Defects Report](../audits/current-defects-report.md) | Audit Report | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-AUD-022 | [Production Readiness Audit](../audits/system/production-readiness-audit.md) | Audit Report | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-001 | [Backend documentation](../backend/README.md) | Index | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-002 | [Backend architecture](../backend/architecture/backend-architecture.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-003 | [Backend codebase navigation](../backend/architecture/codebase-navigation.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |
@@ -215,32 +216,35 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-BE-013 | [Authentication and security model](../backend/security/authentication-and-security-model.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-014 | [Authentication incident investigation](../backend/security/authentication-incident-report.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-BE-015 | [Verification and test strategy](../backend/testing/verification-and-test-strategy.md) | Backend Reference | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-DEV-001 | [Afrinov Platform — Implementation](../../afrinov-platform/README.md) | Developer Guide | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-DEV-002 | [@afrinov/backend](../../afrinov-platform/apps/backend/README.md) | Developer Guide | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-DEV-001 | [Afrinov Platform — Implementation](../../afrinov-platform/README.md) | Developer Guide | 27/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-DEV-002 | [@afrinov/backend](../../afrinov-platform/apps/backend/README.md) | Developer Guide | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-DEV-003 | [Frontend-only development mode](../../afrinov-platform/apps/frontend/FRONTEND_ONLY.md) | Developer Guide | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-DOC-002 | [Document Control](README.md) | Index | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-DOC-003 | [Afrinov Documentation Style Guide](STYLE_GUIDE.md) | Style Guide | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-DOC-004 | [Documentation Standardisation Report](STANDARDISATION_REPORT.md) | Document Control | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-001 | [Engineering baseline assessment](../engineering/BASELINE_ASSESSMENT.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-002 | [CI/CD architecture](../engineering/CI_CD_ARCHITECTURE.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-002 | [CI/CD architecture](../engineering/CI_CD_ARCHITECTURE.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-003 | [Database assurance](../engineering/DATABASE_ASSURANCE.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-004 | [Exceptions register](../engineering/EXCEPTIONS.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-005 | [Implementation roadmap](../engineering/IMPLEMENTATION_ROADMAP.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-005 | [Implementation roadmap](../engineering/IMPLEMENTATION_ROADMAP.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-006 | [Quality gates](../engineering/QUALITY_GATES.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-007 | [Engineering assurance](../engineering/README.md) | Index | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-008 | [Risk register](../engineering/RISK_REGISTER.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-009 | [Security controls](../engineering/SECURITY_CONTROLS.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-007 | [Engineering assurance](../engineering/README.md) | Index | 27/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-008 | [Risk register](../engineering/RISK_REGISTER.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-009 | [Security controls](../engineering/SECURITY_CONTROLS.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-010 | [Testing guide](../engineering/TESTING_GUIDE.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-011 | [Verification evidence](../engineering/VERIFICATION_EVIDENCE.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-011 | [Verification evidence](../engineering/VERIFICATION_EVIDENCE.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-012 | [Production readiness assessment](../engineering/PRODUCTION_READINESS_ASSESSMENT.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-013 | [Remediation plan](../engineering/REMEDIATION_PLAN.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-GEN-001 | [Afrinov Inventory & Operations Platform](../../README.md) | Repository Overview | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-GEN-002 | [Afrinov Inventory & Operations Platform — Documentation](../../afrinov-docs/docs/README.md) | Index | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-GEN-003 | [Architecture & Product Decision Log](../../decision-log.md) | Decision Records | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-GEN-004 | [Documentation index](../README.md) | Index | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-GEN-004 | [Documentation index](../README.md) | Index | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-GEN-005 | [Gap Analysis: AS-IS vs TO-BE](../../gap-analysis.md) | General | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-GEN-006 | [Afrinov Inventory Platform: Racks and Locations Roadmap](../../racks-locations-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-GEN-007 | [SAP → Afrinov Mapping: What to Adopt](../../sap-lessons-for-afrinov.md) | General | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-GEN-008 | [Task Context](../../task_context.md) | General | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-GEN-008 | [Task Context](../../task_context.md) | General | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-GEN-009 | [Afrinov Inventory Platform: Workbook Replacement Roadmap](../../workbook-replacement-roadmap.md) | Roadmap | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-GEN-010 | [Changelog](../../CHANGELOG.md) | General | 27/11/2026 | Ntokozo Maselala |
 
 ## Retired IDs
 

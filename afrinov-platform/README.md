@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-DEV-001</b></td>
 <td align="center"><b><i>Afrinov Platform — Implementation</i></b><br><i>Developer Guide</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DEV-001 updated=2026-11-26 by="Ntokozo Maselala" body=86afcd366bcb -->
+<!-- /afrinov:document-control id=AFRI-OMS-DEV-001 updated=2026-11-27 by="Ntokozo Maselala" body=7c50fc3a90e3 -->
 
 # Afrinov Platform — Implementation
 
@@ -16,20 +16,20 @@ The runnable implementation of the system described in
 the disagreement is logged in
 `../afrinov-docs/docs/13-project-management/technical-debt.md`.
 
-*Last verified against code: 4e6d76f, 2026-10-09.*
+*Last verified against code: 4e6d76f, 2026-10-09; the stack, module, test and prerequisite lines at `71395dc`, 2026-11-27.*
 
 ## What's in this platform
 
 | Concern | Implementation |
 |---|---|
-| Architecture | Modular monolith, one backend deployable; modules `identity`, `inventory`, `procurement`, `operations`, `reporting`, `settings`, `audit`, `health`, `migration` (boundaries are folder convention, not enforced) |
-| Backend | Node.js, Fastify 5, TypeScript strict, Zod validation |
-| Database | PostgreSQL 16 via Prisma 5 |
-| Frontend | React 18 + Vite + TypeScript + Tailwind CSS |
+| Architecture | Modular monolith, one backend deployable; modules `identity`, `inventory`, `procurement`, `sales`, `operations`, `reporting`, `settings`, `audit`, `backups`, `health`, `migration` (boundaries are folder convention, not enforced) |
+| Backend | Node.js 24, Fastify 5, TypeScript strict, Zod 4 validation |
+| Database | PostgreSQL 16 via Prisma 7 |
+| Frontend | React 19 + Vite 8 + TypeScript + Tailwind CSS 4 |
 | Auth | JWT (HS256, 12 hours), bcrypt-hashed passwords; accounts created by an administrator |
 | Authorization | Role-based, checked on the server by each route |
 | Ledger | ADR-002: `inventory_transactions` is append-only through the API; `inventory_balances` is recomputed from it after every movement; mistakes are reversed (ADR-005) |
-| Tests | Vitest unit tests (both apps), backend integration tests against PostgreSQL, one Playwright E2E test |
+| Tests | Vitest unit tests (both apps), backend integration tests against PostgreSQL, Playwright browser tests on a real backend (sign-in, sign-out, error handling) |
 | Container | Dockerfile for the backend; docker-compose with PostgreSQL |
 
 ## What's intentionally NOT in this platform yet
@@ -47,7 +47,7 @@ Purchase orders and goods receipts are on by default. Set
 
 ## Quick start (local dev)
 
-Prerequisites: Node 22 or later (24 recommended; the test tools need 22+),
+Prerequisites: Node 24 (what CI and the backend image run; Vitest 5 also runs on 22.12+ and 26+, not 23 or 25),
 Docker, npm 10+. The full, current steps are in
 [`apps/backend/README.md`](apps/backend/README.md) ("Running it locally").
 In short:
@@ -98,8 +98,8 @@ afrinov-platform/
 ```
 apps/backend/src/
 ├── index.ts, server.ts      # entry point and server bootstrap
-├── modules/                 # identity, inventory, procurement, operations, reporting,
-│                            # settings, audit, health, migration
+├── modules/                 # identity, inventory, procurement, sales, operations,
+│                            # reporting, settings, audit, backups, health, migration
 ├── shared/                  # config, db, errors, events, permissions, authorization, inventory helpers
 ├── openapi/                 # OpenAPI document for /api/docs
 └── db/                      # migrate, seed

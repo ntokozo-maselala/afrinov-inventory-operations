@@ -1,9 +1,17 @@
 // Afrinov Platform — Prisma schema
-// Source of truth for the data model, derived from the docs in
-// afrinov-docs/docs/03-domain/entity-catalog.md, aggregate-model.md,
-// domain-model.md, state-machines.md, and 02-business-analysis/functional-requirements.md.
-// ADR-002: inventory_transactions is the ledger; inventory_balances is a derived
-// materialized view that is never written by application code.
+// Source of truth for the data model; the migrations in prisma/migrations/
+// build it, and CI fails when the two differ in anything Prisma can describe
+// (migration-drift). CHECK constraints are outside what Prisma compares; the
+// stock floor's is looked for by check:issued-stock and the daily stock check
+// (src/modules/inventory/issued-stock-check.ts). The schema began from the docs
+// in afrinov-docs/docs/03-domain/ and 02-business-analysis/, which now follow
+// it, not the other way round (TD-020).
+// ADR-002: inventory_transactions is the ledger; inventory_balances is derived
+// from it. There is no trigger: each application path that moves stock locks the
+// balances, writes the ledger line and calls recomputeBalance
+// (shared/inventory/balances.ts, ADR-047) in the same transaction. The demo seed
+// is the exception: it writes its ledger lines, then recomputes in a step of its
+// own (src/db/seed.ts).
 
 generator client {
   provider = "prisma-client-js"
@@ -1474,8 +1482,10 @@ model ConsumableOutcome {
   @@map("consumable_outcomes")
 }
 
-// ADR-002: derived/materialized view. Application code never writes to this
-// table; it's recomputed by the recomputeBalances job / refresh trigger.
+// ADR-002: derived from the ledger. Written only by recomputeBalance
+// (shared/inventory/balances.ts), which sums the item's ledger lines inside the
+// transaction that wrote them; there is no trigger or job. A daily check
+// compares each row with its ledger (stock-reconciliation.ts, ADR-047).
 model InventoryBalance {
   materialId     String   @map("material_id")
   locationId     String   @map("location_id")

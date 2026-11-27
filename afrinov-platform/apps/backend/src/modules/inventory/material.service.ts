@@ -1,8 +1,9 @@
 // Material master CRUD with audit. A tool kept as one unit can carry its serial
 // number; nothing else can, and no two items share one. Each material is in
 // the Stores or the Projects section (material-section.ts).
-import { Prisma } from '@prisma/client';
+import { Prisma, MaterialCategory } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { enumFilter } from '../../shared/query-filters.js';
 import { Errors } from '../../shared/errors.js';
 import { categoryWhere, checkMaterialChange, projectForNewMaterial, sectionOf, type MaterialSection } from './material-section.js';
 import { checkQuantityForUnit, checkUnitOfMeasure } from '../../shared/units.js';
@@ -148,7 +149,8 @@ export const MaterialService = {
   async list(filter: { category?: string; active?: boolean; q?: string; section?: MaterialSection; projectNumber?: string } = {}) {
     const where: Prisma.MaterialWhereInput = {};
     if (filter.section) where.category = categoryWhere(filter.section);
-    if (filter.category) where.category = filter.category as Prisma.MaterialWhereInput['category'];
+    const category = enumFilter(filter.category, MaterialCategory, 'category');
+    if (category) where.category = category;
     if (filter.projectNumber) where.projectNumber = filter.projectNumber;
     if (filter.active !== undefined) where.active = filter.active;
     if (filter.q) {

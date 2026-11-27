@@ -1061,6 +1061,11 @@
       "type": "Audit Report"
     },
     {
+      "id": "AFRI-OMS-AUD-022",
+      "path": "docs/audits/system/production-readiness-audit.md",
+      "type": "Audit Report"
+    },
+    {
       "id": "AFRI-OMS-BE-001",
       "path": "docs/backend/README.md",
       "type": "Index"
@@ -1226,6 +1231,16 @@
       "type": "Engineering Assurance"
     },
     {
+      "id": "AFRI-OMS-ENG-012",
+      "path": "docs/engineering/PRODUCTION_READINESS_ASSESSMENT.md",
+      "type": "Engineering Assurance"
+    },
+    {
+      "id": "AFRI-OMS-ENG-013",
+      "path": "docs/engineering/REMEDIATION_PLAN.md",
+      "type": "Engineering Assurance"
+    },
+    {
       "id": "AFRI-OMS-GEN-001",
       "path": "README.md",
       "type": "Repository Overview"
@@ -1269,6 +1284,11 @@
       "id": "AFRI-OMS-GEN-009",
       "path": "workbook-replacement-roadmap.md",
       "type": "Roadmap"
+    },
+    {
+      "id": "AFRI-OMS-GEN-010",
+      "path": "CHANGELOG.md",
+      "type": "General"
     }
   ],
   "retired": []

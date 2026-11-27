@@ -4,18 +4,19 @@
 <td width="104" align="center"><img src="docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-GEN-008</b></td>
 <td align="center"><b><i>Task Context</i></b><br><i>General</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-GEN-008 updated=2026-11-26 by="Ntokozo Maselala" body=9bc073df512e -->
+<!-- /afrinov:document-control id=AFRI-OMS-GEN-008 updated=2026-11-27 by="Ntokozo Maselala" body=3f9faf8b1ac6 -->
 
 # Task Context
 
 Orientation for anyone, human or AI assistant, starting work in this
 repository.
 
-Rewritten 2026-10-08, at the end of Phase 0. Where this file and the code
-disagree, trust the code and update this file.
+Rewritten 2026-10-08, at the end of Phase 0; brought up to date on
+2026-11-27 (TD-021). Where this file and the code disagree, trust the code
+and update this file.
 
 ## What this is
 
@@ -24,22 +25,28 @@ A platform to replace Afrinov's stock workbook
 tooling/PPE/electrical, fasteners and project material through IN/OUT logs.
 The workbook itself is git-ignored and never committed.
 
-`workbook-replacement-roadmap.md` holds the plan. Phase 0 (clean-up and
-controls) is done; Phase 1 (daily store workflows: receive stock, Issued To,
-returns) is next.
+`workbook-replacement-roadmap.md` holds the plan. Every checklist item of
+Phases 0 to 3 (controls, daily store workflows, data migration, reporting)
+and Phase 5 (tools) is ticked there; the roadmap's opening gap table, which
+marks receiving, Issued To and the import "Missing", describes the start, not
+now. Phase 4 (pilot and go-live: production environment, accounts,
+training, parallel run, cutover) is open. What stands between the code and a
+production release is in
+`docs/engineering/PRODUCTION_READINESS_ASSESSMENT.md`.
 
 ## Repository layout
 
 | Path | What it is |
 | --- | --- |
 | `afrinov-platform/` | npm workspaces monorepo; install dependencies and run scripts here |
-| `afrinov-platform/apps/backend/` | REST API: Fastify 5, Prisma 5, PostgreSQL 16, Zod, Vitest |
-| `afrinov-platform/apps/frontend/` | React 18 + Vite + Tailwind 3 SPA, Vitest and Playwright |
-| `afrinov-docs/docs/` | Original specification: product, domain, processes, architecture, API, security, testing, operations |
-| `.github/workflows/` | CI: `backend-ci.yml`, `frontend-ci.yml` |
+| `afrinov-platform/apps/backend/` | REST API: Fastify 5, Prisma 7, PostgreSQL 16, Zod 4, Vitest 5 |
+| `afrinov-platform/apps/frontend/` | React 19 + Vite 8 + Tailwind 4 SPA, Vitest and Playwright |
+| `afrinov-docs/docs/` | Product, domain, processes, architecture, API, security, testing and operations references |
+| `.github/workflows/` | CI: `backend-ci.yml`, `frontend-ci.yml`, `security-ci.yml`, `codeql.yml`, `docs-ci.yml` |
+| `docs/engineering/` | How the repository is verified and released: gates, security controls, risks, readiness |
 | `workbook-replacement-roadmap.md` | The plan, phase by phase, with what is done |
-| `decision-log.md` | Architecture decisions, ADR-001 onwards |
-| `gap-analysis.md`, `sap-lessons-for-afrinov.md` | Early analysis of the workbook and of SAP |
+| `afrinov-docs/docs/00-governance/decision-log.md` | Architecture decisions, ADR-001 onwards (the root `decision-log.md` points there) |
+| `gap-analysis.md`, `sap-lessons-for-afrinov.md` | Early analysis of the workbook and of SAP (pointers to `afrinov-docs/docs/`) |
 | `docs/archive/` | Earlier audits and reports, kept for history; several are out of date |
 
 ## Running it locally
@@ -56,7 +63,7 @@ npm run dev:frontend   # app on http://localhost:5173
 `npm run dev:frontend-only`, run in `apps/frontend/`, starts the frontend on
 mock data with no backend.
 
-Use Node 22 or later (24 recommended); the test tools need 22+.
+Use Node 24: CI, the backend Docker image and the test tools all run on it.
 
 ## Checking a change
 
@@ -78,8 +85,8 @@ database; CI runs them on every backend pull request.
 - **Accounts are created by an administrator.** There is no self-registration
   (ADR-006).
 - **Roles:** `ADMIN`, `STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER` (view only),
-  `TECHNICIAN`, `VIEWER`, and those who sign orders: `PROCUREMENT_MANAGER`,
-  `DIRECTOR`, `CEO`, `WORKSHOP_MANAGER` (ADR-030). Server permissions are in
+  `TECHNICIAN`, `VIEWER`, `SALES` (sales RFQs), and those who sign orders:
+  `PROCUREMENT_MANAGER`, `DIRECTOR`, `CEO`, `WORKSHOP_MANAGER` (ADR-030). Server permissions are in
   `apps/backend/src/shared/permissions.ts`. In the UI, `useHasRole()` lets
   ADMIN pass any check.
 - **Purchase orders** go DRAFT → PENDING_APPROVAL → APPROVED →
@@ -107,8 +114,9 @@ database; CI runs them on every backend pull request.
   award raises a draft purchase order in the same transaction. They are for
   one project and its material only, use the purchase order permissions and
   sit behind the same procurement switch.
-- **Settings** come from the catalog in `settings.service.ts`. Removing a key
-  there retires it; the seed deletes its row.
+- **Settings** come from `SETTING_CATALOG` in `settings.service.ts`. A key is
+  added only with the code that reads it; one nothing reads is retired with a
+  migration that deletes its row (ADR-035).
 - **Production builds** of the frontend fail if `VITE_FRONTEND_ONLY` or
   `VITE_DEMO_AUTH_ENABLED` is true.
 - **Tests:** unit tests mock the database with in-memory fakes; integration
@@ -116,10 +124,21 @@ database; CI runs them on every backend pull request.
 
 ## Known follow-ups
 
-- The `inventory_balances` foreign keys declared in `schema.prisma` were never
-  created by a migration.
-- The backend still runs on Node 20 in CI and in its Docker image; Node 20 no
-  longer receives security updates.
-- The GitHub Actions `checkout@v4` and `setup-node@v4` need updating.
-- `npm audit` reports vulnerabilities that should be reviewed; do not use
-  `npm audit fix --force`, which upgrades across major versions.
+The four follow-ups listed here before (the balance foreign keys, Node 20,
+the GitHub Actions versions, `npm audit` findings) are all resolved
+(TD-005, TD-018; `npm audit` reports none). What is open now is kept in the
+registers, not here:
+
+- `afrinov-docs/docs/13-project-management/technical-debt.md` (TD-) and
+  `docs/engineering/RISK_REGISTER.md` (SEC-, OPS-, GATE-, …) — the current
+  list, the release gate among them.
+- `docs/audits/current-defects-report.md` — a dated extract of those
+  registers; each entry that names code was checked against it at the report's
+  baseline (entries waiting on a decision or a deployment can't be). Edition 3
+  is at `02e4146`, before the readiness review: it still lists this file
+  (TD-021) and others since closed.
+- `docs/engineering/PRODUCTION_READINESS_ASSESSMENT.md` — the latest
+  readiness verdict and what it waits on.
+
+Fix an `npm audit` finding with a scoped override or an in-range bump, never
+`npm audit fix --force`, which upgrades across major versions.
