@@ -66,4 +66,12 @@ describe('enum filters over real HTTP', () => {
       expect(res.status, `${path}?${name}=${value}`).toBe(200);
     }
   });
+
+  // A Movements report sets the type itself and has always ignored ?type=.
+  it('ignores ?type= under a report, an unknown one included', async () => {
+    for (const report of ['issued', 'transfers', 'writeoffs', 'loans', 'returned']) {
+      const res = await api('GET', `/inventory-transactions?report=${report}&type=abc`);
+      expect(res.status, report).toBe(200);
+    }
+  });
 });
