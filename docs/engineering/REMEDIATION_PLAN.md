@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-013 updated=2026-11-27 by="Ntokozo Maselala" body=71097c066ac8 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-013 updated=2026-11-27 by="Ntokozo Maselala" body=925385f484e9 -->
 
 # Remediation plan
 
@@ -28,9 +28,9 @@ PRR- IDs are this review's.
 
 | ID | Finding | Priority | Change | Files affected | Tests | Status |
 |---|---|---|---|---|---|---|
-| PRR-01 | `main` unprotected | P1 | Branch protection enabled at the owner's request: pull request, six always-run checks, up to date, admins included, no force push or deletion | Repository setting; `CI_CD_ARCHITECTURE.md` | Read back with `gh api …/branches/main/protection` | **Partly fixed** 2026-11-27: Backend and Frontend CI not yet required (GATE-02) |
+| PRR-01 | `main` unprotected | P1 | Branch protection enabled at the owner's request: pull request, six always-run checks, up to date, admins included, no force push or deletion | Repository setting; `CI_CD_ARCHITECTURE.md` | Read back with `gh api …/branches/main/protection` | **Fixed & verified** 2026-11-27: eleven required checks, Backend and Frontend CI included after PR #221 (GATE-02) |
 | PRR-02 | Eleven routes answer 500 to an unknown enum filter | P2 | `enumFilter` checks the value before Prisma; 400 VALIDATION_ERROR | `src/shared/query-filters.ts` (new); `modules/inventory/inventory.service.ts`, `material.service.ts`, `material.routes.ts`; `modules/reporting/reporting.service.ts`, `consumption.service.ts` | `query-filters.test.ts` (new, 9); `integration/query-filters.real-http.test.ts` (new, 23; 11 fail on the old code); probe 88 → 0 5xx | **Fixed & verified** (TD-029) |
-| PRR-03 | Four High-rated CodeQL alerts | P2 | `cleanWebsite` trims by walking in from each end; one `mdCell` escapes `\` before `\|` | `modules/procurement/supplier-fields.ts`; `modules/migration/markdown.ts` (new), `workbook-report.ts`, `vendor-list.ts`, `reconciliation.ts` | `supplier-fields.test.ts` (new, 5: the old output for 4,096 mixes, a linear-time check); `markdown.test.ts` (new, 7) | **Fixed in code**; alerts close on the next CodeQL run on `main` (SEC-08) |
+| PRR-03 | Four High-rated CodeQL alerts | P2 | `cleanWebsite` trims by walking in from each end; one `mdCell` escapes `\` before `\|` | `modules/procurement/supplier-fields.ts`; `modules/migration/markdown.ts` (new), `workbook-report.ts`, `vendor-list.ts`, `reconciliation.ts` | `supplier-fields.test.ts` (new, 5: the old output for 4,096 mixes, a linear-time check); `markdown.test.ts` (new, 7) | **Fixed & verified**: CodeQL marked alerts 1, 2, 3 and 5 fixed on `main`, 2026-11-27 (SEC-08) |
 | PRR-04 | Base Compose file published the database and API on every interface | P2 | Both bound to `127.0.0.1` | `apps/backend/docker-compose.yml`; `deployment.md`, `apps/backend/README.md` (one sentence each) | `docker compose config` for the file alone, with the overlay, and with the test profile | **Fixed & verified** (SEC-03, part) |
 | PRR-05 | `Number(q['limit'])` on `/reports/movement-history` | P4 | None | — | Probe: no 5xx | Deferred: change with the next edit to the route |
 | PRR-06 | Fixtures used categories the schema lacks | P3 | The category-filter test uses a real category and checks the refusal | `modules/reporting/reporting.service.test.ts` | That file 35 / 35 | **Partly fixed**: the other fixture values remain |
@@ -76,9 +76,11 @@ anywhere; that can only be known by the owner (below).
 | Item | Why | Done when | Needs |
 |---|---|---|---|
 | **SEC-07** rotate the bootstrap password from history | It is readable by anyone in the public repository | The account is rotated or removed wherever it was used; recorded in `EXCEPTIONS.md` | Owner action |
-| **GATE-02 / PRR-01** require Backend and Frontend CI on `main` | Protection is on, but a change can still merge with failing unit, integration or browser tests | Both workflows report on every pull request under distinct job names (done on branch `ci/gate-02-required-checks`), and their five checks are required (`CI_CD_ARCHITECTURE.md`, "Branch protection", has the command) | Merging that branch, then the setting |
 | **OPS-01** production evidence | No production host, restore or alerting has been shown | `deployment.md` Parts 1–9 done on the real host; a restore test signed off; RPO/RTO agreed; alerting proven | Owner and operator; a host |
-| Merge this branch | The fixes above exist only here | CI green on the pull request | Approval to commit and open the pull request |
+
+Done since the review: the branch merged (PR #220), and GATE-02 / PRR-01 closed:
+`main` requires eleven checks, Backend and Frontend CI included (PR #221, then the
+setting).
 
 ### P2 — soon after, each a decision first
 
@@ -108,5 +110,5 @@ anywhere; that can only be known by the owner (below).
 - No dependency was added, removed or upgraded.
 - Nothing was deployed, and no production system or data was touched.
 - One repository setting was changed, at the owner's request after the review:
-  branch protection on `main` (PRR-01, partly fixed; Backend and Frontend CI are
-  still to be made required, GATE-02). No other setting was changed.
+  branch protection on `main` (PRR-01, GATE-02; eleven required checks). No other
+  setting was changed.

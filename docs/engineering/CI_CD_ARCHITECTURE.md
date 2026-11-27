@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=f5380c6795a3 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=ae5fa159f016 -->
 
 # CI/CD architecture
 
@@ -33,10 +33,8 @@ The workstream maps onto the staged pipeline model as follows.
   run first.
 - **Stage B — pull request assurance.** Before merge: the Stage A checks plus
   integration tests against a real PostgreSQL service, the browser tests
-  (`frontend-ci.yml` `e2e`), migration apply and drift detection, the production dependency audit, the secret scan, and CodeQL. Six
-  of them are required checks today (Security CI, Docs CI, CodeQL); the Backend
-  CI and Frontend CI checks run on every pull request and are to be required
-  once their workflows are on `main` (see "Branch protection" below).
+  (`frontend-ci.yml` `e2e`), migration apply and drift detection, the production dependency audit, the secret scan, and CodeQL. All
+  eleven are required checks on `main` (see "Branch protection" below).
 - **Stage C — main-branch verification.** The same workflows re-run on `push`
   to `main`, so the merged commit is verified, not just the PR head.
 - **Stages D–F — staging, production, post-deployment.** **Not implemented.**
@@ -79,37 +77,38 @@ The workstream maps onto the staged pipeline model as follows.
 The workflows above become enforcing gates only when branch protection requires
 them. This is a repository setting, not something a commit can guarantee.
 
-**In force since 2026-11-27** (GATE-02), read back with
+**In force since 2026-11-27** (GATE-02, closed), read back with
 `gh api repos/ntokozo-maselala/afrinov-inventory-operations/branches/main/protection`:
 
 | Setting | Value |
 |---|---|
 | Pull request before merging | Required; 0 approving reviews (one maintainer: an author can't approve their own pull request); stale approvals dismissed |
-| Required checks (GitHub Actions app only) | `Dependency security audit (production)`, `Secret scanning`, `No spreadsheets in the tree` (Security CI); `Document control` (Docs CI); `Analyze (javascript-typescript)`, `Analyze (actions)` (CodeQL) |
+| Required checks (GitHub Actions app only) | Eleven, below |
 | Branch up to date before merging | Required |
 | Applies to administrators | Yes |
 | Force pushes, deletion | Blocked |
 
-These six run on every pull request that targets `main` (CodeQL runs only on
-those; the rest on every pull request).
+| Workflow | Required checks |
+|---|---|
+| Backend CI | `Backend: typecheck, lint, unit tests, build`, `Backend: migration drift and database integrity`, `Backend: integration tests (real Postgres)` |
+| Frontend CI | `Frontend: typecheck, lint, unit tests, build`, `Frontend: browser tests (Playwright, real backend)` |
+| Security CI | `Dependency security audit (production)`, `Secret scanning`, `No spreadsheets in the tree` |
+| Docs CI | `Document control` |
+| CodeQL | `Analyze (javascript-typescript)`, `Analyze (actions)` |
 
-**To be added once the workflows above are on `main`:** the five Backend and
-Frontend CI checks, under their new names:
+All eleven report on every pull request that targets `main`: Backend and
+Frontend CI skip their jobs, as a pass, when the pull request touches none of
+their paths. The six from Security CI, Docs CI and CodeQL were required first
+(2026-11-27, PR #220); the five Backend and Frontend checks after PR #221 made
+them report on every pull request under unique names. The `… what changed` jobs
+are not required: if one fails, the jobs after it run anyway.
 
-- `Backend: typecheck, lint, unit tests, build`
-- `Backend: migration drift and database integrity`
-- `Backend: integration tests (real Postgres)`
-- `Frontend: typecheck, lint, unit tests, build`
-- `Frontend: browser tests (Playwright, real backend)`
+A pull request still on the workflows from before PR #221 reports the old
+names (`Typecheck, lint, unit tests, build` and so on) and waits for the new
+ones until `main` is merged into it.
 
-They can't be required before then: a pull request based on the old workflows
-reports the old names, and would wait for the new ones forever. Before
-2026-11-27 they couldn't be required at all: the workflows had `paths:` filters
-on `pull_request` (no check on a pull request outside them) and both called
-their first job `Typecheck, lint, unit tests, build`. The `… what changed` jobs
-need not be required: if one fails, the jobs after it run anyway.
-
-Adding them (the six already required, plus the five):
+The command that set the list, to repeat or change it (send the whole list:
+it replaces what is there):
 
 ```sh
 gh api -X PATCH repos/ntokozo-maselala/afrinov-inventory-operations/branches/main/protection/required_status_checks \
@@ -131,7 +130,8 @@ EOF
 ```
 
 `15368` is the GitHub Actions app, so a check of the same name from any other
-app doesn't count. That makes eleven required checks. With a second
+app doesn't count. A new job that should gate `main` is added to this list
+(`AGENTS.md`, "Layout"). With a second
 maintainer, require one approving review as well. For changes touching authentication, authorization, migrations,
 or the ledger, an independent reviewer who did not author the change should be
 required. A `CODEOWNERS` file is the mechanism to route those paths to the right
