@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=17ab3de30dd1 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=0d7966dbfa5d -->
 
 # Production readiness assessment
 
@@ -32,8 +32,9 @@ by three things outside the code, each recorded as High or as a release gate:
    no restore test there, no agreed RPO/RTO, no proven alerting.
 2. **SEC-07:** a real bootstrap admin password is in the public repository's
    history, and nobody has recorded that it was rotated wherever it was used.
-3. **GATE-02:** `main`, from which production is installed, is not protected, so
-   the gates are advisory.
+3. **GATE-02:** `main`, from which production is installed, has been protected
+   since 2026-11-27, but Backend CI and Frontend CI are not yet required checks,
+   so a change can still merge with failing unit, integration or browser tests.
 
 It becomes **CONDITIONALLY READY** when all three are done and this branch is
 merged with CI green, leaving the P2 items in the remediation plan to be accepted or
@@ -51,7 +52,7 @@ runs well in production.
 | Functional correctness | **Meets** | 1,462 backend and 1,672 frontend unit tests, 422 integration tests on real PostgreSQL, 1,223 Postman checks over every workflow: all pass. Browser tests passed in CI on `02e4146` | Phase 4 acceptance (parallel run against the workbook) not done | Business rules confirmed only against the workbook rehearsal still to come | None from the code; acceptance is part of go-live |
 | Architectural integrity | **Meets, with recorded debt** | One ledger with a database floor (ADR-047); one error envelope; idempotent writes; 47 ADRs | TD-004, TD-007, TD-027 | A new stock path must follow the lock order by hand (TD-027) | None |
 | Code quality | **Meets** | Lint and typecheck clean; no `@ts-ignore`, no `eslint-disable`; 6 `any` outside tests | PRR-05, PRR-06 (P3/P4) | Low | None |
-| Security | **Conditional** | 183 endpoints 401 without a token; 5 low-privilege roles × 88 writes, none succeeded; record-level checks 403; bound SQL; no XSS sink; fail-closed configuration; 0 vulnerabilities; CodeQL alerts fixed | SEC-07 (High), GATE-02; SEC-03 rest, SEC-05, SEC-06, TD-006, TD-014 (Medium or conditional) | A reused leaked password; an API compromise holding owner rights on the database | **Blocks** until SEC-07 and GATE-02 are done |
+| Security | **Conditional** | 183 endpoints 401 without a token; 5 low-privilege roles × 88 writes, none succeeded; record-level checks 403; bound SQL; no XSS sink; fail-closed configuration; 0 vulnerabilities; CodeQL alerts fixed | SEC-07 (High), GATE-02; SEC-03 rest, SEC-05, SEC-06, TD-006, TD-014 (Medium or conditional) | A reused leaked password; an API compromise holding owner rights on the database | **Blocks** until SEC-07 is done and GATE-02 finished (Backend and Frontend CI required) |
 | Data integrity | **Meets, with recorded debt** | 76 migrations apply cleanly; no drift; `CHECK (quantity >= 0)`; daily reconciliation; race tests pass | TD-006 immutability by convention | Direct SQL could edit history | None, if database access is limited to the operator |
 | Test maturity | **Meets** | Four layers in CI; every regression test in this review failed on the old code first | No load test; browser tests not run locally | Behaviour under many simultaneous users unmeasured | None for the one store the business has (one store controller) |
 | Performance | **Adequate for the expected load** | p50 10 ms, p95 56 ms, p99 290 ms over 426 requests; first load 147 kB + 258 kB, heavy libraries on demand | No load test; rate limits per process | Unknown beyond a handful of users | None |
@@ -66,8 +67,9 @@ runs well in production.
 
 1. **Rotate SEC-07** wherever that password was ever used, and record it in
    `EXCEPTIONS.md` (EX-01).
-2. **Protect `main`**: require the CI checks in `CI_CD_ARCHITECTURE.md`; block force
-   pushes and deletion.
+2. **Finish protecting `main`**: protection is on (2026-11-27); make Backend CI
+   and Frontend CI report on every pull request under distinct job names, then
+   require their checks (`CI_CD_ARCHITECTURE.md`, "Branch protection").
 3. **Merge this branch** with CI green, so the fixes reach `main`; confirm CodeQL
    then shows the four alerts closed.
 4. **Install on the production host** by `deployment.md` Parts 1–9, `TRUST_PROXY`
@@ -131,5 +133,7 @@ runs well in production.
 | PRR-06 (fixture values) | Partly completed |
 | Load test, penetration test, browser tests on this machine | Not attempted |
 | OPS-01 evidence | Blocked: needs a production host |
-| SEC-07, GATE-02 | Waiting on the owner |
-| Committing this branch and opening its pull request; every P2 decision | Waiting on approval |
+| Branch protection on `main` (GATE-02) | Partly completed 2026-11-27: on, with six always-run checks; Backend and Frontend CI still to require |
+| SEC-07 | Waiting on the owner |
+| Committing this branch and opening its pull request | Completed: PR #220 |
+| Every P2 decision | Waiting on approval |

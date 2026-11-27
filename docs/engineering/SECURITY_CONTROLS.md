@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-27 by="Ntokozo Maselala" body=1817af4c7596 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-009 updated=2026-11-27 by="Ntokozo Maselala" body=f6917829fb56 -->
 
 # Security controls
 
@@ -199,8 +199,8 @@ name.
 
 ### What is still open
 
-SEC-07 (rotate the password in history, owner), **GATE-02** (`main` not protected,
-owner), the rest of SEC-03 (the API's database role), SEC-05, SEC-06, TD-006 and
+SEC-07 (rotate the password in history, owner), **GATE-02** (`main` is protected
+since 2026-11-27, but Backend and Frontend CI are not yet required), the rest of SEC-03 (the API's database role), SEC-05, SEC-06, TD-006 and
 TD-014. Their next steps are in `REMEDIATION_PLAN.md`.
 
 ## Secret handling rules for this repository

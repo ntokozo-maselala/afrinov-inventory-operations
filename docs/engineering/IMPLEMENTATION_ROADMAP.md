@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-ENG-005</b></td>
 <td align="center"><b><i>Implementation roadmap</i></b><br><i>Engineering Assurance</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-005 updated=2026-11-26 by="Ntokozo Maselala" body=8800175f6233 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-005 updated=2026-11-27 by="Ntokozo Maselala" body=0c1460a2be11 -->
 
 # Implementation roadmap
 
@@ -66,7 +66,7 @@ CI/CD, risk register, exceptions, roadmap, and this file's siblings.
 | Item | Why | Acceptance criteria |
 |---|---|---|
 | **SEC-07** rotate the committed admin password | The value is in public history | Account rotated or deleted; no reuse; outcome recorded in `EXCEPTIONS.md` |
-| **Branch protection** on `main` | The gates exist but are not enforcing until required | The checks listed in `CI_CD_ARCHITECTURE.md` are required; one approving review; stale approvals dismissed |
+| **Branch protection** on `main` | The gates exist but are not enforcing until required | **Partly done 2026-11-27 (GATE-02):** on, with the six checks that run on every pull request. Still to do: Backend and Frontend CI required, once they report on every pull request under distinct job names (`CI_CD_ARCHITECTURE.md`); one approving review when there is a second maintainer |
 | **CODEOWNERS** | Route auth/authz/migration/ledger paths to the right reviewers | File added once owning teams are named; those paths require an owner review |
 
 ### Priority 2 — Before any production release (OPS-01)

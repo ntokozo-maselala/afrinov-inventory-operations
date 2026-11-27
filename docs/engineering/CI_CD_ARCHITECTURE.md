@@ -4,10 +4,10 @@
 <td width="104" align="center"><img src="../document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-ENG-002</b></td>
 <td align="center"><b><i>CI/CD architecture</i></b><br><i>Engineering Assurance</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-26 by="Ntokozo Maselala" body=9233ec7bf366 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-002 updated=2026-11-27 by="Ntokozo Maselala" body=3167daa174e0 -->
 
 # CI/CD architecture
 
@@ -64,17 +64,36 @@ The workstream maps onto the staged pipeline model as follows.
 ## Branch protection (configuration, not code)
 
 The workflows above become enforcing gates only when branch protection requires
-them. This is a repository setting, not something a commit can guarantee, so it
-is recorded as an action item rather than assumed. The required checks should be:
+them. This is a repository setting, not something a commit can guarantee.
 
-- Backend CI: `checks`, `migration-drift`, `integration`
-- Frontend CI: `checks`, `e2e`
-- Security CI: `dependency-audit`, `secret-scan`
-- Docs CI: `document-control`
-- CodeQL: `analyze (javascript-typescript)`, `analyze (actions)`
+**In force since 2026-11-27** (GATE-02), read back with
+`gh api repos/ntokozo-maselala/afrinov-inventory-operations/branches/main/protection`:
 
-Also required: at least one approving review, and dismissal of stale approvals
-on new commits. For changes touching authentication, authorization, migrations,
+| Setting | Value |
+|---|---|
+| Pull request before merging | Required; 0 approving reviews (one maintainer: an author can't approve their own pull request); stale approvals dismissed |
+| Required checks (GitHub Actions app only) | `Dependency security audit (production)`, `Secret scanning`, `No spreadsheets in the tree` (Security CI); `Document control` (Docs CI); `Analyze (javascript-typescript)`, `Analyze (actions)` (CodeQL) |
+| Branch up to date before merging | Required |
+| Applies to administrators | Yes |
+| Force pushes, deletion | Blocked |
+
+These six run on every pull request. **Not yet required:** Backend CI
+(`Typecheck, lint, unit tests, build`, `Migration drift and database integrity`,
+`Integration tests (real Postgres)`) and Frontend CI (`Typecheck, lint, unit
+tests, build`, `Browser tests (Playwright, real backend)`). Two things stop them:
+
+- Their `paths:` filters are on the workflow, so a pull request outside those
+  paths (any documentation change) gets no check at all, and a required check
+  that never reports blocks the merge.
+- Both workflows call their first job `Typecheck, lint, unit tests, build`, and a
+  required check is matched by name.
+
+To require them: give each job a distinct name, and make each workflow run on
+every pull request, deciding inside it whether there is anything to do (a job
+that skips still reports success). Then add the five checks here.
+
+The target, once those exist, is all eleven checks above. With a second
+maintainer, require one approving review as well. For changes touching authentication, authorization, migrations,
 or the ledger, an independent reviewer who did not author the change should be
 required. A `CODEOWNERS` file is the mechanism to route those paths to the right
 reviewers; it is recommended but not added here because the owning teams are not

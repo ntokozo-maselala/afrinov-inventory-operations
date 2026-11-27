@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=f18ad35ac509 -->
+<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=519b7f5425ca -->
 
 # Document Register
 
@@ -223,10 +223,10 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-DOC-003 | [Afrinov Documentation Style Guide](STYLE_GUIDE.md) | Style Guide | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-DOC-004 | [Documentation Standardisation Report](STANDARDISATION_REPORT.md) | Document Control | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-001 | [Engineering baseline assessment](../engineering/BASELINE_ASSESSMENT.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-002 | [CI/CD architecture](../engineering/CI_CD_ARCHITECTURE.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-002 | [CI/CD architecture](../engineering/CI_CD_ARCHITECTURE.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-003 | [Database assurance](../engineering/DATABASE_ASSURANCE.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-004 | [Exceptions register](../engineering/EXCEPTIONS.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-005 | [Implementation roadmap](../engineering/IMPLEMENTATION_ROADMAP.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-005 | [Implementation roadmap](../engineering/IMPLEMENTATION_ROADMAP.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-006 | [Quality gates](../engineering/QUALITY_GATES.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-007 | [Engineering assurance](../engineering/README.md) | Index | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-008 | [Risk register](../engineering/RISK_REGISTER.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
