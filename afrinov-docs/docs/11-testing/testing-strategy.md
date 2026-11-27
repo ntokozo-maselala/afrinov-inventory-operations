@@ -4,14 +4,14 @@
 <td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-11-009</b></td>
 <td align="center"><b><i>Testing Strategy</i></b><br><i>Testing</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-11-009 updated=2026-11-26 by="Ntokozo Maselala" body=3ab836f389f1 -->
+<!-- /afrinov:document-control id=AFRI-OMS-11-009 updated=2026-11-27 by="Ntokozo Maselala" body=4a38a999cf2d -->
 
 # Testing Strategy
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09; the CI paragraph and its Evidence at `e2bdab7` (PR #221), 2026-11-27
 
 Test business invariants, not just CRUD. The most important invariant in
 this system: **a material's balance always equals the sum of its posted
@@ -30,12 +30,14 @@ Layers as implemented (see `test-pyramid.md` for counts):
 | End-to-end | Playwright | `apps/frontend/e2e/` | Real backend and database |
 | Acceptance (plain-language business scenarios) | — | `acceptance-testing.md` | Mapped to integration tests |
 
-CI runs backend unit + integration and frontend unit tests on every
-relevant pull request, and the Playwright browser suite as "Browser tests
-(Playwright, real backend)" in `frontend-ci.yml` (`e2e-testing.md`).
+CI runs backend unit + integration and frontend unit tests, and the Playwright
+browser suite as "Frontend: browser tests (Playwright, real backend)" in
+`frontend-ci.yml` (`e2e-testing.md`). Both workflows run on every pull request;
+a pull request that changes none of their paths gets the checks skipped, which
+counts as a pass (`docs/engineering/CI_CD_ARCHITECTURE.md`).
 
 ## Evidence
 - `afrinov-platform/apps/backend/integration/helpers.ts:74-88`
 - `afrinov-platform/apps/backend/vitest.config.ts`, `afrinov-platform/apps/backend/vitest.integration.config.ts`
 - `afrinov-platform/apps/frontend/vitest.config.ts`, `afrinov-platform/apps/frontend/playwright.config.ts`
-- `.github/workflows/backend-ci.yml:51-54,110`, `.github/workflows/frontend-ci.yml:49-54`
+- `.github/workflows/backend-ci.yml` (jobs `changes`, `checks`, `integration`), `.github/workflows/frontend-ci.yml` (jobs `changes`, `checks`, `e2e`)

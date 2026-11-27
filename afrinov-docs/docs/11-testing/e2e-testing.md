@@ -4,14 +4,14 @@
 <td width="104" align="center"><img src="../../../docs/document-control/assets/afrinov-logo-header.png" alt="Afrinov" width="80"><br><sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</sub></td>
 <td align="center"><sub>Document ID</sub><br><b>AFRI-OMS-11-004</b></td>
 <td align="center"><b><i>End-to-End Testing</i></b><br><i>Testing</i></td>
-<td align="center"><sub>Last updated</sub><br><b>26/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
+<td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-11-004 updated=2026-11-26 by="Ntokozo Maselala" body=1a3828378e99 -->
+<!-- /afrinov:document-control id=AFRI-OMS-11-004 updated=2026-11-27 by="Ntokozo Maselala" body=07ae231e902b -->
 
 # End-to-End Testing
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 6a122ff, 2026-11-24
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 6a122ff, 2026-11-24; the CI job name and when it runs at `e2bdab7` (PR #221), 2026-11-27
 
 Target: automate the critical journeys from `01-product/user-journeys.md`
 (technician issues material against a project; store controller receives
@@ -19,8 +19,10 @@ goods against a PO; low stock noticed and ordered; tool check-out and
 back), against a staging-like environment with seeded reference data.
 
 Implemented: Playwright (`apps/frontend/playwright.config.ts`, Chromium),
-run in CI as "Browser tests (Playwright, real backend)" in
-`frontend-ci.yml`. Three specs: signing in and being refused
+run in CI as "Frontend: browser tests (Playwright, real backend)" in
+`frontend-ci.yml`, on every pull request that changes the frontend, the
+backend, the workspace manifests (`package.json`, `package-lock.json`) or
+`frontend-ci.yml` itself (skipped, as a success, otherwise). Three specs: signing in and being refused
 (`login.spec.ts`), signing out (`sign-out.spec.ts`), and how failures look
 over the live stack (`error-handling.spec.ts`). The seeded admin's password
 comes from `SEED_ADMIN_PASSWORD`; the database must be a local `*_test` one.
@@ -59,4 +61,4 @@ check-out and check-in are covered over real HTTP by
 - `afrinov-platform/apps/frontend/playwright.config.ts`
 - `afrinov-platform/apps/frontend/e2e/global-setup.ts`, `e2e/servers.ts`, `e2e/servers.test.ts`
 - `afrinov-platform/apps/frontend/e2e/login.spec.ts`, `sign-out.spec.ts`, `error-handling.spec.ts`
-- `.github/workflows/frontend-ci.yml` — the "Browser tests (Playwright, real backend)" job
+- `.github/workflows/frontend-ci.yml` — the "Frontend: browser tests (Playwright, real backend)" job

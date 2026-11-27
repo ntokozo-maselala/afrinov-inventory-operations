@@ -11,7 +11,14 @@ file.
   `workspaces` but does not exist yet.
   - `apps/backend/` — Fastify 5 REST API, Prisma 7, PostgreSQL 16, Zod, Vitest.
   - `apps/frontend/` — React SPA (Vite, Tailwind CSS 4), Vitest and Playwright.
-- `.github/workflows/` — CI: `backend-ci.yml`, `frontend-ci.yml`, `codeql.yml`.
+- `.github/workflows/` — CI: `backend-ci.yml`, `frontend-ci.yml`,
+  `security-ci.yml`, `codeql.yml`, `docs-ci.yml`. Backend and Frontend CI run
+  on every pull request so their checks can be required on `main` (GATE-02):
+  never put a `paths:` filter on their `pull_request` trigger. A new job there
+  `needs: changes` with the same `if:` as its neighbours, and a name no other
+  job in any workflow has (`Backend: …`, `Frontend: …`), since required checks
+  match by name; then add it to the required checks
+  (`docs/engineering/CI_CD_ARCHITECTURE.md`, "Branch protection").
 - `afrinov-docs/docs/` — the specification set.
 - `docs/README.md` — documentation index. `task_context.md` — orientation.
 

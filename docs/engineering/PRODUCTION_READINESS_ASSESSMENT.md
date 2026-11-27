@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=85b2350f45e1 -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-012 updated=2026-11-27 by="Ntokozo Maselala" body=de2ed43e2bf8 -->
 
 # Production readiness assessment
 
@@ -67,9 +67,10 @@ runs well in production.
 
 1. **Rotate SEC-07** wherever that password was ever used, and record it in
    `EXCEPTIONS.md` (EX-01).
-2. **Finish protecting `main`**: protection is on (2026-11-27); make Backend CI
-   and Frontend CI report on every pull request under distinct job names, then
-   require their checks (`CI_CD_ARCHITECTURE.md`, "Branch protection").
+2. **Finish protecting `main`**: protection is on (2026-11-27), and branch
+   `ci/gate-02-required-checks` makes Backend CI and Frontend CI report on every
+   pull request under distinct job names; merge it, then require their five
+   checks (`CI_CD_ARCHITECTURE.md`, "Branch protection", has the command).
 3. **Merge this branch** with CI green, so the fixes reach `main`; confirm CodeQL
    then shows the four alerts closed.
 4. **Install on the production host** by `deployment.md` Parts 1–9, `TRUST_PROXY`
@@ -134,7 +135,7 @@ runs well in production.
 | PRR-06 (fixture values) | Partly completed |
 | Load test, penetration test, browser tests on this machine | Not attempted |
 | OPS-01 evidence | Blocked: needs a production host |
-| Branch protection on `main` (GATE-02) | Partly completed 2026-11-27: on, with six always-run checks; Backend and Frontend CI still to require |
+| Branch protection on `main` (GATE-02) | Partly completed 2026-11-27: on, with six always-run checks; the workflow change that lets Backend and Frontend CI be required is on `ci/gate-02-required-checks`; requiring them follows its merge |
 | SEC-07 | Waiting on the owner |
 | Committing this branch and opening its pull request | Completed: PR #220 |
 | Every P2 decision | Waiting on approval |
