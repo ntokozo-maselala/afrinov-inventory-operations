@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-ENG-013 updated=2026-11-27 by="Ntokozo Maselala" body=1589c77febef -->
+<!-- /afrinov:document-control id=AFRI-OMS-ENG-013 updated=2026-11-27 by="Ntokozo Maselala" body=71097c066ac8 -->
 
 # Remediation plan
 
@@ -76,7 +76,7 @@ anywhere; that can only be known by the owner (below).
 | Item | Why | Done when | Needs |
 |---|---|---|---|
 | **SEC-07** rotate the bootstrap password from history | It is readable by anyone in the public repository | The account is rotated or removed wherever it was used; recorded in `EXCEPTIONS.md` | Owner action |
-| **GATE-02 / PRR-01** require Backend and Frontend CI on `main` | Protection is on, but a change can still merge with failing unit, integration or browser tests | Both workflows report on every pull request under distinct job names, and their five checks are required (`CI_CD_ARCHITECTURE.md`, "Branch protection") | A workflow change, then the setting |
+| **GATE-02 / PRR-01** require Backend and Frontend CI on `main` | Protection is on, but a change can still merge with failing unit, integration or browser tests | Both workflows report on every pull request under distinct job names (done on branch `ci/gate-02-required-checks`), and their five checks are required (`CI_CD_ARCHITECTURE.md`, "Branch protection", has the command) | Merging that branch, then the setting |
 | **OPS-01** production evidence | No production host, restore or alerting has been shown | `deployment.md` Parts 1–9 done on the real host; a restore test signed off; RPO/RTO agreed; alerting proven | Owner and operator; a host |
 | Merge this branch | The fixes above exist only here | CI green on the pull request | Approval to commit and open the pull request |
 

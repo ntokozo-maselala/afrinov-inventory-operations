@@ -7,7 +7,7 @@
 <td align="center"><sub>Last updated</sub><br><b>27/11/2026</b><br><sub>by Ntokozo Maselala</sub></td>
 </tr>
 </table>
-<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=e382745d8575 -->
+<!-- /afrinov:document-control id=AFRI-OMS-DOC-001 updated=2026-11-27 by="Ntokozo Maselala" body=d84744b114fd -->
 
 # Document Register
 
@@ -112,7 +112,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-11-001 | [Acceptance Testing](../../afrinov-docs/docs/11-testing/acceptance-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-11-002 | [API Testing](../../afrinov-docs/docs/11-testing/api-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-11-003 | [Contract Testing](../../afrinov-docs/docs/11-testing/contract-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-11-004 | [End-to-End Testing](../../afrinov-docs/docs/11-testing/e2e-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-11-004 | [End-to-End Testing](../../afrinov-docs/docs/11-testing/e2e-testing.md) | Testing | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-11-005 | [Integration Testing](../../afrinov-docs/docs/11-testing/integration-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-11-006 | [Performance Testing](../../afrinov-docs/docs/11-testing/performance-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-11-007 | [Test Pyramid](../../afrinov-docs/docs/11-testing/test-pyramid.md) | Testing | 26/11/2026 | Ntokozo Maselala |
@@ -121,7 +121,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-11-010 | [Unit Testing](../../afrinov-docs/docs/11-testing/unit-testing.md) | Testing | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-001 | [Alerting](../../afrinov-docs/docs/12-operations/alerting.md) | Operations | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-002 | [Backup & Recovery](../../afrinov-docs/docs/12-operations/backup-and-recovery.md) | Operations | 26/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-12-003 | [CI/CD](../../afrinov-docs/docs/12-operations/ci-cd.md) | Operations | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-12-003 | [CI/CD](../../afrinov-docs/docs/12-operations/ci-cd.md) | Operations | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-004 | [Deployment](../../afrinov-docs/docs/12-operations/deployment.md) | Operations | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-005 | [Disaster Recovery](../../afrinov-docs/docs/12-operations/disaster-recovery.md) | Operations | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-12-006 | [Environments](../../afrinov-docs/docs/12-operations/environments.md) | Operations | 26/11/2026 | Ntokozo Maselala |
@@ -227,7 +227,7 @@ themselves; do not edit it by hand. How IDs are given out and kept: [README.md](
 | AFRI-OMS-ENG-003 | [Database assurance](../engineering/DATABASE_ASSURANCE.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-004 | [Exceptions register](../engineering/EXCEPTIONS.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-005 | [Implementation roadmap](../engineering/IMPLEMENTATION_ROADMAP.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
-| AFRI-OMS-ENG-006 | [Quality gates](../engineering/QUALITY_GATES.md) | Engineering Assurance | 26/11/2026 | Ntokozo Maselala |
+| AFRI-OMS-ENG-006 | [Quality gates](../engineering/QUALITY_GATES.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-007 | [Engineering assurance](../engineering/README.md) | Index | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-008 | [Risk register](../engineering/RISK_REGISTER.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
 | AFRI-OMS-ENG-009 | [Security controls](../engineering/SECURITY_CONTROLS.md) | Engineering Assurance | 27/11/2026 | Ntokozo Maselala |
